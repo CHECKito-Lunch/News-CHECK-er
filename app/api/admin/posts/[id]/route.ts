@@ -7,6 +7,13 @@ const supabase = createClient(
   { auth: { persistSession: false } }
 );
 
+type Category = { id: number; name: string; color: string | null };
+type Badge    = { id: number; name: string; color: string | null; kind: string | null };
+
+type PostCategoryRow = { category: Category };
+type PostBadgeRow    = { badge: Badge };
+
+
 export async function GET(
   _req: NextRequest,
   { params }: { params: { id: string } }
@@ -37,8 +44,8 @@ export async function GET(
     effective_from: data.effective_from,
     vendor_id: data.vendor_id,
     updated_at: data.updated_at,
-    categories: (data.post_categories ?? []).map((pc: any) => pc.category),
-    badges: (data.post_badges ?? []).map((pb: any) => pb.badge),
+   categories: (data.post_categories ?? [] as PostCategoryRow[]).map(pc => pc.category),
+  badges:     (data.post_badges     ?? [] as PostBadgeRow[]).map(pb => pb.badge),
   };
 
   return NextResponse.json({ data: row });
