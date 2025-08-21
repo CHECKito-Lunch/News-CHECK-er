@@ -1,64 +1,65 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, NextRequest } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseClient';
 import { T } from '@/lib/tables';
 
-function getGroupId(ctx: any): number | null {
-  const id = Number(ctx?.params?.id);
-  return Number.isFinite(id) ? id : null;
+export async function GET(req: NextRequest) {
+  const s = supabaseAdmin();
+
+  // Query-Param sicher auslesen ohne new URL(...)
+  const withMembers = req.nextUrl.searchParams.get('withMembers');
+
+  const { data: groups, error } = await s
+    .from(T.vendorGroups)
+    .select('id,name')
+    .order('name');
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  // nur Gruppenliste
+  if (!withMembers) {
+    return NextResponse.json({ data: groups });
+  }
+
+  // Gruppen inkl. Mitglieder
+  const { data: m, error: e2 } = await s
+    .from(T.vendorGroupMembers)
+    .select('group_id,vendor_id');
+
+  if (e2) {
+    return NextResponse.json({ error: e2.message }, { status: 500 });
+  }
+
+  const byGroup = new Map<number, number[]>();
+  (m ?? []).forEach(row => {
+    const arr = byGroup.get(row.group_id) ?? [];
+    arr.push(row.vendor_id);
+    byGroup.set(row.group_id, arr);
+  });
+
+  return NextResponse.json({
+    data: (groups ?? []).map(g => ({ ...g, members: byGroup.get(g.id) ?? [] })),
+  });
 }
 
-export async function POST(req: Request, ctx: any) {
-  const groupId = getGroupId(ctx);
-  if (groupId === null) {
-    return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
-  }
-
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
-  }
-
-  const vendor_id = Number((body as any)?.vendor_id);
-  if (!Number.isFinite(vendor_id)) {
-    return NextResponse.json({ error: 'vendor_id must be a number' }, { status: 400 });
-  }
-
+export async function POST(req: NextRequest) {
   const s = supabaseAdmin();
-  const { error } = await s
-    .from(T.vendorGroupMembers)
-    .insert({ group_id: groupId, vendor_id });
+  const { name } = await req.json();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true });
-}
-
-export async function DELETE(req: Request, ctx: any) {
-  const groupId = getGroupId(ctx);
-  if (groupId === null) {
-    return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
+  if (!name || !String(name).trim()) {
+    return NextResponse.json({ error: 'name required' }, { status: 400 });
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+  const { data, error } = await s
+    .from(T.vendorGroups)
+    .insert({ name })
+    .select('id')
+    .single();
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const vendor_id = Number((body as any)?.vendor_id);
-  if (!Number.isFinite(vendor_id)) {
-    return NextResponse.json({ error: 'vendor_id must be a number' }, { status: 400 });
-  }
-
-  const s = supabaseAdmin();
-  const { error } = await s
-    .from(T.vendorGroupMembers)
-    .delete()
-    .eq('group_id', groupId)
-    .eq('vendor_id', vendor_id);
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ id: data.id });
 }
