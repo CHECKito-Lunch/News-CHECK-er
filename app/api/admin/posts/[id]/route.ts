@@ -14,12 +14,17 @@ type Badge    = { id: number; name: string; color: string | null; kind: string |
 type PostCategoryRow = { category: Category };
 type PostBadgeRow    = { badge: Badge };
 
+// Hilfsfunktion: Context → ID
+function parseId(ctx: any): number | null {
+  const idStr = ctx?.params?.id as string | undefined;
+  const idNum = Number(idStr);
+  return Number.isFinite(idNum) ? idNum : null;
+}
+
 // GET /api/admin/posts/[id]
-export async function GET(
-  _req: Request,
-  context: { params: { id: string } }
-) {
-  const id = Number(context.params.id);
+export async function GET(_req: Request, ctx: any) {
+  const id = parseId(ctx);
+  if (id === null) return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
 
   const { data, error } = await supabase
     .from('posts')
@@ -40,28 +45,26 @@ export async function GET(
     slug: data.slug,
     summary: data.summary,
     content: data.content,
-    status: data.status as 'draft'|'scheduled'|'published',
+    status: data.status as 'draft' | 'scheduled' | 'published',
     priority: data.priority,
     pinned_until: data.pinned_until,
     effective_from: data.effective_from,
     vendor_id: data.vendor_id,
     updated_at: data.updated_at,
-    created_at: (data as any).created_at ?? null,
-    categories: (data.post_categories ?? [] as PostCategoryRow[]).map(pc => pc.category),
-    badges:     (data.post_badges     ?? [] as PostBadgeRow[]).map(pb => pb.badge),
+    created_at: (data as { created_at?: string | null }).created_at ?? null,
+    categories: (data.post_categories ?? ([] as PostCategoryRow[])).map((pc) => pc.category),
+    badges:     (data.post_badges     ?? ([] as PostBadgeRow[])).map((pb) => pb.badge),
   };
 
   return NextResponse.json({ data: row });
 }
 
 // PATCH /api/admin/posts/[id]
-export async function PATCH(
-  req: Request,
-  context: { params: { id: string } }
-) {
-  const id = Number(context.params.id);
-  const body = await req.json();
+export async function PATCH(req: Request, ctx: any) {
+  const id = parseId(ctx);
+  if (id === null) return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
 
+  const body = await req.json();
   const { post, categoryIds, badgeIds } = body as {
     post: {
       title: string;
@@ -82,14 +85,14 @@ export async function PATCH(
   const { error: upErr } = await supabase.from('posts').update(post).eq('id', id);
   if (upErr) return NextResponse.json({ error: upErr.message }, { status: 500 });
 
-  // 2) Join-Tabellen neu setzen
+  // 2) Joins neu setzen
   const { error: delCatErr } = await supabase.from('post_categories').delete().eq('post_id', id);
   if (delCatErr) return NextResponse.json({ error: delCatErr.message }, { status: 500 });
 
   if (categoryIds?.length) {
-    const { error: upCatErr } = await supabase.from('post_categories').upsert(
-      categoryIds.map((cid) => ({ post_id: id, category_id: cid }))
-    );
+    const { error: upCatErr } = await supabase
+      .from('post_categories')
+      .upsert(categoryIds.map((cid) => ({ post_id: id, category_id: cid })));
     if (upCatErr) return NextResponse.json({ error: upCatErr.message }, { status: 500 });
   }
 
@@ -97,9 +100,9 @@ export async function PATCH(
   if (delBadgeErr) return NextResponse.json({ error: delBadgeErr.message }, { status: 500 });
 
   if (badgeIds?.length) {
-    const { error: upBadgeErr } = await supabase.from('post_badges').upsert(
-      badgeIds.map((bid) => ({ post_id: id, badge_id: bid }))
-    );
+    const { error: upBadgeErr } = await supabase
+      .from('post_badges')
+      .upsert(badgeIds.map((bid) => ({ post_id: id, badge_id: bid })));
     if (upBadgeErr) return NextResponse.json({ error: upBadgeErr.message }, { status: 500 });
   }
 
@@ -107,11 +110,9 @@ export async function PATCH(
 }
 
 // DELETE /api/admin/posts/[id]
-export async function DELETE(
-  _req: Request,
-  context: { params: { id: string } }
-) {
-  const id = Number(context.params.id);
+export async function DELETE(_req: Request, ctx: any) {
+  const id = parseId(ctx);
+  if (id === null) return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
 
   // erst Joins, dann Post
   const { error: delCatErr } = await supabase.from('post_categories').delete().eq('post_id', id);
