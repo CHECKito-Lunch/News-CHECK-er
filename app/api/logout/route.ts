@@ -1,23 +1,27 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
 
 export async function POST() {
-  const c = cookies();
+  const res = NextResponse.json({ ok: true });
 
-  // Falls du andere Cookie-Namen nutzt, hier ergänzen:
+  // Falls du andere Cookie-Namen nutzt: hier ergänzen
   const names = ['admin_auth', 'editor_auth'];
 
-  names.forEach((name) => {
-    c.set({
+  // for...of statt forEach (robuster, falls ein API-Call mal async wäre)
+  for (const name of names) {
+    // Cookie zuverlässig “entwerten”
+    res.cookies.set({
       name,
       value: '',
       path: '/',
       httpOnly: true,
       secure: true,
       sameSite: 'lax',
-      maxAge: 0,
+      maxAge: 0,           // sofort ablaufen
     });
-  });
 
-  return NextResponse.json({ ok: true });
+    // alternativ (kurz), löscht ohne Expire-Header:
+    // res.cookies.delete(name);
+  }
+
+  return res;
 }
