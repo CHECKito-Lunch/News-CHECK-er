@@ -1,1 +1,0 @@
-# News-CHECK-er

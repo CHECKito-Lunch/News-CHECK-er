@@ -1,0 +1,64 @@
+/* === Tailwind Base === */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Basis-Form-Controls lieber im base-Layer (Element-Selektoren) */
+@layer base {
+  /* alle Inputs außer Farbwähler */
+  input:not([type="color"]), select, textarea {
+    @apply w-full rounded-lg px-3 py-2 border border-gray-300 bg-white text-gray-900 placeholder-gray-500
+           focus:outline-none focus:ring-2 focus:ring-blue-500
+           dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder-gray-400;
+  }
+}
+
+/* Wiederverwendbare Komponenten-Utilities */
+@layer components {
+  /* Buttons */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium
+           transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500
+           focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900
+           disabled:opacity-50 disabled:pointer-events-none;
+  }
+  .btn-primary   { @apply bg-blue-600 text-white hover:bg-blue-700; }
+  .btn-secondary { @apply bg-gray-100 text-gray-900 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700; }
+  .btn-outline   { @apply border border-gray-300 bg-white text-gray-900 hover:bg-gray-50 dark:border-gray-700 dark:bg-transparent dark:text-gray-100 dark:hover:bg-gray-800; }
+  .btn-ghost     { @apply bg-transparent text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800; }
+  .btn-danger    { @apply bg-red-600 text-white hover:bg-red-700; }
+  .btn-sm        { @apply px-3 py-1 text-xs rounded-lg; }
+  .btn-lg        { @apply px-5 py-3 text-base; }
+
+  /* Tabs (wie in deinem Admin) */
+  .tab         { @apply px-3 py-2 text-sm font-medium rounded-lg; }
+  .tab-active  { @apply bg-white text-gray-900 border border-b-0 border-gray-200 -mb-px
+                        dark:bg-gray-900 dark:text-white dark:border-gray-700; }
+  .tab-inactive{ @apply text-gray-600 hover:text-gray-900 bg-transparent border border-transparent
+                        dark:text-gray-300 dark:hover:text-white; }
+
+  /* Karten & Labels, die du schon nutzt */
+  .card        { @apply rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900; }
+  .form-label  { @apply block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1; }
+}
+
+/* === Color Theme Variables === */
+:root {
+  --background: #f7faff;     /* CHECK24-hellblau */
+  --foreground: #1a2947;     /* dunkles CHECK24-blau */
+  --primary: #0056b3;        /* CHECK24-blau */
+  --primary-light: #2287f9;  /* leichtes blau */
+  --accent: #09ad00;         /* accent grün */
+  --divider: #cce3fa;        /* zarte Trennlinie */
+  --shadow: 0 6px 20px 0 rgba(0, 87, 179, 0.07);
+}
+
+.dark {
+  --background: #0a1828;
+  --foreground: #e6eefa;
+  --primary: #449aff;
+  --primary-light: #2563eb;
+  --accent: #4de77e;
+  --divider: #12385d;
+  --shadow: 0 6px 20px 0 rgba(36, 160, 255, 0.10);
+}
