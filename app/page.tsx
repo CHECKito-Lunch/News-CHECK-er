@@ -7,6 +7,8 @@ import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import ThemeToggle from './components/ThemeToggle';
+import { redirect } from 'next/navigation';
+
 
 // Typen
 type Badge = { id: number; name: string; color: string; kind: string };
@@ -67,10 +69,13 @@ export default function Page() {
 
   const pageSize = 20;
 
+
   // Meta laden
   useEffect(() => {
     fetch('/api/meta').then(r => r.json()).then(setMeta);
   }, []);
+
+
 
   // Daten laden
   const load = useCallback(async () => {
