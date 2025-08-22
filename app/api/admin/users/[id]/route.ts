@@ -1,20 +1,19 @@
 // app/api/admin/users/[id]/route.ts
 import { NextResponse } from 'next/server';
-import type { NextRequest, RouteContext } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseClient';
 import { T } from '@/lib/tables';
 
 type Role = 'admin' | 'moderator' | 'user';
 
-function parseId(id: unknown): number | null {
-  const n = Number(id);
+function toId(v: unknown) {
+  const n = Number(v);
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 // GET /api/admin/users/[id]
-export async function GET(_req: NextRequest, { params }: RouteContext) {
-  const { id } = await params;
-  const num = parseId(id);
+export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
+  const { id } = await ctx.params;
+  const num = toId(id);
   if (!num) return NextResponse.json({ error: 'Ungültige ID.' }, { status: 400 });
 
   const s = supabaseAdmin();
@@ -30,21 +29,22 @@ export async function GET(_req: NextRequest, { params }: RouteContext) {
 }
 
 // PATCH /api/admin/users/[id]
-export async function PATCH(req: NextRequest, { params }: RouteContext) {
-  const { id } = await params;
-  const num = parseId(id);
+export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  const { id } = await ctx.params;
+  const num = toId(id);
   if (!num) return NextResponse.json({ error: 'Ungültige ID.' }, { status: 400 });
 
-  const body = await req.json().catch(() => ({} as Partial<{ email: string; name: string | null; role: Role; active: boolean }>) );
+  const body = await req.json().catch(() => ({} as Partial<{ email: string; name: string | null; role: Role; active: boolean }>));
 
-  const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  const update: Record<string, unknown> = {};
   if (typeof body.email === 'string') update.email = body.email.trim().toLowerCase();
-  if (body.name !== undefined) update.name = body.name === '' ? null : body.name;
+  if ('name' in body) update.name = (body.name ?? '') === '' ? null : body.name;
   if (typeof body.role === 'string' && ['admin','moderator','user'].includes(body.role)) update.role = body.role as Role;
   if (typeof body.active === 'boolean') update.active = body.active;
 
-  const hasChanges = Object.keys(update).some(k => k !== 'updated_at');
-  if (!hasChanges) return NextResponse.json({ error: 'Nichts zu aktualisieren.' }, { status: 400 });
+  if (Object.keys(update).length === 0) {
+    return NextResponse.json({ error: 'Nichts zu aktualisieren.' }, { status: 400 });
+  }
 
   const s = supabaseAdmin();
   const { error } = await s.from(T.appUsers).update(update).eq('id', num);
@@ -54,9 +54,9 @@ export async function PATCH(req: NextRequest, { params }: RouteContext) {
 }
 
 // DELETE /api/admin/users/[id]
-export async function DELETE(_req: NextRequest, { params }: RouteContext) {
-  const { id } = await params;
-  const num = parseId(id);
+export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
+  const { id } = await ctx.params;
+  const num = toId(id);
   if (!num) return NextResponse.json({ error: 'Ungültige ID.' }, { status: 400 });
 
   const s = supabaseAdmin();
