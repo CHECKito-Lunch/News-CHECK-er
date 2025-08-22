@@ -4,22 +4,25 @@ import bcrypt from 'bcryptjs';
 import { supabaseAdmin } from '@/lib/supabaseClient';
 import { T } from '@/lib/tables';
 
-export async function PATCH(req: Request, ctx: { params: { id: string } }) {
+export async function PATCH(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> } // 👈 wichtig in Next 15
+) {
+  const { id } = await params;
+
+  const { password } = await req.json().catch(() => ({} as { password?: string }));
+  if (typeof password !== 'string' || password.length < 8) {
+    return NextResponse.json({ error: 'Passwort (mind. 8 Zeichen) erforderlich.' }, { status: 400 });
+  }
+
+  const password_hash = await bcrypt.hash(password, 10);
+
   const s = supabaseAdmin();
-  const id = Number(ctx.params.id);
-  const body = await req.json().catch(() => ({}));
-  const password = String(body.password ?? '');
+  const { error } = await s
+    .from(T.appUsers)
+    .update({ password_hash, updated_at: new Date().toISOString() })
+    .eq('id', Number(id));
 
-  if (!id || Number.isNaN(id)) {
-    return NextResponse.json({ error: 'Ungültige ID.' }, { status: 400 });
-  }
-  if (!password || password.length < 8) {
-    return NextResponse.json({ error: 'Passwort ist erforderlich (mind. 8 Zeichen).' }, { status: 400 });
-  }
-
-  const password_hash = await bcrypt.hash(password, 12);
-  const { error } = await s.from(T.appUsers).update({ password_hash }).eq('id', id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
   return NextResponse.json({ ok: true });
 }
