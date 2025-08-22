@@ -7,7 +7,7 @@ import { T } from '@/lib/tables';
 type Role = 'admin'|'moderator'|'user';
 
 export async function GET() {
-  const c = cookies();
+  const c = await cookies();
   const email = c.get('user_email')?.value || '';
   const role = c.get('user_role')?.value as Role | undefined;
   if (!email || !role) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -34,7 +34,7 @@ export async function GET() {
 }
 
 export async function PATCH(req: Request) {
-  const c = cookies();
+  const c = await cookies();
   const email = c.get('user_email')?.value || '';
   const role = c.get('user_role')?.value as Role | undefined;
   if (!email || !role) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

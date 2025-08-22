@@ -8,7 +8,7 @@ import bcrypt from 'bcryptjs';
 type Role = 'admin'|'moderator'|'user';
 
 export async function POST(req: Request) {
-  const c = cookies();
+  const c = await cookies();
   const email = c.get('user_email')?.value || '';
   const role = c.get('user_role')?.value as Role | undefined;
   if (!email || !role) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
