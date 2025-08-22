@@ -2,12 +2,12 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import ThemeToggle from './ThemeToggle';
 import { usePathname, useRouter } from 'next/navigation';
 
-type Role = 'admin'|'moderator'|'user';
-type Me = { user: { sub: string; role: Role; name?: string|null } | null };
+type Role = 'admin' | 'moderator' | 'user';
+type Me = { user: { sub: string; role: Role; name?: string } | null };
 
 export default function SiteHeader() {
   const pathname = usePathname();
@@ -15,37 +15,41 @@ export default function SiteHeader() {
   const router = useRouter();
 
   useEffect(() => {
-    fetch('/api/me')
-      .then(r => r.json())
-      .then((j: Me) => setMe(j.user))
-      .catch(()=>{});
+    fetch('/api/me').then(r => r.json()).then((j: Me) => setMe(j.user)).catch(() => {});
   }, []);
 
   async function logout() {
     await fetch('/api/logout', { method: 'POST' });
     setMe(null);
     if (pathname?.startsWith('/admin')) router.push('/');
-    else router.refresh();
   }
 
-  const nav = [
-    { href: '/', label: 'Start', show: true },
-    { href: '/news', label: 'News', show: true },
-    { href: '/profile', label: 'Profil', show: !!me },
-    { href: '/admin', label: 'Admin', show: me?.role === 'admin' || me?.role === 'moderator' },
-    { href: '/admin/users', label: 'Userverwaltung', show: me?.role === 'admin' },
-  ].filter(n => n.show);
+  // 👉 Links dynamisch nach Login/Rolle zusammenstellen (keine Duplikate)
+  const links = useMemo(() => {
+    const arr: { href: string; label: string }[] = [
+      { href: '/', label: 'Start' },
+      { href: '/news', label: 'News' },
+    ];
+    if (me) arr.push({ href: '/profile', label: 'Profil' });
+    if (me && (me.role === 'admin' || me.role === 'moderator')) {
+      arr.push({ href: '/admin', label: 'Admin' });
+    }
+    if (me && me.role === 'admin') {
+      arr.push({ href: '/admin/users', label: 'Userverwaltung' });
+    }
+    return arr;
+  }, [me]);
 
   return (
     <header className="sticky top-0 z-50 border-b border-gray-200 dark:border-gray-800
                         bg-white/80 dark:bg-gray-950/80 backdrop-blur">
       <div className="container max-w-5xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
-        <Link href="https://www.check24.de/apple-touch-icon.png" className="flex items-center gap-3 shrink-0" aria-label="Startseite">
-      
+        <Link href="/" className="flex items-center gap-3 shrink-0" aria-label="Startseite">
+          <img src="/header.svg" alt="NewsCHECKer" className="h-8 w-auto dark:opacity-90" />
         </Link>
 
         <nav className="hidden sm:flex items-center gap-1">
-          {nav.map(n => {
+          {links.map(n => {
             const active = pathname === n.href || (n.href !== '/' && pathname?.startsWith(n.href));
             return (
               <Link
@@ -71,7 +75,8 @@ export default function SiteHeader() {
               <button
                 onClick={logout}
                 className="px-3 py-2 rounded-lg border text-sm
-                           bg-white hover:bg-gray-50 dark:bg-white/10 dark:hover:bg-white/20 dark:border-gray-700">
+                           bg-white hover:bg-gray-50 dark:bg-white/10 dark:hover:bg-white/20 dark:border-gray-700"
+              >
                 Logout
               </button>
             </>
@@ -79,10 +84,12 @@ export default function SiteHeader() {
             <Link
               href="/login"
               className="px-3 py-2 rounded-lg border text-sm
-                         bg-white hover:bg-gray-50 dark:bg-white/10 dark:hover:bg-white/20 dark:border-gray-700">
+                         bg-white hover:bg-gray-50 dark:bg-white/10 dark:hover:bg-white/20 dark:border-gray-700"
+            >
               Login
             </Link>
           )}
+
           <ThemeToggle />
         </div>
       </div>

@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import ThemeToggle from '../components/ThemeToggle';
+import ThemeToggle from '../../components/ThemeToggle';
 
 // Typen
 type Badge = { id: number; name: string; color: string; kind: string };
