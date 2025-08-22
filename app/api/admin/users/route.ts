@@ -50,33 +50,18 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const s = supabaseAdmin();
   const body = await req.json().catch(() => ({}));
-
   const email = String(body.email ?? '').trim().toLowerCase();
-  const name = (body.name ?? '').trim() || null;
-
-  const roleRaw = String(body.role ?? 'user').toLowerCase();
-  const allowed = ['admin','moderator','user'] as const;
-  const role: Role = (allowed as readonly string[]).includes(roleRaw) ? (roleRaw as Role) : 'user';
-
+  const name  = (body.name ?? '').trim() || null;
+  const role  = (['admin','moderator','user'].includes(body.role) ? body.role : 'user') as Role;
   const active: boolean = body.active ?? true;
+  const password: string | undefined = typeof body.password === 'string' ? body.password : undefined;
 
-  const password = String(body.password ?? '');
-  if (!email) {
-    return NextResponse.json({ error: 'E-Mail ist erforderlich.' }, { status: 400 });
-  }
-  if (!password || password.length < 8) {
-    return NextResponse.json({ error: 'Passwort ist erforderlich (mind. 8 Zeichen).' }, { status: 400 });
-  }
+  if (!email) return NextResponse.json({ error: 'E-Mail ist erforderlich.' }, { status: 400 });
 
-  const password_hash = await bcrypt.hash(password, 12);
+  const insert: any = { email, name, role, active };
+  if (password && password.length >= 8) insert.password_hash = await bcrypt.hash(password, 12);
 
-  const { data, error } = await s
-    .from(T.appUsers)
-    .insert({ email, name, role, active, password_hash })
-    .select('id')
-    .single();
-
+  const { data, error } = await s.from(T.appUsers).insert(insert).select('id').single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
   return NextResponse.json({ id: data.id });
 }
