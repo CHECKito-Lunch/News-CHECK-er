@@ -1,21 +1,25 @@
-// app/api/me/route.ts
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { supabaseAdmin } from '@/lib/supabaseClient';
-import { T } from '@/lib/tables';
+
+type Role = 'admin' | 'moderator' | 'user';
 
 export async function GET() {
-  const c = cookies();
-  const email = c.get('user_email')?.value || '';
-  const role = (c.get('user_role')?.value as 'admin'|'moderator'|'user'|undefined) || undefined;
+  const c = await cookies(); // 👈 wichtig
 
-  if (!email || !role) return NextResponse.json({ user: null });
+  const email = c.get('user_email')?.value ?? '';
+  const name  = c.get('user_name')?.value || undefined;
 
-  // Name aus DB holen (optional)
-  const s = supabaseAdmin();
-  const { data } = await s.from(T.appUsers).select('name').eq('email', email).single();
+  const roleRaw = c.get('user_role')?.value ?? '';
+  const role: Role | undefined =
+    roleRaw === 'admin' || roleRaw === 'moderator' || roleRaw === 'user'
+      ? (roleRaw as Role)
+      : undefined;
+
+  if (!email || !role) {
+    return NextResponse.json({ user: null });
+  }
 
   return NextResponse.json({
-    user: { sub: email, role, name: data?.name ?? null }
+    user: { sub: email, role, name },
   });
 }
