@@ -1,3 +1,4 @@
+// app/admin/users/page.tsx
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -32,6 +33,7 @@ const btnPrimary =
   'px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium shadow disabled:opacity-50';
 
 export default function UsersAdminPage() {
+  // Liste / Suche
   const [users, setUsers] = useState<AppUser[]>([]);
   const [q, setQ] = useState('');
   const [page, setPage] = useState(1);
@@ -39,15 +41,16 @@ export default function UsersAdminPage() {
   const [loading, setLoading] = useState(false);
   const pageSize = 20;
 
-  // Create form
-  const [email, setEmail] = useState('');
-  const [name, setName] = useState('');
-  const [role, setRole] = useState<Role>('user');
-  const [active, setActive] = useState(true);
-  const [creating, setCreating] = useState(false);
-  const [message, setMessage] = useState<string>('');
+  // Formularzustand (Neu/Update) — analog Admin-Posts
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [fEmail, setFEmail] = useState('');
+  const [fName, setFName] = useState('');
+  const [fRole, setFRole] = useState<Role>('user');
+  const [fActive, setFActive] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState('');
 
-  const pages = useMemo(() => Math.max(1, Math.ceil(total / pageSize)), [total]);
+  const pages = useMemo(() => Math.max(1, Math.ceil(total / pageSize)), [total, pageSize]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -61,44 +64,66 @@ export default function UsersAdminPage() {
     setUsers(json.data ?? []);
     setTotal(json.total ?? 0);
     setLoading(false);
-  }, [q, page]);
+  }, [q, page, pageSize]);
 
   useEffect(() => { load(); }, [load]);
 
-  async function createUser() {
-    setCreating(true);
-    setMessage('');
+  function resetForm() {
+    setEditingId(null);
+    setFEmail('');
+    setFName('');
+    setFRole('user');
+    setFActive(true);
+    setMsg('');
+  }
+
+  async function save() {
+    setSaving(true);
+    setMsg('');
+    const payload = {
+      email: fEmail.trim(),
+      name: fName.trim() || null,
+      role: fRole,
+      active: fActive,
+    };
+
     try {
-      const body = { email, name, role, active };
-      const res = await fetch('/api/admin/users', {
-        method: 'POST',
+      const url = editingId ? `/api/admin/users/${editingId}` : '/api/admin/users';
+      const method = editingId ? 'PATCH' : 'POST';
+      const res = await fetch(url, {
+        method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify(payload),
       });
-      const j = await res.json();
-      if (!res.ok) throw new Error(j.error || 'Fehler beim Anlegen');
-      setEmail(''); setName(''); setRole('user'); setActive(true);
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || 'Fehler beim Speichern');
+
+      setMsg(editingId ? 'Aktualisiert.' : 'Benutzer angelegt.');
       await load();
-      setMessage('Benutzer angelegt.');
+      if (!editingId) resetForm(); // nach Neuanlage Formular leeren
     } catch (e: any) {
-      setMessage(e?.message ?? 'Fehler');
+      setMsg(e?.message ?? 'Fehler');
     } finally {
-      setCreating(false);
+      setSaving(false);
     }
   }
 
-  async function updateUser(id: number, patch: Partial<AppUser>) {
-    const res = await fetch(`/api/admin/users/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(patch),
-    });
-    if (res.ok) {
-      await load();
-    } else {
-      const j = await res.json().catch(() => ({}));
-      alert(j.error ?? 'Update fehlgeschlagen');
-    }
+  async function startEdit(id: number) {
+    setMsg('');
+    // optionaler Detail-Request — falls du eine GET-Route hast:
+    // const r = await fetch(`/api/admin/users/${id}`);
+    // const j = await r.json();
+    // const u: AppUser = j.data;
+    // Falls du keine GET-Detailroute hast, holen wir die Daten aus der Liste:
+    const u = users.find(x => x.id === id);
+    if (!u) return;
+    setEditingId(u.id);
+    setFEmail(u.email);
+    setFName(u.name ?? '');
+    setFRole(u.role);
+    setFActive(u.active);
+    // Scroll zum Formular (UX)
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   async function deleteUser(id: number) {
@@ -106,6 +131,7 @@ export default function UsersAdminPage() {
     const res = await fetch(`/api/admin/users/${id}`, { method: 'DELETE' });
     if (res.ok) {
       await load();
+      if (editingId === id) resetForm();
     } else {
       const j = await res.json().catch(() => ({}));
       alert(j.error ?? 'Löschen fehlgeschlagen');
@@ -118,44 +144,66 @@ export default function UsersAdminPage() {
         <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Benutzerverwaltung</h1>
       </div>
 
-      {/* Create */}
+      {/* Formular analog Admin-Seite (Neu/Update über eine Form) */}
       <div className={cardClass + ' space-y-3'}>
-        <h2 className="text-lg font-semibold">Neuen Benutzer anlegen</h2>
+        <h2 className="text-lg font-semibold">
+          {editingId ? `Benutzer bearbeiten (ID: ${editingId})` : 'Neuen Benutzer anlegen'}
+        </h2>
+
         <div className="grid md:grid-cols-4 gap-3 items-end">
           <div className="md:col-span-2">
             <label className="form-label">E-Mail</label>
-            <input value={email} onChange={e => setEmail(e.target.value)} className={inputClass} placeholder="name@firma.de" />
+            <input
+              value={fEmail}
+              onChange={e => setFEmail(e.target.value)}
+              className={inputClass}
+              placeholder="name@firma.de"
+            />
           </div>
           <div>
             <label className="form-label">Name</label>
-            <input value={name} onChange={e => setName(e.target.value)} className={inputClass} placeholder="optional" />
+            <input
+              value={fName}
+              onChange={e => setFName(e.target.value)}
+              className={inputClass}
+              placeholder="optional"
+            />
           </div>
           <div>
             <label className="form-label">Rolle</label>
-            <select value={role} onChange={e => setRole(e.target.value as Role)} className={inputClass}>
+            <select value={fRole} onChange={e => setFRole(e.target.value as Role)} className={inputClass}>
               <option value="user">User</option>
               <option value="moderator">Moderator</option>
               <option value="admin">Admin</option>
             </select>
           </div>
           <div className="flex items-center gap-2">
-            <input id="active" type="checkbox" checked={active} onChange={e => setActive(e.target.checked)} />
+            <input id="active" type="checkbox" checked={fActive} onChange={e => setFActive(e.target.checked)} />
             <label htmlFor="active" className="text-sm">Aktiv</label>
           </div>
-          <div>
+          <div className="flex gap-2">
             <button
-              disabled={!email || creating}
-              onClick={createUser}
+              disabled={!fEmail || saving}
+              onClick={save}
               className={btnPrimary}
+              type="button"
             >
-              {creating ? 'Anlegen…' : 'Anlegen'}
+              {saving ? 'Speichern…' : 'Speichern'}
+            </button>
+            <button
+              onClick={resetForm}
+              className={btnBase}
+              type="button"
+            >
+              Neu
             </button>
           </div>
         </div>
-        {message && <div className="text-sm text-gray-600 dark:text-gray-300">{message}</div>}
+
+        {msg && <div className="text-sm text-gray-600 dark:text-gray-300">{msg}</div>}
       </div>
 
-      {/* List/Search */}
+      {/* Liste / Suche */}
       <div className={cardClass + ' space-y-3'}>
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-lg font-semibold">Benutzer</h2>
@@ -190,42 +238,32 @@ export default function UsersAdminPage() {
                 <tbody>
                   {users.map(u => (
                     <tr key={u.id} className="border-t border-gray-100 dark:border-gray-800">
-                      <td className="px-3 py-2 font-medium">{u.email}</td>
+                      <td className="px-3 py-2 font-medium truncate max-w-[28ch]">{u.email}</td>
+                      <td className="px-3 py-2 truncate max-w-[22ch]">{u.name ?? '—'}</td>
+                      <td className="px-3 py-2">{u.role}</td>
                       <td className="px-3 py-2">
-                        <input
-                          className="w-56 rounded border px-2 py-1 bg-transparent dark:border-gray-700"
-                          value={u.name ?? ''}
-                          onChange={e => updateUser(u.id, { name: e.target.value })}
-                        />
-                      </td>
-                      <td className="px-3 py-2">
-                        <select
-                          value={u.role}
-                          onChange={e => updateUser(u.id, { role: e.target.value as Role })}
-                          className="rounded border px-2 py-1 bg-transparent dark:border-gray-700"
-                        >
-                          <option value="user">User</option>
-                          <option value="moderator">Moderator</option>
-                          <option value="admin">Admin</option>
-                        </select>
-                      </td>
-                      <td className="px-3 py-2">
-                        <label className="inline-flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            checked={u.active}
-                            onChange={e => updateUser(u.id, { active: e.target.checked })}
-                          />
-                          <span className="text-xs">{u.active ? 'aktiv' : 'inaktiv'}</span>
-                        </label>
+                        <span className="text-xs">{u.active ? 'aktiv' : 'inaktiv'}</span>
                       </td>
                       <td className="px-3 py-2 text-gray-500">
                         {u.created_at ? new Date(u.created_at).toLocaleString() : '—'}
                       </td>
                       <td className="px-3 py-2 text-right">
-                        <button className="px-2 py-1 rounded bg-red-600 text-white" onClick={() => deleteUser(u.id)}>
-                          Löschen
-                        </button>
+                        <div className="inline-flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => startEdit(u.id)}
+                            className="px-2 py-1 rounded border dark:border-gray-700"
+                          >
+                            Bearbeiten
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => deleteUser(u.id)}
+                            className="px-2 py-1 rounded bg-red-600 text-white"
+                          >
+                            Löschen
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
