@@ -95,7 +95,7 @@ export default function VendorGroups() {
           <input value={newName} onChange={(e)=>setNewName(e.target.value)} placeholder="z. B. Pauschalreise-Partner" />
         </div>
         <div>
-          <button disabled={!newName || creating} onClick={createGroup}>Anlegen</button>
+          <button className="btn btn-primary" disabled={!newName || creating} onClick={createGroup}>Anlegen</button>
         </div>
       </div>
 

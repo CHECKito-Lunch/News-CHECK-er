@@ -1,18 +1,19 @@
 import './globals.css';
 import type { Metadata } from 'next';
+import SiteHeader from './components/SiteHeader';
 
 export const metadata: Metadata = {
-  title: 'Reise-News',
-  description: 'Interner News Hub für Veranstalter-Updates',
+  title: 'NewsCHECKer',
+  description: 'News & Admin',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="de" className="dark">
-      <body className="bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
-        <main className="max-w-5xl mx-auto px-4 py-6 space-y-6">
-          {children}
-        </main>
+    <html lang="de" suppressHydrationWarning>
+      {/* pt-16 = Platz für den sticky Header */}
+      <body className="min-h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 pt-16">
+        <SiteHeader />
+        {children}
       </body>
     </html>
   );

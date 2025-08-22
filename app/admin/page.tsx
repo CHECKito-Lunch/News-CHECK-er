@@ -232,16 +232,14 @@ export default function AdminPage() {
     'card p-4 rounded-2xl shadow-sm bg-white border border-gray-200 ' +
     'dark:bg-gray-900 dark:border-gray-800';
 
-  return (
-    <div className="container max-w-5xl mx-auto py-6 space-y-5">
-      {/* Header */}
-<div className="flex items-center justify-between">
-  <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Admin</h1>
-  <div className="flex items-center gap-2">
-    <ThemeToggle />
-    <LogoutButton />
-  </div>
-</div>
+return (
+  <div className="container max-w-5xl mx-auto py-6 space-y-5">
+    {/* Seitentitel – Logout ist bereits im globalen SiteHeader */}
+    <div className="flex items-center justify-between">
+      <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Admin</h1>
+      {/* optional: rechts weitere Page-Actions platzieren */}
+    </div>
+
 
       <Tabs current={tab} onChange={setTab} />
 

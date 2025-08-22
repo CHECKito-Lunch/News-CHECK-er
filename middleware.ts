@@ -2,44 +2,56 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-const PROTECTED_PREFIXES = ['/admin', '/api/admin', '/api/news/admin'];
+type Role = 'admin'|'moderator'|'user';
+
+function getUser(req: NextRequest): { email: string|null; role: Role|null } {
+  const email = req.cookies.get('user_email')?.value || null;
+  const role = (req.cookies.get('user_role')?.value as Role | undefined) || null;
+  return { email, role };
+}
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+  const { email, role } = getUser(req);
 
-  // Prüfen, ob die aktuelle URL in einen geschützten Bereich fällt
-  const needsAuth = PROTECTED_PREFIXES.some(
-    (p) => pathname === p || pathname.startsWith(p + '/')
-  );
-  if (!needsAuth) return NextResponse.next();
+  // Geschützte Bereiche:
+  const needsLogin =
+    pathname.startsWith('/profile') ||
+    pathname.startsWith('/api/profile');
 
-  const user = process.env.ADMIN_USER ?? '';
-  const pass = process.env.ADMIN_PASS ?? '';
-  if (!user || !pass) {
-    return new NextResponse('Admin auth not configured', { status: 500 });
+  const needsModerator =
+    pathname.startsWith('/admin') ||
+    pathname.startsWith('/api/admin');
+
+  const needsAdmin =
+    pathname.startsWith('/admin/users') ||
+    pathname.startsWith('/api/admin/users');
+
+  // 1) Login nötig?
+  if (needsLogin || needsModerator || needsAdmin) {
+    if (!email || !role) {
+      const url = new URL('/login', req.url);
+      url.searchParams.set('next', pathname);
+      return NextResponse.redirect(url);
+    }
   }
 
-  const auth = req.headers.get('authorization');
-  if (!auth?.startsWith('Basic ')) {
-    return new NextResponse('Auth required', {
-      status: 401,
-      headers: { 'WWW-Authenticate': 'Basic realm="Secure Area"' },
-    });
+  // 2) Rollen prüfen
+  if (needsAdmin && role !== 'admin') {
+    return new NextResponse('Forbidden', { status: 403 });
+  }
+  if (needsModerator && !['admin','moderator'].includes(role as string)) {
+    return new NextResponse('Forbidden', { status: 403 });
   }
 
-  // Edge Runtime: atob/btoa verfügbar
-  const [u, p] = atob(auth.slice(6)).split(':');
-  if (u === user && p === pass) return NextResponse.next();
-
-  return new NextResponse('Unauthorized', {
-    status: 401,
-    headers: { 'WWW-Authenticate': 'Basic realm="Secure Area"' },
-  });
+  return NextResponse.next();
 }
 
-// Wichtig: auch /api/admin/** matchen
 export const config = {
-  matcher: ['/admin/:path*', '/api/admin/:path*', '/api/news/admin'],
-  // wenn du auch Unterrouten von /api/news/admin schützen willst:
-  // matcher: ['/admin/:path*', '/api/admin/:path*', '/api/news/admin/:path*'],
+  matcher: [
+    '/profile',
+    '/api/profile/:path*',
+    '/admin/:path*',
+    '/api/admin/:path*',
+  ],
 };

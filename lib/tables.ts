@@ -13,4 +13,9 @@ export const T = {
   // Gruppen
   vendorGroups: 'vendor_groups',
   vendorGroupMembers: 'vendor_group_members',
+
+  // USERS
+
+   appUsers: 'app_users',
+   
 } as const;
