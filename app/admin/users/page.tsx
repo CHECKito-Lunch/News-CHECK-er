@@ -41,12 +41,13 @@ export default function UsersAdminPage() {
   const [loading, setLoading] = useState(false);
   const pageSize = 20;
 
-  // Formularzustand (Neu/Update) — analog Admin-Posts
+  // Formularzustand (Neu/Update)
   const [editingId, setEditingId] = useState<number | null>(null);
   const [fEmail, setFEmail] = useState('');
   const [fName, setFName] = useState('');
   const [fRole, setFRole] = useState<Role>('user');
   const [fActive, setFActive] = useState(true);
+  const [fPassword, setFPassword] = useState(''); // <-- NEU: initiales Passwort nur bei Neuanlage
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
 
@@ -74,22 +75,39 @@ export default function UsersAdminPage() {
     setFName('');
     setFRole('user');
     setFActive(true);
+    setFPassword('');
     setMsg('');
   }
 
   async function save() {
     setSaving(true);
     setMsg('');
-    const payload = {
+
+    const creating = editingId === null;
+
+    // Validierung
+    if (!fEmail.trim()) {
+      setMsg('E-Mail ist erforderlich.');
+      setSaving(false);
+      return;
+    }
+    if (creating && fPassword.length < 8) {
+      setMsg('Passwort ist erforderlich (mindestens 8 Zeichen).');
+      setSaving(false);
+      return;
+    }
+
+    const payload: any = {
       email: fEmail.trim(),
       name: fName.trim() || null,
       role: fRole,
       active: fActive,
     };
+    if (creating) payload.password = fPassword;
 
     try {
-      const url = editingId ? `/api/admin/users/${editingId}` : '/api/admin/users';
-      const method = editingId ? 'PATCH' : 'POST';
+      const url = creating ? '/api/admin/users' : `/api/admin/users/${editingId}`;
+      const method = creating ? 'POST' : 'PATCH';
       const res = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
@@ -98,11 +116,11 @@ export default function UsersAdminPage() {
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.error || 'Fehler beim Speichern');
 
-      setMsg(editingId ? 'Aktualisiert.' : 'Benutzer angelegt.');
+      setMsg(creating ? 'Benutzer angelegt.' : 'Aktualisiert.');
       await load();
-      if (!editingId) resetForm(); // nach Neuanlage Formular leeren
-    } catch (e: any) {
-      setMsg(e?.message ?? 'Fehler');
+      if (creating) resetForm(); // nach Neuanlage Formular leeren
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : 'Fehler');
     } finally {
       setSaving(false);
     }
@@ -110,11 +128,6 @@ export default function UsersAdminPage() {
 
   async function startEdit(id: number) {
     setMsg('');
-    // optionaler Detail-Request — falls du eine GET-Route hast:
-    // const r = await fetch(`/api/admin/users/${id}`);
-    // const j = await r.json();
-    // const u: AppUser = j.data;
-    // Falls du keine GET-Detailroute hast, holen wir die Daten aus der Liste:
     const u = users.find(x => x.id === id);
     if (!u) return;
     setEditingId(u.id);
@@ -122,7 +135,7 @@ export default function UsersAdminPage() {
     setFName(u.name ?? '');
     setFRole(u.role);
     setFActive(u.active);
-    // Scroll zum Formular (UX)
+    setFPassword(''); // Passwortfeld wird bei Bearbeitung nicht angezeigt/genutzt
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
@@ -138,19 +151,39 @@ export default function UsersAdminPage() {
     }
   }
 
+  async function setPasswordForUser(user: AppUser) {
+    const pwd = prompt(`Neues Passwort für ${user.email} (mind. 8 Zeichen):`);
+    if (!pwd) return;
+    if (pwd.length < 8) {
+      alert('Mindestens 8 Zeichen.');
+      return;
+    }
+    const res = await fetch(`/api/admin/users/${user.id}/password`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pwd }),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      alert(j.error ?? 'Passwort setzen fehlgeschlagen');
+      return;
+    }
+    alert('Passwort aktualisiert.');
+  }
+
   return (
     <div className="container max-w-5xl mx-auto py-6 space-y-5">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Benutzerverwaltung</h1>
       </div>
 
-      {/* Formular analog Admin-Seite (Neu/Update über eine Form) */}
+      {/* Formular (Neu/Update) */}
       <div className={cardClass + ' space-y-3'}>
         <h2 className="text-lg font-semibold">
           {editingId ? `Benutzer bearbeiten (ID: ${editingId})` : 'Neuen Benutzer anlegen'}
         </h2>
 
-        <div className="grid md:grid-cols-4 gap-3 items-end">
+        <div className="grid md:grid-cols-5 gap-3 items-end">
           <div className="md:col-span-2">
             <label className="form-label">E-Mail</label>
             <input
@@ -158,6 +191,7 @@ export default function UsersAdminPage() {
               onChange={e => setFEmail(e.target.value)}
               className={inputClass}
               placeholder="name@firma.de"
+              type="email"
             />
           </div>
           <div>
@@ -181,7 +215,22 @@ export default function UsersAdminPage() {
             <input id="active" type="checkbox" checked={fActive} onChange={e => setFActive(e.target.checked)} />
             <label htmlFor="active" className="text-sm">Aktiv</label>
           </div>
-          <div className="flex gap-2">
+
+          {/* Initiales Passwort – nur bei Neuanlage */}
+          {editingId === null && (
+            <div className="md:col-span-2">
+              <label className="form-label">Initiales Passwort</label>
+              <input
+                type="password"
+                value={fPassword}
+                onChange={e => setFPassword(e.target.value)}
+                className={inputClass}
+                placeholder="mind. 8 Zeichen"
+              />
+            </div>
+          )}
+
+          <div className="flex gap-2 md:col-span-3">
             <button
               disabled={!fEmail || saving}
               onClick={save}
@@ -255,6 +304,13 @@ export default function UsersAdminPage() {
                             className="px-2 py-1 rounded border dark:border-gray-700"
                           >
                             Bearbeiten
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPasswordForUser(u)}
+                            className="px-2 py-1 rounded border dark:border-gray-700"
+                          >
+                            Passwort
                           </button>
                           <button
                             type="button"
