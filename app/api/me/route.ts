@@ -1,25 +1,21 @@
+// app/api/me/route.ts
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 
-type Role = 'admin' | 'moderator' | 'user';
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+type Role = 'admin'|'moderator'|'user';
 
 export async function GET() {
-  const c = await cookies(); // 👈 wichtig
+  const c = await cookies(); // in Next 15 kann cookies() async sein
+  const email = c.get('user_email')?.value || '';
+  const role = c.get('user_role')?.value as Role | undefined;
+  const name = c.get('user_name')?.value || undefined;
 
-  const email = c.get('user_email')?.value ?? '';
-  const name  = c.get('user_name')?.value || undefined;
-
-  const roleRaw = c.get('user_role')?.value ?? '';
-  const role: Role | undefined =
-    roleRaw === 'admin' || roleRaw === 'moderator' || roleRaw === 'user'
-      ? (roleRaw as Role)
-      : undefined;
-
-  if (!email || !role) {
-    return NextResponse.json({ user: null });
-  }
-
-  return NextResponse.json({
-    user: { sub: email, role, name },
+  const res = NextResponse.json({
+    user: email && role ? { sub: email, role, name } : null
   });
+  res.headers.set('Cache-Control', 'no-store');
+  return res;
 }
