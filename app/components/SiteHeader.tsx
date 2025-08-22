@@ -40,8 +40,8 @@ export default function SiteHeader() {
     <header className="sticky top-0 z-50 border-b border-gray-200 dark:border-gray-800
                         bg-white/80 dark:bg-gray-950/80 backdrop-blur">
       <div className="container max-w-5xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
-        <Link href="/" className="flex items-center gap-3 shrink-0" aria-label="Startseite">
-          <img src="/header.svg" alt="NewsCHECKer" className="h-8 w-auto dark:opacity-90" />
+        <Link href="https://www.check24.de/apple-touch-icon.png" className="flex items-center gap-3 shrink-0" aria-label="Startseite">
+      
         </Link>
 
         <nav className="hidden sm:flex items-center gap-1">

@@ -1,46 +1,42 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
+import bcrypt from 'bcryptjs';
 import { supabaseAdmin } from '@/lib/supabaseClient';
 import { T } from '@/lib/tables';
 
-// .env(.local) -> LOGIN_CODE=dein-geheimer-code
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
-  const emailRaw = String(body.email ?? '').trim().toLowerCase();
-  const code = String(body.code ?? '');
+  const emailRaw = (body.email as string | undefined) || '';
+  const password = (body.password as string | undefined) || '';
 
-  if (!emailRaw || !code) {
-    return NextResponse.json({ error: 'E-Mail und Code sind erforderlich.' }, { status: 400 });
-  }
-  if (!process.env.LOGIN_CODE) {
-    return NextResponse.json({ error: 'LOGIN_CODE fehlt auf dem Server.' }, { status: 500 });
-  }
-  if (code !== process.env.LOGIN_CODE) {
-    return NextResponse.json({ error: 'Ungültiger Code.' }, { status: 401 });
+  const email = emailRaw.trim().toLowerCase();
+  if (!email || !password) {
+    return NextResponse.json({ error: 'E-Mail und Passwort erforderlich.' }, { status: 400 });
   }
 
   const s = supabaseAdmin();
   const { data, error } = await s
     .from(T.appUsers)
-    .select('email,name,role,active')
-    .eq('email', emailRaw)
+    .select('id,email,name,role,password_hash')
+    .eq('email', email)
     .single();
 
   if (error || !data) {
-    return NextResponse.json({ error: 'Unbekannte E-Mail.' }, { status: 401 });
-  }
-  if (!data.active) {
-    return NextResponse.json({ error: 'Konto ist inaktiv.' }, { status: 403 });
+    return NextResponse.json({ error: 'Login fehlgeschlagen.' }, { status: 401 });
   }
 
-  const c = cookies();
+  const ok = await bcrypt.compare(password, (data as any).password_hash ?? '');
+  if (!ok) {
+    return NextResponse.json({ error: 'Login fehlgeschlagen.' }, { status: 401 });
+  }
+
+  // Cookies über die Response setzen (nicht cookies().set)
+  const res = NextResponse.json({ ok: true });
   const maxAge = 60 * 60 * 8; // 8h Session
+  const base = { httpOnly: true, secure: true, sameSite: 'lax' as const, path: '/', maxAge };
 
-  c.set({ name: 'role', value: data.role, httpOnly: true, secure: true, sameSite: 'lax', path: '/', maxAge });
-  c.set({ name: 'user_email', value: data.email, httpOnly: true, secure: true, sameSite: 'lax', path: '/', maxAge });
-  if (data.name) {
-    c.set({ name: 'user_name', value: data.name, httpOnly: true, secure: true, sameSite: 'lax', path: '/', maxAge });
-  }
+  res.cookies.set('user_role', String(data.role), base);
+  res.cookies.set('user_email', String(data.email), base);
+  if (data.name) res.cookies.set('user_name', String(data.name), base);
 
-  return NextResponse.json({ ok: true });
+  return res;
 }

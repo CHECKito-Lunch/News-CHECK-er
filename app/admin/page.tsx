@@ -3,9 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import TaxonomyEditor from './TaxonomyEditor';
 import VendorGroups from './VendorGroups';
-import ThemeToggle from '../components/ThemeToggle';
 import RichTextEditor from '../components/RichTextEditor';
-import LogoutButton from '../components/LogoutButton';
+
 
 function slugify(s: string) {
   return s
