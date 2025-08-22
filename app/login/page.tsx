@@ -1,62 +1,99 @@
+// app/login/page.tsx
 'use client';
 
-import { useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-
-const inputClass =
-  'w-full rounded-lg px-3 py-2 bg-white text-gray-900 placeholder-gray-500 border border-gray-300 ' +
-  'focus:outline-none focus:ring-2 focus:ring-blue-500 ' +
-  'dark:bg-white/10 dark:text-white dark:placeholder-gray-400 dark:border-white/10';
-
-const btnPrimary =
-  'px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-medium shadow disabled:opacity-50';
+import { Suspense, useState } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
 
 export default function LoginPage() {
-  const [email, setEmail] = useState('');
-  const [code, setCode] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [msg, setMsg] = useState('');
+  return (
+    <Suspense fallback={<div className="container max-w-md mx-auto p-6">Lädt…</div>}>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+function LoginForm() {
+  const sp = useSearchParams();               // ✅ steckt jetzt in <Suspense>
   const router = useRouter();
-  const params = useSearchParams();
-  const redirect = params.get('redirect') || '/admin';
+  const redirect = sp.get('redirect') || '/';
+
+  const [email, setEmail] = useState('');
+  const [pass, setPass] = useState('');
+  const [pending, setPending] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setLoading(true);
-    setMsg('');
+    setPending(true);
+    setErr(null);
     try {
       const res = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type':'application/json' },
-        body: JSON.stringify({ email, code }),
+        body: JSON.stringify({ email, password: pass }),
       });
       const j = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(j.error || 'Login fehlgeschlagen.');
+      if (!res.ok) {
+        setErr(j.error || 'Login fehlgeschlagen.');
+        setPending(false);
+        return;
+      }
       router.push(redirect);
-    } catch (err:any) {
-      setMsg(err.message || 'Fehler');
-    } finally {
-      setLoading(false);
+    } catch (e) {
+      setErr('Netzwerkfehler.');
+      setPending(false);
     }
   }
 
+  // simple Styles
+  const input =
+    'w-full rounded-xl px-3 py-2 bg-white text-gray-900 placeholder-gray-500 border border-gray-300 ' +
+    'shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ' +
+    'dark:bg-white/10 dark:text-white dark:placeholder-gray-400 dark:border-white/10';
+  const btn =
+    'w-full px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-medium disabled:opacity-50';
+
   return (
-    <div className="min-h-screen flex items-center justify-center p-6">
-      <form onSubmit={onSubmit} className="w-full max-w-sm p-6 rounded-2xl border bg-white dark:bg-gray-900 dark:border-gray-800 space-y-4">
-        <h1 className="text-xl font-semibold">Anmelden</h1>
+    <div className="container max-w-md mx-auto p-6">
+      <h1 className="text-2xl font-bold mb-4 text-gray-900 dark:text-gray-100">Login</h1>
+
+      <form onSubmit={onSubmit} className="space-y-3">
         <div>
-          <label className="form-label">E-Mail</label>
-          <input className={inputClass} value={email} onChange={e=>setEmail(e.target.value)} placeholder="du@firma.de" />
+          <label className="block text-sm mb-1">E-Mail</label>
+          <input
+            type="email"
+            autoComplete="username"
+            className={input}
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            placeholder="you@example.com"
+          />
         </div>
         <div>
-          <label className="form-label">Zugangscode</label>
-          <input className={inputClass} value={code} onChange={e=>setCode(e.target.value)} placeholder="Code" type="password" />
+          <label className="block text-sm mb-1">Passwort</label>
+          <input
+            type="password"
+            autoComplete="current-password"
+            className={input}
+            value={pass}
+            onChange={(e) => setPass(e.target.value)}
+            required
+            placeholder="••••••••"
+          />
         </div>
-        <button disabled={!email || !code || loading} className={btnPrimary} type="submit">
-          {loading ? 'Anmelden…' : 'Anmelden'}
+
+        {err && <div className="text-sm text-red-600">{err}</div>}
+
+        <button type="submit" disabled={pending} className={btn}>
+          {pending ? 'Anmeldung…' : 'Einloggen'}
         </button>
-        {msg && <div className="text-sm text-red-600">{msg}</div>}
       </form>
+
+      <div className="mt-4 text-sm">
+        <Link href="/" className="text-blue-600 dark:text-blue-400 hover:underline">Zur Startseite</Link>
+      </div>
     </div>
   );
 }
