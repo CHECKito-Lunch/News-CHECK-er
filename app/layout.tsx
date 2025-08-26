@@ -1,12 +1,12 @@
+import './globals.css';
 import type { ReactNode } from 'react';
-import '../globals.css';
-import SiteHeader from './components/SiteHeader';
 
-export default function SiteLayout({ children }: { children: ReactNode }) {
+export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <>
-      <SiteHeader />
-      {children}
-    </>
+    <html lang="de">
+      <body className="min-h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100">
+        {children}
+      </body>
+    </html>
   );
 }

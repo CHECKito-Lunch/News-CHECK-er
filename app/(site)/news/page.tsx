@@ -1,7 +1,7 @@
 // app/news/page.tsx
 'use client';
 
-import '../globals.css';
+
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';

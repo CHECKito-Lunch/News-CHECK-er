@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import TaxonomyEditor from './TaxonomyEditor';
 import VendorGroups from './VendorGroups';
 import RichTextEditor from '../components/RichTextEditor';
+import Link from 'next/link';
 
 
 function slugify(s: string) {
@@ -237,6 +238,14 @@ return (
     <div className="flex items-center justify-between">
       <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Admin</h1>
       {/* optional: rechts weitere Page-Actions platzieren */}
+      <Link
+    href="/"
+    className="px-3 py-2 rounded-lg border text-sm
+               bg-white hover:bg-gray-50
+               dark:bg-white/10 dark:hover:bg-white/20 dark:border-gray-700"
+  >
+    ← Zur Startseite
+  </Link>
     </div>
 
 
