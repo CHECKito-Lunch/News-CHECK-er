@@ -1,18 +1,29 @@
+// /app/api/admin/categories/route.ts
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseClient';
-import { T } from '@/lib/tables';
 
 export async function GET() {
   const s = supabaseAdmin();
-  const { data, error } = await s.from(T.categories).select('id,name,color').order('name');
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  const { data, error } = await s
+    .from('categories')
+    .select('id,name,color,show_vendor_filter,show_badges_filter,show_search_filter')
+    .order('name');
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   return NextResponse.json({ data });
 }
 
 export async function POST(req: Request) {
+  const body = await req.json().catch(() => ({}));
+  const { name, color, show_vendor_filter = true, show_badges_filter = true, show_search_filter = true } = body;
+
+  if (!name) return NextResponse.json({ error: 'Name fehlt' }, { status: 400 });
+
   const s = supabaseAdmin();
-  const body = await req.json(); // { name, color? }
-  const { error } = await s.from(T.categories).insert({ name: body.name, color: body.color ?? null });
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true });
+  const { data, error } = await s
+    .from('categories')
+    .insert([{ name, color, show_vendor_filter, show_badges_filter, show_search_filter }])
+    .select('id')
+    .single();
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  return NextResponse.json({ id: data?.id ?? null });
 }

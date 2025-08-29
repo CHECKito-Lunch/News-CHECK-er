@@ -2,13 +2,24 @@
 
 import { useEffect, useState } from 'react';
 
-export type TaxoItem = { id: number; name: string; color?: string; kind?: string };
+export type TaxoItem = {
+  id: number;
+  name: string;
+  color?: string;
+  kind?: string;
+  // NEU: nur relevant für Kategorien
+  show_vendor_filter?: boolean;
+  show_badges_filter?: boolean;
+  show_search_filter?: boolean;
+};
 
 type Props = {
   title: string;
-  endpoint: string; // z.B. '/api/admin/vendors'
+  endpoint: string; // z.B. '/api/admin/categories'
   columns?: Array<'name' | 'color' | 'kind'>;
   allowGroups?: boolean; // nur für Vendors
+  /** Optional: erzwingt die Anzeige der drei Kategorie-Filter-Switches */
+  showCategoryFlags?: boolean;
 };
 
 export default function TaxonomyEditor({
@@ -16,6 +27,7 @@ export default function TaxonomyEditor({
   endpoint,
   columns = ['name'],
   allowGroups,
+  showCategoryFlags,
 }: Props) {
   const [items, setItems] = useState<TaxoItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -25,6 +37,11 @@ export default function TaxonomyEditor({
   const [kind, setKind] = useState('default');
   const [error, setError] = useState<string | null>(null);
 
+  // NEU: Create-Form Switches (Defaults true)
+  const [fVendor, setFVendor] = useState(true);
+  const [fBadges, setFBadges] = useState(true);
+  const [fSearch, setFSearch] = useState(true);
+
   // Edit-Mode + Drafts
   const [isEditing, setIsEditing] = useState(false);
   const [drafts, setDrafts] = useState<Record<number, TaxoItem>>({});
@@ -32,6 +49,9 @@ export default function TaxonomyEditor({
 
   const showColor = columns.includes('color');
   const showKind = columns.includes('kind');
+
+  // Kategorien-Erkennung (falls Prop nicht gesetzt)
+  const showFlags = (showCategoryFlags ?? endpoint.toLowerCase().includes('categories'));
 
   async function load() {
     setLoading(true);
@@ -78,6 +98,11 @@ export default function TaxonomyEditor({
       const body: Partial<TaxoItem> = { name };
       if (showColor) body.color = color;
       if (showKind) body.kind = kind;
+      if (showFlags) {
+        body.show_vendor_filter = fVendor;
+        body.show_badges_filter = fBadges;
+        body.show_search_filter = fSearch;
+      }
 
       const res = await fetch(endpoint, {
         method: 'POST',
@@ -86,6 +111,13 @@ export default function TaxonomyEditor({
       });
       if (!res.ok) throw new Error();
       setName('');
+      if (showColor) setColor('#eeeeff');
+      if (showKind) setKind('default');
+      if (showFlags) {
+        setFVendor(true);
+        setFBadges(true);
+        setFSearch(true);
+      }
       setCreating(false);
       await load();
     } catch {
@@ -100,6 +132,16 @@ export default function TaxonomyEditor({
     if (draft.name !== original.name) patch.name = draft.name;
     if (showColor && draft.color !== original.color) patch.color = draft.color;
     if (showKind && draft.kind !== original.kind) patch.kind = draft.kind;
+
+    if (showFlags) {
+      if (draft.show_vendor_filter !== original.show_vendor_filter)
+        patch.show_vendor_filter = !!draft.show_vendor_filter;
+      if (draft.show_badges_filter !== original.show_badges_filter)
+        patch.show_badges_filter = !!draft.show_badges_filter;
+      if (draft.show_search_filter !== original.show_search_filter)
+        patch.show_search_filter = !!draft.show_search_filter;
+    }
+
     return patch;
   }
 
@@ -222,12 +264,31 @@ export default function TaxonomyEditor({
             <input value={kind} onChange={(e) => setKind(e.target.value)} placeholder="z.B. warning/info" />
           </div>
         )}
+
         <div>
           <button className="btn btn-primary" disabled={!name || creating} onClick={create} type="button">
             Anlegen
           </button>
         </div>
       </div>
+
+      {/* NEU: Create – Kategorie-Filter-Flags */}
+      {showFlags && (
+        <div className="grid sm:grid-cols-3 gap-3">
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={fVendor} onChange={(e) => setFVendor(e.target.checked)} />
+            Veranstalter-Filter
+          </label>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={fBadges} onChange={(e) => setFBadges(e.target.checked)} />
+            Badges-Filter
+          </label>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={fSearch} onChange={(e) => setFSearch(e.target.checked)} />
+            Suche
+          </label>
+        </div>
+      )}
 
       {error && <div className="text-sm text-red-500">{error}</div>}
 
@@ -261,8 +322,10 @@ export default function TaxonomyEditor({
                       onChange={(e) => changeDraft(it.id, 'color', e.target.value)}
                     />
                   ) : (
-                    <div className="h-6 w-10 rounded border border-gray-200 dark:border-gray-700"
-                         style={{ backgroundColor: it.color ?? '#eeeeff' }} />
+                    <div
+                      className="h-6 w-10 rounded border border-gray-200 dark:border-gray-700"
+                      style={{ backgroundColor: it.color ?? '#eeeeff' }}
+                    />
                   )}
                   <span
                     className="px-2 py-0.5 rounded-full text-xs border border-gray-200 dark:border-gray-700"
@@ -285,6 +348,52 @@ export default function TaxonomyEditor({
                 ) : (
                   <span className="w-40 truncate">{it.kind}</span>
                 )
+              )}
+
+              {/* NEU: Kategorie-Filter-Flags */}
+              {showFlags && (
+                <div className="flex items-center gap-4">
+                  {isEditing ? (
+                    <>
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={!!draft.show_vendor_filter}
+                          onChange={(e) => changeDraft(it.id, 'show_vendor_filter', e.target.checked)}
+                        />
+                        Veranstalter
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={!!draft.show_badges_filter}
+                          onChange={(e) => changeDraft(it.id, 'show_badges_filter', e.target.checked)}
+                        />
+                        Badges
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={!!draft.show_search_filter}
+                          onChange={(e) => changeDraft(it.id, 'show_search_filter', e.target.checked)}
+                        />
+                        Suche
+                      </label>
+                    </>
+                  ) : (
+                    <div className="flex items-center gap-2 text-xs">
+                      <span className={`px-2 py-0.5 rounded-full border ${it.show_vendor_filter ? 'border-green-400 text-green-700' : 'border-gray-300 text-gray-500'}`}>
+                        Veranstalter {it.show_vendor_filter ? '✓' : '✗'}
+                      </span>
+                      <span className={`px-2 py-0.5 rounded-full border ${it.show_badges_filter ? 'border-green-400 text-green-700' : 'border-gray-300 text-gray-500'}`}>
+                        Badges {it.show_badges_filter ? '✓' : '✗'}
+                      </span>
+                      <span className={`px-2 py-0.5 rounded-full border ${it.show_search_filter ? 'border-green-400 text-green-700' : 'border-gray-300 text-gray-500'}`}>
+                        Suche {it.show_search_filter ? '✓' : '✗'}
+                      </span>
+                    </div>
+                  )}
+                </div>
               )}
 
               <div className="ml-auto flex items-center gap-2">

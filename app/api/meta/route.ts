@@ -1,19 +1,24 @@
+// app/api/meta/route.ts
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabaseClient';
+import { supabaseServer } from '@/lib/supabaseClient';
 import { T } from '@/lib/tables';
 
 export async function GET() {
-  const s = supabaseAdmin();
-  const [vendors, categories, badges] = await Promise.all([
-    s.from(T.vendors).select('id,name').order('name'),
-    s.from(T.categories).select('id,name,color').order('name'),
-    s.from(T.badges).select('id,name,color,kind').order('name'),
+  const s = supabaseServer();
+
+  const [v, c, b] = await Promise.all([
+    s.from(T.vendors).select('id, name').order('name', { ascending: true }),
+    s.from(T.categories).select('id, name, color').order('name', { ascending: true }),
+    s.from(T.badges).select('id, name, color, kind').order('name', { ascending: true }),
   ]);
-  const err = vendors.error || categories.error || badges.error;
-  if (err) return NextResponse.json({ error: err.message }, { status: 500 });
+
+  if (v.error) return NextResponse.json({ error: v.error.message }, { status: 500 });
+  if (c.error) return NextResponse.json({ error: c.error.message }, { status: 500 });
+  if (b.error) return NextResponse.json({ error: b.error.message }, { status: 500 });
+
   return NextResponse.json({
-    vendors: vendors.data ?? [],
-    categories: categories.data ?? [],
-    badges: badges.data ?? [],
+    vendors: v.data ?? [],
+    categories: c.data ?? [],
+    badges: b.data ?? [],
   });
 }

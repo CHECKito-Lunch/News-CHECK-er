@@ -1,47 +1,20 @@
-// app/api/admin/badges/[id]/route.ts
-import { NextRequest, NextResponse } from 'next/server';
+// /app/api/admin/categories/[id]/route.ts
+import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseClient';
-import { T } from '@/lib/tables';
 
-// id sicher aus der URL (/api/admin/badges/[id]) lesen
-function getId(req: NextRequest): number {
-  const last = req.nextUrl.pathname.split('/').pop() || '';
-  const id = Number(last);
-  if (!Number.isFinite(id)) throw new Error('Invalid id');
-  return id;
-}
+export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  const { id } = await ctx.params;
+  const body = await req.json().catch(() => ({}));
 
-export async function PATCH(req: NextRequest) {
-  try {
-    const id = getId(req);
-    const patch = await req.json(); // { name?, color?, kind? }
+  const update: any = {};
+  if ('name' in body) update.name = body.name;
+  if ('color' in body) update.color = body.color;
+  if ('show_vendor_filter'  in body) update.show_vendor_filter  = !!body.show_vendor_filter;
+  if ('show_badges_filter'  in body) update.show_badges_filter  = !!body.show_badges_filter;
+  if ('show_search_filter'  in body) update.show_search_filter  = !!body.show_search_filter;
 
-    const s = supabaseAdmin();
-    const { error } = await s.from(T.categories).update(patch).eq('id', id);
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-    return NextResponse.json({ ok: true, id });
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: msg }, { status: 400 });
-  }
-}
-
-export async function DELETE(req: NextRequest) {
-  try {
-    const id = getId(req);
-
-    const s = supabaseAdmin();
-    const { error } = await s.from(T.categories).delete().eq('id', id);
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-    return NextResponse.json({ ok: true, id });
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: msg }, { status: 400 });
-  }
+  const s = supabaseAdmin();
+  const { error } = await s.from('categories').update(update).eq('id', id);
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  return NextResponse.json({ ok: true });
 }

@@ -9,6 +9,11 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@fullcalendar/daygrid": "^6.1.19",
+    "@fullcalendar/icalendar": "^6.1.19",
+    "@fullcalendar/interaction": "^6.1.19",
+    "@fullcalendar/list": "^6.1.19",
+    "@fullcalendar/react": "^6.1.19",
     "@supabase/supabase-js": "^2.55.0",
     "@tiptap/extension-link": "^3.2.0",
     "@tiptap/extension-placeholder": "^3.2.0",
@@ -17,9 +22,13 @@
     "@tiptap/react": "^3.2.0",
     "@tiptap/starter-kit": "^3.2.0",
     "bcryptjs": "^3.0.2",
+    "date-fns": "^4.1.0",
+    "isomorphic-dompurify": "^2.26.0",
     "jose": "^6.0.13",
     "next": "^15.4.6",
     "react": "^19.1.1",
+    "react-big-calendar": "^1.19.4",
+    "react-calendar": "^6.0.0",
     "react-dom": "^19.1.1",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1"

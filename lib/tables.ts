@@ -9,6 +9,7 @@ export const T = {
   vendors: 'vendors',
   categories: 'categories',
   badges: 'badges',
+  kpis: 'kpis',
 
   // Gruppen
   vendorGroups: 'vendor_groups',
@@ -16,6 +17,8 @@ export const T = {
 
   // USERS
 
-   appUsers: 'app_users',
+  appUsers: 'app_users',
+  tools: 'tools',
+  termine: 'termine',
    
 } as const;

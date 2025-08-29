@@ -2,6 +2,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 
 type Role = 'admin' | 'moderator' | 'user';
 
@@ -175,6 +176,15 @@ export default function UsersAdminPage() {
     <div className="container max-w-5xl mx-auto py-6 space-y-5">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Benutzerverwaltung</h1>
+
+        <Link
+            href="/"
+            className="px-3 py-2 rounded-lg border text-sm
+                       bg-white hover:bg-gray-50
+                       dark:bg-white/10 dark:hover:bg-white/20 dark:border-gray-700"
+          >
+            ← Zur Startseite
+          </Link>
       </div>
 
       {/* Formular (Neu/Update) */}
