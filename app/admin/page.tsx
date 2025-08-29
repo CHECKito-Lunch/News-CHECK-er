@@ -6,6 +6,7 @@ import VendorGroups from './VendorGroups';
 import RichTextEditor from '../components/RichTextEditor';
 import Link from 'next/link';
 import { supabaseBrowser } from '@/lib/supabaseClient';
+import type { DateClickArg, EventClickArg, EventInput } from '@fullcalendar/core';
 
 // Kalender (JS-Plugins – CSS kommt via CDN aus layout.tsx)
 import FullCalendar from '@fullcalendar/react';
@@ -92,14 +93,17 @@ type AgentLog = {
   note?: string;
 };
 
+// Tabs-Typ statt any
+type TabKey = 'post' | 'vendors' | 'categories' | 'badges' | 'vendor-groups' | 'tools' | 'termine' | 'agent';
+
 function Tabs({
   current,
   onChange,
 }: {
-  current: 'post' | 'vendors' | 'categories' | 'badges' | 'vendor-groups' | 'tools' | 'termine' | 'agent';
-  onChange: (v: 'post' | 'vendors' | 'categories' | 'badges' | 'vendor-groups' | 'tools' | 'termine' | 'agent') => void;
+  current: TabKey;
+  onChange: (v: TabKey) => void;
 }) {
-  const tabs = [
+  const tabs: { k: TabKey; label: string }[] = [
     { k: 'post',           label: 'Beitrag anlegen' },
     { k: 'vendors',        label: 'Veranstalter' },
     { k: 'categories',     label: 'Kategorien' },
@@ -108,16 +112,16 @@ function Tabs({
     { k: 'tools',          label: 'Tools' },
     { k: 'termine',        label: 'Termine' },
     { k: 'agent',          label: 'News-Agent' },
-  ] as const;
+  ];
 
   return (
     <div className="flex gap-2 border-b border-gray-200 dark:border-gray-800">
       {tabs.map((t) => {
-        const active = current === (t.k as any);
+        const active = current === t.k;
         return (
           <button
             key={t.k}
-            onClick={() => onChange(t.k as any)}
+            onClick={() => onChange(t.k)}
             className={`px-3 py-2 rounded-t-lg text-sm font-medium
               ${active
                 ? 'bg-white text-gray-900 border border-b-0 border-gray-200 dark:bg-gray-900 dark:text-white dark:border-gray-700'
@@ -203,7 +207,7 @@ export default function AdminPage() {
   const [sources, setSources] = useState<SourceRow[]>([{ url: '', label: '' }]);
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<string>('');
-  const [tab, setTab] = useState<'post' | 'vendors' | 'categories' | 'badges' | 'vendor-groups' | 'tools' | 'termine' | 'agent'>('post');
+  const [tab, setTab] = useState<TabKey>('post');
 
   // Beiträge Liste
   const [postRows, setPostRows] = useState<PostRow[]>([]);
@@ -299,8 +303,9 @@ export default function AdminPage() {
       setAuthMsg('Erfolgreich angemeldet.');
       await loadPosts(1, postsQ);
       if (tab === 'agent') await agentLoad();
-    } catch (err: any) {
-      setAuthMsg(err?.message ?? 'Login fehlgeschlagen.'); setSessionOK(false);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setAuthMsg(msg || 'Login fehlgeschlagen.'); setSessionOK(false);
     }
   }
   async function doLogout() {
@@ -487,6 +492,15 @@ export default function AdminPage() {
   }
 
   // ===== Termine CRUD (mit Uhrzeit, Ganztägig, Icon, Farbe) =====
+  type TerminPayload = {
+    title: string;
+    starts_at: string;
+    ends_at: string | null;
+    all_day: boolean;
+    icon: string | null;
+    color: string | null;
+  };
+
   async function termsLoad() {
     setTermLoading(true);
     const r = await fetch('/api/admin/termine');
@@ -504,19 +518,21 @@ export default function AdminPage() {
     setTermColor('#2563eb');
   }
   async function termsSave() {
-    const payload: any = {
+    const base = {
       title: termTitle.trim(),
       all_day: termAllDay,
       icon: termIcon || null,
       color: termColor || null,
     };
-    if (!payload.title) { alert('Titel ist Pflicht.'); return; }
+
+    if (!base.title) { alert('Titel ist Pflicht.'); return; }
+
+    let payload: TerminPayload;
 
     if (termAllDay) {
       if (!termStartLocal) { alert('Bitte Start-Datum wählen.'); return; }
       const d = termStartLocal.slice(0,10);
-      payload.starts_at = fromLocalInput(`${d}T00:00`);
-      payload.ends_at = null;
+      payload = { ...base, starts_at: fromLocalInput(`${d}T00:00`), ends_at: null };
     } else {
       const starts = termStartLocal ? fromLocalInput(termStartLocal) : '';
       const ends = termEndLocal ? fromLocalInput(termEndLocal) : null;
@@ -524,8 +540,7 @@ export default function AdminPage() {
       if (ends && new Date(ends).getTime() < new Date(starts).getTime()) {
         alert('Ende darf nicht vor Start liegen.'); return;
       }
-      payload.starts_at = starts;
-      payload.ends_at = ends;
+      payload = { ...base, starts_at: starts, ends_at: ends };
     }
 
     const url = termEditId ? `/api/admin/termine/${termEditId}` : '/api/admin/termine';
@@ -551,7 +566,7 @@ export default function AdminPage() {
     await termsLoad(); if (termEditId===id) termsReset();
   }
 
-  const calendarEvents = [
+  const calendarEvents: EventInput[] =[
     ...termRows.map(t => {
       const color = t.color ?? '#2563eb';
       const textColor = contrastText(color);
@@ -598,8 +613,9 @@ export default function AdminPage() {
       const j = await r.json().catch(()=>({}));
       if (!r.ok) throw new Error(j?.error || 'Fehler beim Speichern');
       setAgentMsg('Gespeichert.');
-    } catch (e:any) {
-      setAgentMsg(e?.message || 'Speichern fehlgeschlagen.');
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setAgentMsg(msg || 'Speichern fehlgeschlagen.');
     } finally { setAgentLoading(false); }
   }
   async function agentRunDry() {
@@ -610,8 +626,9 @@ export default function AdminPage() {
       if (!r.ok) throw new Error(j?.error || 'Fehler beim Testlauf');
       setAgentMsg(`Testlauf ok – gefunden: ${j.found ?? '—'}, Vorschläge: ${j.proposed ?? '—'}`);
       await agentLoadLogs();
-    } catch (e:any) {
-      setAgentMsg(e?.message || 'Testlauf fehlgeschlagen.');
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setAgentMsg(msg || 'Testlauf fehlgeschlagen.');
     } finally { setAgentLoading(false); }
   }
   async function agentLoadLogs() {
@@ -1011,7 +1028,7 @@ export default function AdminPage() {
               locale="de"
               height={520}
               events={calendarEvents}
-              dateClick={(arg) => {
+              dateClick={(arg: DateClickArg) => {
                 if (termAllDay) {
                   const d = arg.dateStr.slice(0,10);
                   setTermStartLocal(`${d}T00:00`);
@@ -1022,8 +1039,9 @@ export default function AdminPage() {
                   setTermEndLocal('');
                 }
               }}
-              eventClick={(info) => {
-                if (info.event.extendedProps && (info.event.extendedProps as any).own) {
+              eventClick={(info: EventClickArg) => {
+                const ep = info.event.extendedProps as { own?: boolean; tid?: number } | undefined;
+                if (ep?.own) {
                   const idNum = Number(info.event.id);
                   const t = termRows.find(x => x.id === idNum);
                   if (t) termsStartEdit(t);

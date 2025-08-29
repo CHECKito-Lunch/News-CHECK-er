@@ -93,7 +93,7 @@ export default function HomePage() {
 
         {/* Was gibt's Neues? */}
         <section>
-          <h2 className="text-xl font-semibold mb-2">Was gibt's Neues?</h2>
+          <h2 className="text-xl font-semibold mb-2">Was gibt&apos;s Neues?</h2>
           <div className={card + ' max-h-[400px] overflow-y-auto'}>
             {items.length === 0 && <div>Keine Start-News.</div>}
             <ul className="grid gap-3">
