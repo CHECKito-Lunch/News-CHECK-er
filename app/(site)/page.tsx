@@ -204,7 +204,7 @@ export default function HomePage() {
         <section>
           <h2 className="text-xl font-semibold mb-2">Was gibt&apos;s Neues?</h2>
           <div className={card + ' max-h-[400px] overflow-y-auto'}>
-            {items.length === 0 && <div>Keine Start-News.</div>}
+            {items.length === 0 && <div>Keine Start-News vorhanden.</div>}
             <ul className="grid gap-3">
               {items.map(it => (
                 <li key={it.id} className="border border-gray-200 dark:border-gray-700 rounded p-4 bg-gray-50 dark:bg-gray-800">
