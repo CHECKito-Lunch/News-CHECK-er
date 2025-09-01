@@ -336,7 +336,7 @@ export default function AdminPage() {
 
     const now = new Date();
     theEff: {
-      /* eslint-disable no-unused-labels */
+  
     }
     const eff = effectiveFrom ? new Date(effectiveFrom) : null;
 
