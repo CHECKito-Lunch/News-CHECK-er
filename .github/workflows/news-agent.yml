@@ -1,0 +1,17 @@
+name: News Agent Cron
+
+on:
+  schedule:
+    - cron: "0 8,12,17 * * *"   # 08:00, 12:00, 17:00 UTC – anpassen!
+  workflow_dispatch: {}          # manuell startbar
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call news-agent on production
+        run: |
+          curl -sS -X POST "${{ secrets.PROD_URL }}/api/admin/news-agent/run" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json" \
+            --fail
