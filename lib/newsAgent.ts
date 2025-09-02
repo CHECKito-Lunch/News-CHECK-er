@@ -32,17 +32,24 @@ function hasEnv(name: string) {
 }
 
 async function loadConfig(): Promise<AgentConfig> {
-  const { data, error } = await supabaseAdmin
-    .from('app_settings').select('value')
-    .eq('key','news_agent').single();
+  const db = supabaseAdmin();
+  const { data, error } = await db
+    .from('app_settings')
+    .select('value')
+    .eq('key', 'news_agent')
+    .single();
   if (error) throw error;
-  return (data.value as AgentConfig);
+  const cfg = (data?.value ?? null) as AgentConfig | null;
+  if (!cfg) throw new Error('news_agent config missing');
+  return cfg;
 }
 
 export async function saveConfig(cfg: AgentConfig) {
-  await supabaseAdmin.from('app_settings')
-    .upsert({ key:'news_agent', value: cfg, updated_at: new Date().toISOString() })
-    .eq('key','news_agent');
+  const db = supabaseAdmin();
+  await db
+    .from('app_settings')
+    .upsert({ key: 'news_agent', value: cfg, updated_at: new Date().toISOString() })
+    .eq('key', 'news_agent');
 }
 
 function buildQuery(terms: string[]) {
@@ -122,7 +129,13 @@ function makeSlug(title: string) {
     .slice(0, 80);
 }
 
-async function insertPostFromAgent(cfg: AgentConfig, summaryMd: string, sources: {url:string; label?:string|null}[], dryRun=false) {
+async function insertPostFromAgent(
+  cfg: AgentConfig,
+  summaryMd: string,
+  sources: {url:string; label?:string|null}[],
+  dryRun = false
+) {
+  const db = supabaseAdmin();
   const status = cfg.autoPublish ? 'published' : 'draft';
   const title = 'Branchen-Update: Reise & Tourismus';
   const slugBase = makeSlug(`${title}-${new Date().toISOString().slice(0,10)}`);
@@ -130,7 +143,7 @@ async function insertPostFromAgent(cfg: AgentConfig, summaryMd: string, sources:
 
   if (dryRun) return { insertedId: null };
 
-  const { data: post, error: e1 } = await supabaseAdmin
+  const { data: post, error: e1 } = await db
     .from('posts')
     .insert({
       title,
@@ -139,22 +152,23 @@ async function insertPostFromAgent(cfg: AgentConfig, summaryMd: string, sources:
       content: summaryMd,
       status,
       effective_from: new Date().toISOString(),
-      vendor_id: cfg.defaultVendorId,
-      author_name: 'News-Agent',
+      vendor_id: cfg.defaultVendorId ?? null,
+      // author_id: null, // optional, wenn vorhanden
+      // author_name: 'News-Agent', // nur falls Spalte existiert
     })
     .select('id')
     .single();
   if (e1) throw e1;
 
   if (cfg.defaultCategoryId) {
-    await supabaseAdmin.from('post_categories').insert({ post_id: post.id, category_id: cfg.defaultCategoryId });
+    await db.from('post_categories').insert({ post_id: post.id, category_id: cfg.defaultCategoryId });
   }
   for (const b of (cfg.defaultBadgeIds || [])) {
-    await supabaseAdmin.from('post_badges').insert({ post_id: post.id, badge_id: b });
+    await db.from('post_badges').insert({ post_id: post.id, badge_id: b });
   }
-  for (let i=0;i<sources.length;i++){
+  for (let i = 0; i < sources.length; i++) {
     const s = sources[i];
-    await supabaseAdmin.from('post_sources').insert({ post_id: post.id, url: s.url, label: s.label ?? null, sort_order: i });
+    await db.from('post_sources').insert({ post_id: post.id, url: s.url, label: s.label ?? null, sort_order: i });
   }
 
   return { insertedId: post.id };
@@ -180,13 +194,19 @@ export async function runAgent({ force=false, dry=false } = {}) {
     return { skipped: 'disabled' };
   }
 
+  const db = supabaseAdmin();
+
   // Simple lock (5 min)
   const lockName = 'news_agent';
-  const { data: lock } = await supabaseAdmin.from('agent_locks').select('name, locked_at').eq('name', lockName).maybeSingle();
+  const { data: lock } = await db
+    .from('agent_locks')
+    .select('name, locked_at')
+    .eq('name', lockName)
+    .maybeSingle();
   if (lock && Date.now() - new Date(lock.locked_at).getTime() < 5*60*1000) {
     return { skipped: 'locked' };
   }
-  await supabaseAdmin.from('agent_locks').upsert({ name: lockName, locked_at: new Date().toISOString() });
+  await db.from('agent_locks').upsert({ name: lockName, locked_at: new Date().toISOString() });
 
   try {
     if (!force) {
@@ -196,7 +216,7 @@ export async function runAgent({ force=false, dry=false } = {}) {
       }
     }
 
-    // -------- DRY-RUN: keine harten Fehler, best effort ----------
+    // -------- DRY-RUN ----------
     if (dry) {
       let articles: NewsArticle[] = [];
       let usedNews = false;
@@ -226,7 +246,7 @@ export async function runAgent({ force=false, dry=false } = {}) {
     }
     // -------- /DRY-RUN ----------
 
-    // Normaler Lauf (mit echten Fehlern, wenn Keys fehlen)
+    // Normaler Lauf
     const articles = await fetchNews(cfg);
     const top = articles.slice(0, cfg.maxArticles || 30);
     const srcs = top.map(a => ({ url: a.url, label: a.source?.name || null }));
@@ -238,12 +258,13 @@ export async function runAgent({ force=false, dry=false } = {}) {
     await logRun(Date.now()-t0, top.length, countInserted, false, inserted.insertedId ? `post#${inserted.insertedId}` : undefined);
     return { found: top.length, inserted: countInserted, id: inserted.insertedId || null };
   } finally {
-    await supabaseAdmin.from('agent_locks').delete().eq('name', lockName);
+    await db.from('agent_locks').delete().eq('name', lockName);
   }
 }
 
 export async function logRun(tookMs: number, found: number, inserted: number, dryRun: boolean, note?: string) {
-  await supabaseAdmin.from('agent_runs').insert({
+  const db = supabaseAdmin();
+  await db.from('agent_runs').insert({
     took_ms: Math.round(tookMs),
     found, inserted,
     dry_run: !!dryRun,
@@ -251,8 +272,9 @@ export async function logRun(tookMs: number, found: number, inserted: number, dr
   });
 }
 
-export async function getLogs(limit=20){
-  const { data } = await supabaseAdmin
+export async function getLogs(limit = 20){
+  const db = supabaseAdmin();
+  const { data } = await db
     .from('agent_runs')
     .select('*')
     .order('ran_at', { ascending: false })

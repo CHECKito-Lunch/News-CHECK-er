@@ -1,7 +1,7 @@
 // app/api/profile/password/route.ts
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { supabaseAdmin } from '@/lib/supabaseClient';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { T } from '@/lib/tables';
 import bcrypt from 'bcryptjs';
 

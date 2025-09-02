@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabaseClient'; // Server-only (Service Role)
+import { supabaseAdmin } from '@/lib/supabaseAdmin'; // Server-only (Service Role)
 import { T } from '@/lib/tables'; // { vendors: 'vendors', ... }
 
 export async function GET() {

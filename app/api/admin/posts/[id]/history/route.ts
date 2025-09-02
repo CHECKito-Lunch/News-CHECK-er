@@ -1,13 +1,17 @@
-import { NextResponse } from 'next/server';
+// app/api/admin/posts/[id]/history/route.ts  (Pfad beispielhaft)
+import { NextResponse, type NextRequest } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
-type Params = { params: { id: string } };
-
-export async function GET(_req: Request, { params }: Params) {
-  const postId = Number(params.id);
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const postId = Number(id);
   if (!postId) return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
 
-  const { data, error } = await supabaseAdmin
+  const db = supabaseAdmin();
+  const { data, error } = await db
     .from('post_revisions')
     .select('id, action, changed_at, editor_name, changes')
     .eq('post_id', postId)

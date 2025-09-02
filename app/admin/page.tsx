@@ -1,3 +1,4 @@
+// app/admin/page.tsx
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
@@ -6,7 +7,8 @@ import VendorGroups from './VendorGroups';
 import RichTextEditor from '../components/RichTextEditor';
 import Link from 'next/link';
 import { supabaseBrowser } from '@/lib/supabaseClient';
-import type { DateClickArg, EventClickArg, EventInput } from '@fullcalendar/core';
+import type { EventClickArg, EventInput } from '@fullcalendar/core';
+import type { DateClickArg } from '@fullcalendar/interaction';
 
 // Kalender (JS-Plugins – CSS kommt via CDN aus layout.tsx)
 import FullCalendar from '@fullcalendar/react';
@@ -96,7 +98,7 @@ type AgentLog = {
 // Tabs-Typ statt any
 type TabKey =
   | 'post'
-  | 'posts'          // 👈 NEU
+  | 'posts'
   | 'vendors'
   | 'categories'
   | 'badges'
@@ -114,7 +116,7 @@ function Tabs({
 }) {
   const tabs: { k: TabKey; label: string }[] = [
     { k: 'post',           label: 'Beitrag anlegen' },
-    { k: 'posts',          label: 'Beiträge' },           // 👈 NEU
+    { k: 'posts',          label: 'Beiträge' },
     { k: 'vendors',        label: 'Veranstalter' },
     { k: 'categories',     label: 'Kategorien' },
     { k: 'badges',         label: 'Badges' },
@@ -161,13 +163,6 @@ function statusDE(s: PostRow['status']) {
   return 'Veröffentlicht';
 }
 
-// === Token-Header holen (nur wenn Session existiert)
-async function authHeaders(): Promise<Record<string, string>> {
-  const { data } = await sb.auth.getSession();
-  const token = data.session?.access_token;
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
-
 // Helpers für datetime-local ↔ ISO
 function toLocalInput(iso?: string|null) {
   if (!iso) return '';
@@ -188,12 +183,13 @@ function contrastText(hex?: string|null) {
 const EMOJI_CHOICES = ['📌','📅','🗓️','📣','📊','📝','🧑‍💻','🤝','☕','🎉','🛠️','🧪'];
 
 export default function AdminPage() {
-  // === Auth-Zustand
-  const [userEmail, setUserEmail] = useState('');
-  const [userPassword, setUserPassword] = useState('');
+  // === Auth/Rollen-Zustand
   const [authLoading, setAuthLoading] = useState(true);
   const [sessionOK, setSessionOK] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [authMsg, setAuthMsg] = useState<string>('');
+  const [userEmail, setUserEmail] = useState('');
+  const [userPassword, setUserPassword] = useState('');
 
   // === Stammdaten
   const [meta, setMeta] = useState<{ categories: Option[]; badges: Option[]; vendors: Option[] }>({
@@ -273,26 +269,55 @@ export default function AdminPage() {
   const [agentLogs, setAgentLogs] = useState<AgentLog[]>([]);
   const [agentLogsLoading, setAgentLogsLoading] = useState(false);
 
-  // === Session prüfen
+  // === Session + Rolle prüfen (Client)
   useEffect(() => {
-    let isMounted = true;
+    let mounted = true;
     (async () => {
       try {
-        const { data, error } = await sb.auth.getUser();
-        if (!isMounted) return;
-        setSessionOK(!!data?.user && !error);
-      } catch {
-        setSessionOK(false);
+        const { data } = await sb.auth.getUser();
+        const user = data?.user ?? null;
+        setSessionOK(!!user);
+
+        if (user) {
+          const { data: prof } = await sb
+            .from('profiles')
+            .select('role')
+            .eq('user_id', user.id)
+            .single();
+
+          setIsAdmin(prof?.role === 'admin');
+        } else {
+          setIsAdmin(false);
+        }
       } finally {
-        setAuthLoading(false);
+        if (mounted) setAuthLoading(false);
       }
     })();
-    return () => { isMounted = false; };
+
+    // live auf Auth-Änderungen reagieren
+    const { data: sub } = sb.auth.onAuthStateChange(async (_event, session) => {
+      setSessionOK(!!session?.user);
+      if (session?.user) {
+        const { data: prof } = await sb
+          .from('profiles')
+          .select('role')
+          .eq('user_id', session.user.id)
+          .single();
+        setIsAdmin(prof?.role === 'admin');
+      } else {
+        setIsAdmin(false);
+      }
+    });
+
+    return () => {
+      sub.subscription.unsubscribe();
+      mounted = false;
+    };
   }, []);
 
   // === Metadaten (keine Auth nötig)
   useEffect(() => {
-    fetch('/api/meta')
+    fetch('/api/meta', { credentials: 'same-origin' })
       .then((r) => r.json())
       .then(setMeta)
       .catch(() => setMeta({ categories: [], badges: [], vendors: [] }));
@@ -306,21 +331,32 @@ export default function AdminPage() {
   async function doLogin(e: React.FormEvent) {
     e.preventDefault();
     setAuthMsg('');
-    try {
-      const { error } = await sb.auth.signInWithPassword({ email: userEmail.trim(), password: userPassword });
-      if (error) { setAuthMsg(error.message); setSessionOK(false); return; }
+    const { error } = await sb.auth.signInWithPassword({ email: userEmail.trim(), password: userPassword });
+    if (error) {
+      setAuthMsg(error.message || 'Login fehlgeschlagen.');
+      setSessionOK(false);
+      setIsAdmin(false);
+      return;
+    }
+    // Session steht – Rolle nachladen
+    const { data } = await sb.auth.getUser();
+    const u = data?.user;
+    if (u) {
+      const { data: prof } = await sb.from('profiles').select('role').eq('user_id', u.id).single();
+      const admin = prof?.role === 'admin';
+      setIsAdmin(admin);
       setSessionOK(true);
-      setAuthMsg('Erfolgreich angemeldet.');
-      await loadPosts(1, postsQ);
-      if (tab === 'agent') await agentLoad();
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setAuthMsg(msg || 'Login fehlgeschlagen.'); setSessionOK(false);
+      setAuthMsg(admin ? 'Erfolgreich angemeldet.' : 'Angemeldet – aber kein Admin-Zugriff.');
+      if (admin) {
+        await loadPosts(1, postsQ);
+        if (tab === 'agent') await agentLoad();
+      }
     }
   }
   async function doLogout() {
     await sb.auth.signOut();
     setSessionOK(false);
+    setIsAdmin(false);
     setPostRows([]); setPostsTotal(0); setResult('');
   }
 
@@ -331,13 +367,10 @@ export default function AdminPage() {
   }
 
   async function save() {
-    if (!sessionOK) { setResult('Bitte zuerst anmelden.'); return; }
+    if (!sessionOK || !isAdmin) { setResult('Kein Zugriff. Bitte als Admin anmelden.'); return; }
     setSaving(true); setResult('');
 
     const now = new Date();
-    theEff: {
-  
-    }
     const eff = effectiveFrom ? new Date(effectiveFrom) : null;
 
     const finalStatus: PostRow['status'] = isDraft
@@ -362,8 +395,12 @@ export default function AdminPage() {
     const method = editingId ? 'PATCH' : 'POST';
 
     try {
-      const headers = { 'Content-Type': 'application/json', ...(await authHeaders()) };
-      const res = await fetch(url, { method, headers, body: JSON.stringify(payload) });
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(payload),
+      });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
         setResult(`Fehler: ${json.error || 'unbekannt'}`);
@@ -380,32 +417,32 @@ export default function AdminPage() {
   }
 
   async function loadPosts(p = postsPage, q = postsQ) {
-    if (!sessionOK) return;
+    if (!sessionOK || !isAdmin) return;
     setLoadingPosts(true);
     const params = new URLSearchParams();
     params.set('page', String(p));
     params.set('pageSize', String(pageSize));
     if (q) params.set('q', q);
     try {
-      const res = await fetch(`/api/admin/posts?${params.toString()}`, { headers: await authHeaders() });
+      const res = await fetch(`/api/admin/posts?${params.toString()}`, { credentials: 'same-origin' });
       const json = await res.json().catch(() => ({}));
       setPostRows(json.data ?? []); setPostsTotal(json.total ?? 0); setPostsPage(p);
     } finally { setLoadingPosts(false); }
   }
 
   useEffect(() => {
-    if (!sessionOK) return;
+    if (!sessionOK || !isAdmin) return;
     if (tab === 'post')    loadPosts(1, postsQ);
-    if (tab === 'posts')   loadPosts(1, postsQ);   // 👈 NEU: Liste beim Wechsel laden
+    if (tab === 'posts')   loadPosts(1, postsQ);
     if (tab === 'tools')   toolsLoad();
     if (tab === 'termine') termsLoad();
     if (tab === 'agent')   agentLoad();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, sessionOK]);
+  }, [tab, sessionOK, isAdmin]);
 
   async function startEdit(id: number) {
-    if (!sessionOK) { alert('Bitte zuerst anmelden.'); return; }
-    const res = await fetch(`/api/admin/posts/${id}`, { headers: await authHeaders() });
+    if (!sessionOK || !isAdmin) { alert('Bitte als Admin anmelden.'); return; }
+    const res = await fetch(`/api/admin/posts/${id}`, { credentials: 'same-origin' });
     const json = await res.json().catch(() => ({}));
     const p: PostRow | undefined = json?.data;
     if (!p) { alert('Beitrag konnte nicht geladen werden.'); return; }
@@ -419,13 +456,13 @@ export default function AdminPage() {
     setBadgeIds(p.badges?.map((b) => b.id) ?? []);
     setSources((p.sources ?? []).map((s) => ({ url: s.url, label: s.label ?? '' })) || [{ url: '', label: '' }]);
     setResult('');
-    setTab('post'); // 👈 UX: nach Laden zum Formular-Tab springen
+    setTab('post'); // UX
   }
 
   async function deletePost(id: number) {
-    if (!sessionOK) { alert('Bitte zuerst anmelden.'); return; }
+    if (!sessionOK || !isAdmin) { alert('Bitte als Admin anmelden.'); return; }
     if (!confirm('Wirklich löschen?')) return;
-    const res = await fetch(`/api/admin/posts/${id}`, { method: 'DELETE', headers: await authHeaders() });
+    const res = await fetch(`/api/admin/posts/${id}`, { method: 'DELETE', credentials: 'same-origin' });
     if (res.ok) { await loadPosts(); if (editingId === id) resetForm(); }
     else {
       const j = await res.json().catch(() => ({}));
@@ -436,7 +473,7 @@ export default function AdminPage() {
   async function openHistory(id: number) {
     setHistoryOpenFor(id); setHistoryLoading(true); setHistoryError('');
     try {
-      const res = await fetch(`/api/admin/posts/${id}/history`, { headers: await authHeaders() });
+      const res = await fetch(`/api/admin/posts/${id}/history`, { credentials: 'same-origin' });
       const j = await res.json();
       setHistoryItems(j.data ?? []);
     } catch {
@@ -470,7 +507,7 @@ export default function AdminPage() {
   // ===== Tools CRUD =====
   async function toolsLoad() {
     setToolsLoading(true);
-    const r = await fetch('/api/admin/tools');
+    const r = await fetch('/api/admin/tools', { credentials: 'same-origin' });
     const j = await r.json().catch(()=>({}));
     setToolsRows(j.data ?? []);
     setToolsLoading(false);
@@ -483,7 +520,12 @@ export default function AdminPage() {
     if (!body.title || !body.href) { alert('Titel und Link sind Pflicht.'); return; }
     const url = toolEditId ? `/api/admin/tools/${toolEditId}` : '/api/admin/tools';
     const method = toolEditId ? 'PATCH' : 'POST';
-    const r = await fetch(url, { method, headers: { 'Content-Type':'application/json' }, body: JSON.stringify(body) });
+    const r = await fetch(url, {
+      method,
+      headers: { 'Content-Type':'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify(body),
+    });
     if (!r.ok) { const j = await r.json().catch(()=>({})); alert(j.error || 'Fehler beim Speichern'); return; }
     await toolsLoad(); if (!toolEditId) toolsReset();
   }
@@ -493,7 +535,7 @@ export default function AdminPage() {
   }
   async function toolsDelete(id:number) {
     if (!confirm('Tool wirklich löschen?')) return;
-    const r = await fetch(`/api/admin/tools/${id}`, { method:'DELETE' });
+    const r = await fetch(`/api/admin/tools/${id}`, { method:'DELETE', credentials: 'same-origin' });
     if (!r.ok) { const j = await r.json().catch(()=>({})); alert(j.error || 'Löschen fehlgeschlagen'); return; }
     await toolsLoad(); if (toolEditId===id) toolsReset();
   }
@@ -501,12 +543,22 @@ export default function AdminPage() {
     const idx = toolsRows.findIndex(r => r.id===id);
     const swap = toolsRows[idx+dir]; if (!swap) return;
     const a = toolsRows[idx], b = swap;
-    await fetch(`/api/admin/tools/${a.id}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ sort: b.sort }) });
-    await fetch(`/api/admin/tools/${b.id}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ sort: a.sort }) });
+    await fetch(`/api/admin/tools/${a.id}`, {
+      method:'PATCH',
+      headers:{'Content-Type':'application/json'},
+      credentials: 'same-origin',
+      body: JSON.stringify({ sort: b.sort })
+    });
+    await fetch(`/api/admin/tools/${b.id}`, {
+      method:'PATCH',
+      headers:{'Content-Type':'application/json'},
+      credentials: 'same-origin',
+      body: JSON.stringify({ sort: a.sort })
+    });
     await toolsLoad();
   }
 
-  // ===== Termine CRUD (mit Uhrzeit, Ganztägig, Icon, Farbe) =====
+  // ===== Termine CRUD =====
   type TerminPayload = {
     title: string;
     starts_at: string;
@@ -518,7 +570,7 @@ export default function AdminPage() {
 
   async function termsLoad() {
     setTermLoading(true);
-    const r = await fetch('/api/admin/termine');
+    const r = await fetch('/api/admin/termine', { credentials: 'same-origin' });
     const j = await r.json().catch(()=>({}));
     setTermRows((j.data ?? []) as TerminRow[]);
     setTermLoading(false);
@@ -560,7 +612,12 @@ export default function AdminPage() {
 
     const url = termEditId ? `/api/admin/termine/${termEditId}` : '/api/admin/termine';
     const method = termEditId ? 'PATCH' : 'POST';
-    const r = await fetch(url, { method, headers: { 'Content-Type':'application/json' }, body: JSON.stringify(payload) });
+    const r = await fetch(url, {
+      method,
+      headers: { 'Content-Type':'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify(payload)
+    });
     if (!r.ok) { const j = await r.json().catch(()=>({})); alert(j.error || 'Fehler beim Speichern'); return; }
     await termsLoad(); if (!termEditId) termsReset();
   }
@@ -576,7 +633,7 @@ export default function AdminPage() {
   }
   async function termsDelete(id:number) {
     if (!confirm('Termin wirklich löschen?')) return;
-    const r = await fetch(`/api/admin/termine/${id}`, { method:'DELETE' });
+    const r = await fetch(`/api/admin/termine/${id}`, { method:'DELETE', credentials: 'same-origin' });
     if (!r.ok) { const j = await r.json().catch(()=>({})); alert(j.error || 'Löschen fehlgeschlagen'); return; }
     await termsLoad(); if (termEditId===id) termsReset();
   }
@@ -601,11 +658,11 @@ export default function AdminPage() {
     { url: 'https://www.schulferien.org/iCal/Ferien/ical/Sachsen.ics', format:'ics' },
   ];
 
-  // >>> News-Agent: Loader/Saver/Actions
+  // >>> News-Agent
   async function agentLoad() {
     setAgentLoading(true); setAgentMsg('');
     try {
-      const r = await fetch('/api/admin/news-agent', { headers: await authHeaders() });
+      const r = await fetch('/api/admin/news-agent', { credentials: 'same-origin' });
       const j = await r.json().catch(()=>({}));
       if (j?.data) setAgent((prev)=>({ ...prev, ...j.data }));
     } catch {
@@ -622,7 +679,8 @@ export default function AdminPage() {
     try {
       const r = await fetch('/api/admin/news-agent', {
         method:'PUT',
-        headers: { 'Content-Type':'application/json', ...(await authHeaders()) },
+        headers: { 'Content-Type':'application/json' },
+        credentials: 'same-origin',
         body: JSON.stringify(body),
       });
       const j = await r.json().catch(()=>({}));
@@ -636,7 +694,7 @@ export default function AdminPage() {
   async function agentRunDry() {
     setAgentLoading(true); setAgentMsg('');
     try {
-      const r = await fetch('/api/admin/news-agent/run?dry=1', { method:'POST', headers: await authHeaders() });
+      const r = await fetch('/api/admin/news-agent/run?dry=1', { method:'POST', credentials: 'same-origin' });
       const j = await r.json().catch(()=>({}));
       if (!r.ok) throw new Error(j?.error || 'Fehler beim Testlauf');
       setAgentMsg(`Testlauf ok – gefunden: ${j.found ?? '—'}, Vorschläge: ${j.proposed ?? '—'}`);
@@ -649,7 +707,7 @@ export default function AdminPage() {
   async function agentLoadLogs() {
     setAgentLogsLoading(true);
     try {
-      const r = await fetch('/api/admin/news-agent/logs', { headers: await authHeaders() });
+      const r = await fetch('/api/admin/news-agent/logs', { credentials: 'same-origin' });
       const j = await r.json().catch(()=>({}));
       setAgentLogs(Array.isArray(j?.data) ? j.data : []);
     } finally { setAgentLogsLoading(false); }
@@ -677,9 +735,10 @@ export default function AdminPage() {
         </div>
       </div>
 
-      <Tabs current={tab} onChange={setTab} />
+      {/* Tabs nur zeigen, wenn Admin */}
+      {sessionOK && isAdmin && <Tabs current={tab} onChange={setTab} />}
 
-      {/* Login Panel (nur wenn nicht angemeldet) */}
+      {/* Login Panel (wenn nicht angemeldet) */}
       {!authLoading && !sessionOK && (
         <div className={cardClass + ' space-y-3'}>
           <h2 className="text-lg font-semibold">Login</h2>
@@ -692,8 +751,18 @@ export default function AdminPage() {
         </div>
       )}
 
-      {/* ========== POSTS ========== */}
-      {sessionOK && tab === 'post' && (
+      {/* Kein Admin-Zugriff */}
+      {sessionOK && !isAdmin && (
+        <div className={cardClass + ' space-y-2'}>
+          <h2 className="text-lg font-semibold">Kein Zugriff</h2>
+          <p className="text-sm text-gray-600 dark:text-gray-300">
+            Du bist angemeldet, aber dein Konto hat keine <strong>Admin-Rolle</strong>. Bitte wende dich an die Administration.
+          </p>
+        </div>
+      )}
+
+      {/* ========== POSTS (nur Admin) ========== */}
+      {sessionOK && isAdmin && tab === 'post' && (
         <>
           <div className="grid md:grid-cols-2 gap-4">
             {/* Linke Karte */}
@@ -842,7 +911,7 @@ export default function AdminPage() {
       )}
 
       {/* ========== POSTS – LISTE ========== */}
-      {sessionOK && tab === 'posts' && (
+      {sessionOK && isAdmin && tab === 'posts' && (
         <>
           <div className={cardClass + ' space-y-3'}>
             <div className="flex items-center justify-between gap-2">
@@ -1023,7 +1092,7 @@ export default function AdminPage() {
                           <div className="mt-2 text-sm">
                             <div className="font-medium mb-1">Quellen:</div>
                             <div className="text-gray-600">
-                              + {(h.changes.sources?.added || []).join(', ') || '—'} · − {(h.changes.sources?.removed || []).join(', ') || '—'}
+                              + {(h.changes.sources?.added || []).join(', ') || '—'} · − {(h.changes?.sources?.removed || []).join(', ') || '—'}
                             </div>
                           </div>
                         ) : null}
@@ -1038,29 +1107,29 @@ export default function AdminPage() {
       )}
 
       {/* ========== VENDORS / CATEGORIES / BADGES / GROUPS ========== */}
-      {sessionOK && tab === 'vendors' && (
+      {sessionOK && isAdmin && tab === 'vendors' && (
         <div className={cardClass}>
           <TaxonomyEditor title="Veranstalter" endpoint="/api/admin/vendors" columns={['name']} allowGroups />
         </div>
       )}
-      {sessionOK && tab === 'categories' && (
+      {sessionOK && isAdmin && tab === 'categories' && (
         <div className={cardClass}>
           <TaxonomyEditor title="Kategorien" endpoint="/api/admin/categories" columns={['name', 'color']} />
         </div>
       )}
-      {sessionOK && tab === 'badges' && (
+      {sessionOK && isAdmin && tab === 'badges' && (
         <div className={cardClass}>
           <TaxonomyEditor title="Badges" endpoint="/api/admin/badges" columns={['name', 'color', 'kind']} />
         </div>
       )}
-      {sessionOK && tab === 'vendor-groups' && (
+      {sessionOK && isAdmin && tab === 'vendor-groups' && (
         <div className={cardClass}>
           <VendorGroups />
         </div>
       )}
 
       {/* ========== TOOLS ========== */}
-      {sessionOK && tab === 'tools' && (
+      {sessionOK && isAdmin && tab === 'tools' && (
         <>
           <div className={cardClass + ' space-y-3'}>
             <h2 className="text-lg font-semibold">{toolEditId ? `Tool bearbeiten (ID ${toolEditId})` : 'Neues Tool anlegen'}</h2>
@@ -1130,7 +1199,7 @@ export default function AdminPage() {
       )}
 
       {/* ========== TERMINE ========== */}
-      {sessionOK && tab === 'termine' && (
+      {sessionOK && isAdmin && tab === 'termine' && (
         <>
           <div className={cardClass + ' space-y-3'}>
             <h2 className="text-lg font-semibold">{termEditId ? `Termin bearbeiten (ID ${termEditId})` : 'Neuen Termin anlegen'}</h2>
@@ -1152,7 +1221,6 @@ export default function AdminPage() {
                       const on = e.target.checked;
                       setTermAllDay(on);
                       if (on) {
-                        // auf Datum normalisieren & Ende leeren
                         setTermStartLocal(prev => prev ? `${prev.slice(0,10)}T00:00` : '');
                         setTermEndLocal('');
                       }
@@ -1176,7 +1244,7 @@ export default function AdminPage() {
               </div>
             </div>
 
-            {/* Mini Emoji-Picker unter Icon */}
+            {/* Mini Emoji-Picker */}
             <div className="flex flex-wrap gap-1">
               {EMOJI_CHOICES.map(em => (
                 <button
@@ -1191,7 +1259,7 @@ export default function AdminPage() {
               ))}
             </div>
 
-            {/* Zeile 2: Start / Ende (Ende ausgeblendet bei All-Day) */}
+            {/* Zeile 2: Start / Ende */}
             <div className="grid md:grid-cols-8 gap-3 items-end">
               <div className={termAllDay ? 'md:col-span-4' : 'md:col-span-4'}>
                 <label className="form-label">{termAllDay ? 'Datum' : 'Start'}</label>
@@ -1312,7 +1380,7 @@ export default function AdminPage() {
       )}
 
       {/* ========== NEWS-AGENT ========== */}
-      {sessionOK && tab === 'agent' && (
+      {sessionOK && isAdmin && tab === 'agent' && (
         <>
           <div className={cardClass + ' space-y-4'}>
             <div className="flex items-center justify-between">

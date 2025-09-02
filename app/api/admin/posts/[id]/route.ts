@@ -1,17 +1,18 @@
-import { NextResponse } from 'next/server';
+// app/api/admin/posts/[id]/route.ts
+import { NextResponse, type NextRequest } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-// Optional: Zugriffsschutz
-// import { getUserFromRequest } from '@/lib/auth';
-
-type Params = { params: { id: string } };
 
 // -------- GET /api/admin/posts/:id ------------------------------------------
-export async function GET(_req: Request, { params }: Params) {
-  const id = Number(params.id);
-  if (!id) return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const postId = Number(id);
+  if (!postId) return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
 
-  // Falls du keine View hast: nimm 'posts' und joine einzeln
-  const { data, error } = await supabaseAdmin
+  const db = supabaseAdmin();
+  const { data, error } = await db
     .from('posts_view')
     .select(`
       id, title, slug, summary, content, status,
@@ -21,7 +22,7 @@ export async function GET(_req: Request, { params }: Params) {
       badges:post_badges ( badge:badges ( id, name, color, kind ) ),
       sources:post_sources ( url, label, sort_order )
     `)
-    .eq('id', id)
+    .eq('id', postId)
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 404 });
@@ -33,72 +34,71 @@ export async function GET(_req: Request, { params }: Params) {
 }
 
 // -------- PATCH /api/admin/posts/:id ----------------------------------------
-export async function PATCH(req: Request, { params }: Params) {
-  const id = Number(params.id);
-  if (!id) return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
-
-  // Optional: Zugriffsschutz
-  // const user = await getUserFromRequest(req);
-  // if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const postId = Number(id);
+  if (!postId) return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
 
   const body = await req.json().catch(() => null);
   if (!body?.post) return NextResponse.json({ error: 'Missing payload' }, { status: 400 });
 
+  const db = supabaseAdmin();
+
   // 1) Post-Felder
-  const { error: upErr } = await supabaseAdmin.from('posts').update(body.post).eq('id', id);
+  const { error: upErr } = await db.from('posts').update(body.post).eq('id', postId);
   if (upErr) return NextResponse.json({ error: upErr.message }, { status: 400 });
 
-  // 2) Relationen (optional – nur wenn du sie mitschickst)
-  // Kategorien
+  // 2) Relationen
   if (Array.isArray(body.categoryIds)) {
-    // Clear + Insert minimal (ersetzt sauber; nutze upserts wenn vorhanden)
-    await supabaseAdmin.from('post_categories').delete().eq('post_id', id);
+    await db.from('post_categories').delete().eq('post_id', postId);
     if (body.categoryIds.length) {
-      const rows = body.categoryIds.map((cid: number) => ({ post_id: id, category_id: cid }));
-      await supabaseAdmin.from('post_categories').insert(rows);
+      const rows = body.categoryIds.map((cid: number) => ({ post_id: postId, category_id: cid }));
+      await db.from('post_categories').insert(rows);
     }
   }
 
-  // Badges
   if (Array.isArray(body.badgeIds)) {
-    await supabaseAdmin.from('post_badges').delete().eq('post_id', id);
+    await db.from('post_badges').delete().eq('post_id', postId);
     if (body.badgeIds.length) {
-      const rows = body.badgeIds.map((bid: number) => ({ post_id: id, badge_id: bid }));
-      await supabaseAdmin.from('post_badges').insert(rows);
+      const rows = body.badgeIds.map((bid: number) => ({ post_id: postId, badge_id: bid }));
+      await db.from('post_badges').insert(rows);
     }
   }
 
-  // Quellen
   if (Array.isArray(body.sources)) {
-    await supabaseAdmin.from('post_sources').delete().eq('post_id', id);
+    await db.from('post_sources').delete().eq('post_id', postId);
     if (body.sources.length) {
-      const rows = body.sources.map((s: any) => ({ post_id: id, ...s }));
-      await supabaseAdmin.from('post_sources').insert(rows);
+      const rows = body.sources.map((s: any) => ({ post_id: postId, ...s }));
+      await db.from('post_sources').insert(rows);
     }
   }
 
-  return NextResponse.json({ ok: true, id });
+  return NextResponse.json({ ok: true, id: postId });
 }
 
 // -------- DELETE /api/admin/posts/:id ---------------------------------------
-export async function DELETE(_req: Request, { params }: Params) {
-  const id = Number(params.id);
-  if (!id) return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const postId = Number(id);
+  if (!postId) return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
 
-  // Optional: Zugriffsschutz
-  // const user = await getUserFromRequest(req);
-  // if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const db = supabaseAdmin();
+  // Reihenfolge: erst Relationen, dann Haupttabelle (wenn kein FK CASCADE)
+  await db.from('post_sources').delete().eq('post_id', postId);
+  await db.from('post_badges').delete().eq('post_id', postId);
+  await db.from('post_categories').delete().eq('post_id', postId);
 
-  // Reihenfolge: erst Relationen, dann Haupttabelle (falls keine FK ON DELETE CASCADE)
-  await supabaseAdmin.from('post_sources').delete().eq('post_id', id);
-  await supabaseAdmin.from('post_badges').delete().eq('post_id', id);
-  await supabaseAdmin.from('post_categories').delete().eq('post_id', id);
-
-  const { error } = await supabaseAdmin.from('posts').delete().eq('id', id);
+  const { error } = await db.from('posts').delete().eq('id', postId);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
   return NextResponse.json({ ok: true });
 }
 
-// (Optional) wenn du konsequent dynamic willst:
+// Optional:
 // export const dynamic = 'force-dynamic';

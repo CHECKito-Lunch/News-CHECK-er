@@ -1,6 +1,6 @@
 // /app/api/admin/categories/route.ts
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabaseClient';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
 export async function GET() {
   const s = supabaseAdmin();

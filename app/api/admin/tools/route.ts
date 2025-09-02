@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabaseClient';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { T } from '@/lib/tables';
 
 type NewTool = { title: string; href: string; icon?: string | null; sort?: number };

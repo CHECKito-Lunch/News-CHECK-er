@@ -1,18 +1,21 @@
-import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabaseClient';
+// app/api/admin/termine/[id]/route.ts
+import { NextResponse, type NextRequest } from 'next/server';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { T } from '@/lib/tables';
-
-type Params = { params: { id: string } };
 
 // PATCH /api/admin/termine/:id
 // body optional: { title?: string; starts_at?: string; ends_at?: string|null; all_day?: boolean; icon?: string|null; color?: string|null }
-export async function PATCH(req: Request, { params }: Params) {
-  const id = Number(params.id);
-  if (!id) return NextResponse.json({ error: 'Ungültige ID.' }, { status: 400 });
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const numId = Number(id);
+  if (!numId) return NextResponse.json({ error: 'Ungültige ID.' }, { status: 400 });
 
   const s = supabaseAdmin();
-  const body = await req.json().catch(() => ({}));
-  const patch: any = {};
+  const body = await req.json().catch(() => ({} as Record<string, unknown>));
+  const patch: Record<string, unknown> = {};
 
   if (typeof body.title === 'string') patch.title = body.title.trim();
 
@@ -28,7 +31,15 @@ export async function PATCH(req: Request, { params }: Params) {
   }
 
   if (body.ends_at !== undefined) {
-    patch.ends_at = body.ends_at === null || body.ends_at === '' ? null : new Date(String(body.ends_at)).toISOString();
+    if (body.ends_at === null || body.ends_at === '') {
+      patch.ends_at = null;
+    } else {
+      try {
+        patch.ends_at = new Date(String(body.ends_at)).toISOString();
+      } catch {
+        return NextResponse.json({ error: 'ends_at ist kein gültiges Datum.' }, { status: 400 });
+      }
+    }
   }
 
   if (body.all_day !== undefined) patch.all_day = !!body.all_day;
@@ -39,17 +50,22 @@ export async function PATCH(req: Request, { params }: Params) {
     return NextResponse.json({ error: 'Keine Änderungen.' }, { status: 400 });
   }
 
-  const { error } = await s.from(T.termine).update(patch).eq('id', id);
+  const { error } = await s.from(T.termine).update(patch).eq('id', numId);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });
 }
 
 // DELETE /api/admin/termine/:id
-export async function DELETE(_req: Request, { params }: Params) {
-  const id = Number(params.id);
-  if (!id) return NextResponse.json({ error: 'Ungültige ID.' }, { status: 400 });
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const numId = Number(id);
+  if (!numId) return NextResponse.json({ error: 'Ungültige ID.' }, { status: 400 });
+
   const s = supabaseAdmin();
-  const { error } = await s.from(T.termine).delete().eq('id', id);
+  const { error } = await s.from(T.termine).delete().eq('id', numId);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });
 }

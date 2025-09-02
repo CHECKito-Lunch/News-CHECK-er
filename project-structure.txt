@@ -1,0 +1,148 @@
+.
+├── .env.local
+├── .github
+│   └── workflows
+│       └── news-agent.yml
+├── .gitignore
+├── .vscode
+│   ├── settings.json
+│   └── tailwind.json
+├── app
+│   ├── (auth)
+│   │   ├── layout.tsx
+│   │   └── login
+│   │       └── page.tsx
+│   ├── (site)
+│   │   ├── layout.tsx
+│   │   ├── news
+│   │   │   ├── [slug]
+│   │   │   │   └── page.tsx
+│   │   │   └── page.tsx
+│   │   ├── page.tsx
+│   │   └── profile
+│   │       └── page.tsx
+│   ├── admin
+│   │   ├── TaxonomyEditor.tsx
+│   │   ├── VendorGroups.tsx
+│   │   ├── kpis
+│   │   │   └── page.tsx
+│   │   ├── page.tsx
+│   │   ├── termine
+│   │   │   └── page.tsx
+│   │   ├── tools
+│   │   │   └── page.tsx
+│   │   └── users
+│   │       └── page.tsx
+│   ├── api
+│   │   ├── admin
+│   │   │   ├── badges
+│   │   │   │   ├── [id]
+│   │   │   │   └── route.ts
+│   │   │   ├── categories
+│   │   │   │   ├── [id]
+│   │   │   │   └── route.ts
+│   │   │   ├── kpis
+│   │   │   │   ├── [id]
+│   │   │   │   └── route.ts
+│   │   │   ├── news-agent
+│   │   │   │   ├── logs
+│   │   │   │   ├── route.ts
+│   │   │   │   └── run
+│   │   │   ├── posts
+│   │   │   │   ├── [id]
+│   │   │   │   └── route.ts
+│   │   │   ├── termine
+│   │   │   │   ├── [id]
+│   │   │   │   └── route.ts
+│   │   │   ├── tools
+│   │   │   │   ├── [id]
+│   │   │   │   └── route.ts
+│   │   │   ├── travel-news
+│   │   │   │   └── keywords
+│   │   │   ├── users
+│   │   │   │   ├── [id]
+│   │   │   │   └── route.ts
+│   │   │   ├── vendor-groups
+│   │   │   │   ├── [id]
+│   │   │   │   └── route.ts
+│   │   │   └── vendors
+│   │   │       ├── [id]
+│   │   │       └── route.ts
+│   │   ├── cron
+│   │   │   └── news-agent
+│   │   │       └── route.ts
+│   │   ├── fetch-travel-news
+│   │   │   └── route.ts
+│   │   ├── kpis
+│   │   │   └── route.ts
+│   │   ├── login
+│   │   │   └── route.ts
+│   │   ├── logout
+│   │   │   └── route.ts
+│   │   ├── me
+│   │   │   └── route.ts
+│   │   ├── meta
+│   │   │   └── route.ts
+│   │   ├── news
+│   │   │   ├── [slug]
+│   │   │   │   └── route.ts
+│   │   │   ├── admin
+│   │   │   │   └── route.ts
+│   │   │   └── route.ts
+│   │   ├── profile
+│   │   │   ├── password
+│   │   │   │   └── route.ts
+│   │   │   └── route.ts
+│   │   ├── termine
+│   │   │   └── route.ts
+│   │   ├── tools
+│   │   │   └── route.ts
+│   │   └── travel-news
+│   │       └── route.ts
+│   ├── components
+│   │   ├── LogoutButton.tsx
+│   │   ├── RichTextEditor.tsx
+│   │   ├── SiteHeader.tsx
+│   │   └── ThemeToggle.tsx
+│   ├── favicon.ico
+│   ├── globals.css
+│   ├── head.tsx
+│   └── layout.tsx
+├── eslint.config.mjs
+├── lib
+│   ├── absoluteUrl.ts
+│   ├── auth.ts
+│   ├── getUserFromRequest.ts
+│   ├── holidays.ts
+│   ├── localizer.ts
+│   ├── newsAgent.ts
+│   ├── openai.ts
+│   ├── requireAdmin.ts
+│   ├── server
+│   │   └── cronSecret.ts
+│   ├── supabaseAdmin.ts
+│   ├── supabaseClient.ts
+│   └── tables.ts
+├── middleware.ts
+├── next-env.d.ts
+├── next.config.ts
+├── package-lock.json
+├── package.json
+├── postcss.config.js
+├── postcss.config.mjs
+├── project-structure.txt
+├── public
+│   ├── file.svg
+│   ├── fullcalender
+│   │   ├── common.css
+│   │   ├── daygrid.css
+│   │   └── list.css
+│   ├── globe.svg
+│   ├── header.svg
+│   ├── next.svg
+│   ├── vercel.svg
+│   └── window.svg
+├── tailwind.config.js
+└── tsconfig.json
+
+62 directories, 84 files

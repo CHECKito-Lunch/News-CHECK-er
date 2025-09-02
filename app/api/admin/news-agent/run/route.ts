@@ -1,20 +1,26 @@
 // app/api/admin/news-agent/run/route.ts
-import { requireAdmin } from '@/lib/requireAdmin';
+import { NextResponse } from 'next/server';
 import { runAgent } from '@/lib/newsAgent';
+import { isCronAuthorized, getDryFlag } from '@/lib/server/cronSecret';
 
 export async function POST(req: Request) {
-  const u = await requireAdmin(req);
-  if (!u) return new Response(JSON.stringify({ error: 'unauthorized' }), { status: 401 });
-
   try {
-    const { searchParams } = new URL(req.url);
-    const dry = searchParams.get('dry') === '1';
-    const out = await runAgent({ force: true, dry });
-    return Response.json(out);
-  } catch (e:any) {
-    return new Response(JSON.stringify({
-      error: e?.message || 'run failed',
-      hint: 'Prüfe OPENAI_API_KEY / NEWS_API_KEY und Netzwerkkonnektivität.',
-    }), { status: 500 });
+    const dry = getDryFlag(req);
+
+    // ✅ Secret-Bypass für Cron
+    if (isCronAuthorized(req)) {
+      const result = await runAgent({ dry, force: true });
+      return NextResponse.json({ ok: true, ...result });
+    }
+
+    // ❌ Falls kein Secret: hier könntest du Session prüfen, wenn nötig.
+    // (oder Admin-Zugriff per UI erlauben – wie vorher)
+    // Sonst gleich ablehnen:
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  } catch (e: unknown) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : String(e) },
+      { status: 500 }
+    );
   }
 }

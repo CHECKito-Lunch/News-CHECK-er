@@ -1,6 +1,6 @@
 // app/api/termine/route.ts
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabaseClient';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { T } from '@/lib/tables';
 
 // GET /api/termine

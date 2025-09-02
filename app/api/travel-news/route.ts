@@ -1,11 +1,11 @@
 // app/api/travel-news/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseServer } from '@/lib/supabaseClient';
+import { supabaseServer } from '@/lib/supabase-server';
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const limit = Math.min(50, Number(url.searchParams.get('limit') ?? 20));
-  const sb = supabaseServer();
+  const sb = await supabaseServer();
   const { data, error } = await sb
     .from('travel_news')
     .select('id, headline, summary, impact, source_url, published_at, created_at')

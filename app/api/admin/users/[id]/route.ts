@@ -1,6 +1,6 @@
 // app/api/admin/users/[id]/route.ts
-import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabaseClient';
+import { NextResponse, type NextRequest } from 'next/server';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { T } from '@/lib/tables';
 
 type Role = 'admin' | 'moderator' | 'user';
@@ -11,8 +11,11 @@ function toId(v: unknown) {
 }
 
 // GET /api/admin/users/[id]
-export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const { id } = await ctx.params;
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
   const num = toId(id);
   if (!num) return NextResponse.json({ error: 'Ungültige ID.' }, { status: 400 });
 
@@ -29,12 +32,17 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
 }
 
 // PATCH /api/admin/users/[id]
-export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const { id } = await ctx.params;
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
   const num = toId(id);
   if (!num) return NextResponse.json({ error: 'Ungültige ID.' }, { status: 400 });
 
-  const body = await req.json().catch(() => ({} as Partial<{ email: string; name: string | null; role: Role; active: boolean }>));
+  const body = await req.json().catch(
+    () => ({} as Partial<{ email: string; name: string | null; role: Role; active: boolean }>)
+  );
 
   const update: Record<string, unknown> = {};
   if (typeof body.email === 'string') update.email = body.email.trim().toLowerCase();
@@ -54,8 +62,11 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
 }
 
 // DELETE /api/admin/users/[id]
-export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const { id } = await ctx.params;
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
   const num = toId(id);
   if (!num) return NextResponse.json({ error: 'Ungültige ID.' }, { status: 400 });
 

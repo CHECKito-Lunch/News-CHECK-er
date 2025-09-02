@@ -1,6 +1,28 @@
 // app/api/news/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseServer } from '@/lib/supabaseClient';
+import { supabaseServer } from '@/lib/supabase-server';
+
+type PostRow = {
+  id: number;
+  slug: string | null;
+  title: string;
+  summary: string | null;
+  content: string | null;
+  priority: number | null;
+  pinned_until: string | null;
+  effective_from: string | null;
+  status: 'draft' | 'scheduled' | 'published';
+  created_at: string;
+  updated_at: string;
+  author_id: string | null;
+  vendor: { id: number; name: string } | null;
+  post_categories: { post_id: number; category: { id: number; name: string; color: string | null } }[];
+  post_badges:     { post_id: number; badge:    { id: number; name: string; color: string | null; kind: string | null } }[];
+  sources:         { url: string; label: string | null; sort_order: number | null }[];
+};
+
+type AppUserRow = { user_id: string; name: string | null };
+type AugmentedPostRow = PostRow & { author_name: string | null };
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
@@ -13,9 +35,9 @@ export async function GET(req: NextRequest) {
   const from = (page - 1) * pageSize;
   const to   = from + pageSize - 1;
 
-  const supabase = supabaseServer();
+  const supabase = await supabaseServer();
 
-  // Basisselekt inkl. author_id (für spätere Namensauflösung)
+  // Basis-Select inkl. author_id (für spätere Namensauflösung)
   let selectStr = `
     id, slug, title, summary, content, priority, pinned_until,
     effective_from, status, created_at, updated_at,
@@ -26,69 +48,53 @@ export async function GET(req: NextRequest) {
     sources:post_sources ( url, label, sort_order )
   `;
 
-  // Falls nach Kategorien/Badges gefiltert wird: inner join erzwingen
+  // Bei Filtern: inner join erzwingen
   if (cat.length)   selectStr = selectStr.replace('post_categories (', 'post_categories!inner(');
   if (badge.length) selectStr = selectStr.replace('post_badges     (', 'post_badges!inner(');
 
   let query = supabase
     .from('posts')
     .select(selectStr, { count: 'exact' })
-    // Veröffentlichungslogik ggf. aktivieren, falls keine RLS regelt:
-    // .eq('status', 'published')
-    // .lte('effective_from', new Date().toISOString())
+    .eq('status', 'published')
+    .lte('effective_from', new Date().toISOString())
     .order('pinned_until', { ascending: false, nullsFirst: false })
     .order('effective_from', { ascending: false })
     .range(from, to);
 
-  // Volltext/ILike-Suche
   if (q.length > 1) {
-    // Wenn du eine TSVECTOR-Spalte "fts" hast:
+    // Falls FTS-Spalte vorhanden:
     query = query.textSearch('fts', q, { type: 'websearch', config: 'simple' });
-    // Falls KEIN fts vorhanden, stattdessen:
+    // Ohne FTS-Column:
     // query = query.or(`title.ilike.%${q}%,summary.ilike.%${q}%,content.ilike.%${q}%`);
   }
 
   if (vendor.length) query = query.in('vendor_id', vendor);
-
-  // Filter auf Join-Spalten – funktioniert zusammen mit !inner oben
-  if (cat.length)   query = query.in('post_categories.category_id', cat);
-  if (badge.length) query = query.in('post_badges.badge_id', badge);
+  if (cat.length)    query = query.in('post_categories.category_id', cat);
+  if (badge.length)  query = query.in('post_badges.badge_id', badge);
 
   const { data, error, count } = await query;
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
-  if (error) {
-    console.error('[news:list] select error', error);
-    return NextResponse.json({ error: error.message }, { status: 400 });
-  }
+  // <-- Wichtig: Ergebnis via unknown auf deinen Typ casten
+  const rows: PostRow[] = Array.isArray(data) ? (data as unknown as PostRow[]) : [];
 
-  // ---- Autorennamen auflösen (sekundäre Query gegen app_users) ----
-  const rows = (data ?? []) as Array<{
-    id: number;
-    author_id: string | null;
-    [k: string]: any;
-  }>;
-
-  const authorIds = Array.from(
-    new Set(rows.map(r => r.author_id).filter((v): v is string => !!v))
-  );
-
+  // Autorennamen auflösen
+  const authorIds = Array.from(new Set(rows.map(r => r.author_id).filter((v): v is string => !!v)));
   let nameByUserId = new Map<string, string>();
+
   if (authorIds.length) {
-    const { data: users, error: uErr } = await supabase
+    const { data: usersRaw, error: uErr } = await supabase
       .from('app_users')
       .select('user_id,name')
       .in('user_id', authorIds);
 
-    if (uErr) {
-      console.error('[news:list] app_users error', uErr);
-    } else if (users) {
-      nameByUserId = new Map(
-        users.map((u: { user_id: string; name: string | null }) => [u.user_id, u.name ?? ''])
-      );
+    if (!uErr && Array.isArray(usersRaw)) {
+      const users = usersRaw as unknown as AppUserRow[];
+      nameByUserId = new Map(users.map(u => [u.user_id, u.name ?? '']));
     }
   }
 
-  const withAuthor = rows.map(r => ({
+  const withAuthor: AugmentedPostRow[] = rows.map(r => ({
     ...r,
     author_name: r.author_id ? (nameByUserId.get(r.author_id) ?? null) : null,
   }));

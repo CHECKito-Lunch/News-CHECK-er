@@ -201,19 +201,15 @@ export default function Page() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const sp = useSearchParams();
-  const openParam = sp?.get('open');
-  const itemsKey = useMemo(() => items.map(i => i.id).join(','), [items]);
-  useEffect(() => {
-    const idToOpen = openParam ? Number(openParam) : NaN;
-    if (!idToOpen || Number.isNaN(idToOpen)) return;
-    setExpanded(prev => new Set(prev).add(idToOpen));
-    const t = setTimeout(() => document.getElementById(`post-${idToOpen}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
-    return () => clearTimeout(t);
-  }, [openParam, itemsKey]);
+  // --- useSearchParams wurde in Child ausgelagert ---
 
   return (
     <Suspense fallback={<div className="container max-w-5xl mx-auto py-8">Lade…</div>}>
+      {/* Child liest ?open=... und klappt den passenden Post auf */}
+      <Suspense fallback={null}>
+        <OpenFromSearchParam items={items} setExpanded={setExpanded} />
+      </Suspense>
+
       <div className="container max-w-5xl mx-auto py-8 space-y-6">
         {/* Tabs */}
         <Tabs tabs={tabs} current={currentTab} onChange={(t) => { setCurrentTab(t); setPage(1); }} />
@@ -400,6 +396,34 @@ export default function Page() {
 }
 
 /* ------- Unterkomponenten ------- */
+
+function OpenFromSearchParam({
+  items,
+  setExpanded,
+}: {
+  items: Item[];
+  setExpanded: React.Dispatch<React.SetStateAction<Set<number>>>;
+}) {
+  const sp = useSearchParams();
+  const openParam = sp?.get('open');
+  const itemsKey = useMemo(() => items.map(i => i.id).join(','), [items]);
+
+  useEffect(() => {
+    const idToOpen = openParam ? Number(openParam) : NaN;
+    if (!idToOpen || Number.isNaN(idToOpen)) return;
+    setExpanded(prev => {
+      const next = new Set(prev);
+      next.add(idToOpen);
+      return next;
+    });
+    const t = setTimeout(() => {
+      document.getElementById(`post-${idToOpen}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 0);
+    return () => clearTimeout(t);
+  }, [openParam, itemsKey, setExpanded]);
+
+  return null;
+}
 
 function Tabs({ tabs, current, onChange }: { tabs: UiTab[]; current: 'all' | number; onChange: (t: 'all' | number) => void; }) {
   return (

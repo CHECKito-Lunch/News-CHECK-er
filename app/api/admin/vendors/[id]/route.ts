@@ -1,6 +1,6 @@
 // app/api/admin/badges/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabaseClient';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { T } from '@/lib/tables';
 
 // id sicher aus der URL (/api/admin/badges/[id]) lesen

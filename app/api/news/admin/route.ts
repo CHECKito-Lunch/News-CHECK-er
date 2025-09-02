@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabaseClient';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getUserFromRequest } from '@/lib/getUserFromRequest';
 import { T } from '@/lib/tables';
 
@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
   const { post, categoryIds = [], badgeIds = [], sources = [] } = (await req.json()) as Body;
 
   // Editor ermitteln
-  const user = await getUserFromRequest(req);
+  const user = await getUserFromRequest();
   const editor_user_id = user?.id ?? null;
 
   // 1) Post

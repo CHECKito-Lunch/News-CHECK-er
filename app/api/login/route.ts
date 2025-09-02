@@ -1,7 +1,7 @@
 // app/api/login/route.ts
 import { NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
-import { supabaseAdmin } from '@/lib/supabaseClient';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { T } from '@/lib/tables';
 
 // erzwinge Node.js Runtime (Supabase Service-Role + bcrypt)
