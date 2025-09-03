@@ -20,6 +20,61 @@ import interactionPlugin from '@fullcalendar/interaction';
 // === EINMALIGE Supabase-Instanz
 const sb = supabaseBrowser();
 
+// ---- Rollen-Typen/Helpers ----------------------------------------------------
+type Role = 'admin' | 'moderator' | 'user';
+const isAdminRole = (r?: string | null) => r === 'admin' || r === 'moderator';
+
+async function resolveRoleViaApi(): Promise<Role | null> {
+  try {
+    const res = await fetch('/api/me', { credentials: 'same-origin' });
+    if (!res.ok) return null;
+    const j = await res.json().catch(() => null);
+    const role: string | undefined =
+      j?.role ?? j?.data?.role ?? j?.profile?.role ?? j?.user?.role;
+    return (role as Role) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveRoleViaDb(email?: string | null, userId?: string | null): Promise<Role | null> {
+  try {
+    // 1) app_users per E-Mail (dein Admin-Panel nutzt diese Tabelle)
+    if (email) {
+      const { data } = await sb.from('app_users').select('role').eq('email', email.toLowerCase()).maybeSingle();
+      if (data?.role) return data.role as Role;
+    }
+  } catch {
+    /* ignore */
+  }
+  try {
+    // 2) profiles (Legacy)
+    if (userId) {
+      const { data } = await sb.from('profiles').select('role').eq('user_id', userId).maybeSingle();
+      if (data?.role) return data.role as Role;
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+async function resolveSessionAndRole() {
+  // Supabase-Session (Client)…
+  const { data } = await sb.auth.getUser();
+  const user = data?.user ?? null;
+
+  // 1) Versuche serverseitig via /api/me (liest httpOnly-Cookies – deckungsgleich mit Layout/Middleware)
+  const apiRole = await resolveRoleViaApi();
+  if (apiRole) return { user, role: apiRole as Role };
+
+  // 2) Fallback: direkt aus DB auflösen
+  const dbRole = await resolveRoleViaDb(user?.email ?? null, user?.id ?? null);
+  return { user, role: (dbRole ?? null) as Role | null };
+}
+
+// -----------------------------------------------------------------------------
+
 function slugify(s: string) {
   return s
     .toLowerCase()
@@ -105,7 +160,8 @@ type TabKey =
   | 'vendor-groups'
   | 'tools'
   | 'termine'
-  | 'agent';
+  | 'agent'
+  | 'users';
 
 function Tabs({
   current,
@@ -124,6 +180,7 @@ function Tabs({
     { k: 'tools',          label: 'Tools' },
     { k: 'termine',        label: 'Termine' },
     { k: 'agent',          label: 'News-Agent' },
+    { k: 'users',          label: 'Benutzer-Verwaltung' },
   ];
 
   return (
@@ -269,49 +326,35 @@ export default function AdminPage() {
   const [agentLogs, setAgentLogs] = useState<AgentLog[]>([]);
   const [agentLogsLoading, setAgentLogsLoading] = useState(false);
 
-  // === Session + Rolle prüfen (Client)
+  // === Session + Rolle prüfen (Client) – NEU: API-/DB-Fallbacks wie im Layout
   useEffect(() => {
-    let mounted = true;
+    let alive = true;
+
     (async () => {
-      try {
-        const { data } = await sb.auth.getUser();
-        const user = data?.user ?? null;
-        setSessionOK(!!user);
+      const { user, role } = await resolveSessionAndRole();
+      if (!alive) return;
 
-        if (user) {
-          const { data: prof } = await sb
-            .from('profiles')
-            .select('role')
-            .eq('user_id', user.id)
-            .single();
-
-          setIsAdmin(prof?.role === 'admin');
-        } else {
-          setIsAdmin(false);
-        }
-      } finally {
-        if (mounted) setAuthLoading(false);
-      }
+      setSessionOK(!!user);
+      setIsAdmin(isAdminRole(role ?? undefined));
+      setAuthLoading(false);
     })();
 
     // live auf Auth-Änderungen reagieren
     const { data: sub } = sb.auth.onAuthStateChange(async (_event, session) => {
-      setSessionOK(!!session?.user);
-      if (session?.user) {
-        const { data: prof } = await sb
-          .from('profiles')
-          .select('role')
-          .eq('user_id', session.user.id)
-          .single();
-        setIsAdmin(prof?.role === 'admin');
-      } else {
-        setIsAdmin(false);
+      const user = session?.user ?? null;
+      setSessionOK(!!user);
+
+      const apiRole = await resolveRoleViaApi();
+      let role: Role | null = apiRole;
+      if (!role) {
+        role = await resolveRoleViaDb(user?.email ?? null, user?.id ?? null);
       }
+      setIsAdmin(isAdminRole(role ?? undefined));
     });
 
     return () => {
       sub.subscription.unsubscribe();
-      mounted = false;
+      alive = false;
     };
   }, []);
 
@@ -331,29 +374,41 @@ export default function AdminPage() {
   async function doLogin(e: React.FormEvent) {
     e.preventDefault();
     setAuthMsg('');
-    const { error } = await sb.auth.signInWithPassword({ email: userEmail.trim(), password: userPassword });
+
+    const { data: signInData, error } = await sb.auth.signInWithPassword({
+      email: userEmail.trim(),
+      password: userPassword,
+    });
     if (error) {
       setAuthMsg(error.message || 'Login fehlgeschlagen.');
       setSessionOK(false);
       setIsAdmin(false);
       return;
     }
-    // Session steht – Rolle nachladen
-    const { data } = await sb.auth.getUser();
-    const u = data?.user;
-    if (u) {
-      const { data: prof } = await sb.from('profiles').select('role').eq('user_id', u.id).single();
-      const admin = prof?.role === 'admin';
-      setIsAdmin(admin);
-      setSessionOK(true);
-      setAuthMsg(admin ? 'Erfolgreich angemeldet.' : 'Angemeldet – aber kein Admin-Zugriff.');
-      if (admin) {
-        await loadPosts(1, postsQ);
-        if (tab === 'agent') await agentLoad();
-      }
+
+    // WICHTIG: auth + user_role Cookies setzen (wie Login-Seite)
+    const { data: sess } = await sb.auth.getSession();
+    const access = sess?.session?.access_token;
+    if (access) {
+      try { await fetch('/api/login', { method: 'POST', headers: { Authorization: `Bearer ${access}` } }); }
+      catch { /* ignore */ }
+    }
+
+    // Rolle erneut bestimmen
+    const { user, role } = await resolveSessionAndRole();
+    const admin = isAdminRole(role ?? undefined);
+    setIsAdmin(admin);
+    setSessionOK(!!user);
+    setAuthMsg(admin ? 'Erfolgreich angemeldet.' : 'Angemeldet – aber kein Admin-Zugriff.');
+
+    if (admin) {
+      await loadPosts(1, postsQ);
+      if (tab === 'agent') await agentLoad();
     }
   }
+
   async function doLogout() {
+    try { await fetch('/api/logout', { method: 'POST' }); } catch {}
     await sb.auth.signOut();
     setSessionOK(false);
     setIsAdmin(false);
@@ -437,6 +492,7 @@ export default function AdminPage() {
     if (tab === 'tools')   toolsLoad();
     if (tab === 'termine') termsLoad();
     if (tab === 'agent')   agentLoad();
+    if (tab === 'users')   usersLoad(1, usersQ);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, sessionOK, isAdmin]);
 
@@ -657,6 +713,106 @@ export default function AdminPage() {
     { url: 'https://feiertage-api.de/api/?bundesland=SN&out=ical', format:'ics' },
     { url: 'https://www.schulferien.org/iCal/Ferien/ical/Sachsen.ics', format:'ics' },
   ];
+// USERS CRUD
+
+type AppUserRow = {
+    id: number;
+    email: string;
+    name: string | null;
+    role: Role;
+    created_at?: string | null;
+    updated_at?: string | null;
+    last_login_at?: string | null;
+  };
+
+  const [usersRows, setUsersRows] = useState<AppUserRow[]>([]);
+  const [usersTotal, setUsersTotal] = useState(0);
+  const [usersPage, setUsersPage] = useState(1);
+  const [usersQ, setUsersQ] = useState('');
+  const [usersLoading, setUsersLoading] = useState(false);
+  const usersPageSize = 20;
+
+  const [mgtUserEditId, setMgtUserEditId] = useState<number|null>(null);
+  const [mgtUserEmail, setMgtUserEmail] = useState('');
+  const [mgtUserName, setMgtUserName] = useState('');
+  const [mgtUserRole, setMgtUserRole] = useState<Role>('user');
+  const [mgtUserSaving, setMgtUserSaving] = useState(false);
+  const [mgtUserMsg, setMgtUserMsg] = useState('');
+
+  async function usersLoad(p = usersPage, q = usersQ) {
+    if (!sessionOK || !isAdmin) return;
+    setUsersLoading(true);
+    const params = new URLSearchParams();
+    params.set('page', String(p));
+    params.set('pageSize', String(usersPageSize));
+    if (q) params.set('q', q);
+    try {
+      const r = await fetch(`/api/admin/users?${params.toString()}`, { credentials: 'same-origin' });
+      const j = await r.json().catch(()=>({}));
+      setUsersRows(j.data ?? []);
+      setUsersTotal(j.total ?? 0);
+      setUsersPage(p);
+    } finally {
+      setUsersLoading(false);
+    }
+  }
+
+  function usersReset() {
+    setMgtUserEditId(null);
+    setMgtUserEmail('');
+    setMgtUserName('');
+    setMgtUserRole('user');
+    setMgtUserMsg('');
+  }
+
+  async function usersSave() {
+    if (!sessionOK || !isAdmin) { setMgtUserMsg('Kein Zugriff.'); return; }
+    if (!mgtUserEmail.trim()) { setMgtUserMsg('E-Mail ist Pflicht.'); return; }
+    setMgtUserSaving(true); setMgtUserMsg('');
+    const body = {
+      email: mgtUserEmail.trim().toLowerCase(),
+      name: mgtUserName.trim() || null,
+      role: mgtUserRole,
+    };
+    const url = mgtUserEditId ? `/api/admin/users/${mgtUserEditId}` : '/api/admin/users';
+    const method = mgtUserEditId ? 'PATCH' : 'POST';
+    try {
+      const r = await fetch(url, {
+        method,
+        headers: { 'Content-Type':'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(body),
+      });
+      const j = await r.json().catch(()=>({}));
+      if (!r.ok) {
+        setMgtUserMsg(j.error || 'Fehler beim Speichern.');
+      } else {
+        setMgtUserMsg(mgtUserEditId ? 'Benutzer aktualisiert.' : 'Benutzer angelegt.');
+        await usersLoad();
+        if (!mgtUserEditId) usersReset();
+      }
+    } finally {
+      setMgtUserSaving(false);
+    }
+  }
+
+  function usersStartEdit(u: AppUserRow) {
+    setMgtUserEditId(u.id);
+    setMgtUserEmail(u.email);
+    setMgtUserName(u.name ?? '');
+    setMgtUserRole(u.role);
+    setMgtUserMsg('');
+    window.scrollTo({ top: 0, behavior:'smooth' });
+  }
+
+  async function usersDelete(id:number) {
+    if (!confirm('Benutzer wirklich löschen?')) return;
+    const r = await fetch(`/api/admin/users/${id}`, { method:'DELETE', credentials:'same-origin' });
+    if (!r.ok) { const j = await r.json().catch(()=>({})); alert(j.error || 'Löschen fehlgeschlagen'); return; }
+    if (mgtUserEditId === id) usersReset();
+    await usersLoad();
+  }
+
 
   // >>> News-Agent
   async function agentLoad() {
@@ -715,25 +871,8 @@ export default function AdminPage() {
 
   return (
     <div className="container max-w-5xl mx-auto py-6 space-y-5">
-      {/* Seitentitel + Auth Controls */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Admin</h1>
-        <div className="flex items-center gap-2">
-          {sessionOK ? (
-            <button onClick={doLogout} className="px-3 py-2 rounded-lg border text-sm dark:border-gray-700" type="button">
-              Abmelden
-            </button>
-          ) : (
-            <span className="text-sm text-red-600">Nicht angemeldet</span>
-          )}
-          <Link
-            href="/"
-            className="px-3 py-2 rounded-lg border text-sm bg-white hover:bg-gray-50 dark:bg-white/10 dark:hover:bg-white/20 dark:border-gray-700"
-          >
-            ← Zur Startseite
-          </Link>
-        </div>
-      </div>
+      {/* Seitentitel – Navigation/Logout kommt aus app/admin/layout.tsx */}
+<h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">Admin</h1>
 
       {/* Tabs nur zeigen, wenn Admin */}
       {sessionOK && isAdmin && <Tabs current={tab} onChange={setTab} />}
@@ -1083,7 +1222,7 @@ export default function AdminPage() {
                           <div className="mt-2 text-sm">
                             <div className="font-medium mb-1">Badges:</div>
                             <div className="text-gray-600">
-                              + {h.changes.badges?.added?.join(', ') || '—'} · − {h.changes.badges?.removed?.join(', ') || '—'}
+                              + {h.changes.badges?.added?.join(', ') || '—'} · − {h.changes?.badges?.removed?.join(', ') || '—'}
                             </div>
                           </div>
                         ) : null}
@@ -1197,6 +1336,130 @@ export default function AdminPage() {
           </div>
         </>
       )}
+{/* ========== USERS ========== */}
+      {sessionOK && isAdmin && tab === 'users' && (
+        <>
+          <div className={cardClass + ' space-y-3'}>
+            <h2 className="text-lg font-semibold">{mgtUserEditId ? `Benutzer bearbeiten (ID ${mgtUserEditId})` : 'Neuen Benutzer anlegen'}</h2>
+            <div className="grid md:grid-cols-6 gap-3 items-end">
+              <div className="md:col-span-2">
+                <label className="form-label">E-Mail</label>
+                <input className={inputClass} type="email" value={mgtUserEmail} onChange={e=>setMgtUserEmail(e.target.value)} placeholder="name@domain.tld" />
+              </div>
+              <div className="md:col-span-2">
+                <label className="form-label">Name (optional)</label>
+                <input className={inputClass} value={mgtUserName} onChange={e=>setMgtUserName(e.target.value)} placeholder="Max Mustermann" />
+              </div>
+              <div>
+                <label className="form-label">Rolle</label>
+                <select className={inputClass} value={mgtUserRole} onChange={e=>setMgtUserRole(e.target.value as Role)}>
+                  <option value="user">user</option>
+                  <option value="moderator">moderator</option>
+                  <option value="admin">admin</option>
+                </select>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={usersSave} disabled={mgtUserSaving} className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50" type="button">
+                  {mgtUserSaving ? 'Speichert…' : 'Speichern'}
+                </button>
+                <button onClick={usersReset} className="px-3 py-2 rounded-lg text-sm border bg-white hover:bg-gray-50 dark:bg-white/10 dark:hover:bg-white/20 dark:border-gray-700" type="button">
+                  Neu
+                </button>
+              </div>
+            </div>
+            {mgtUserMsg && <div className="text-sm text-gray-700 dark:text-gray-300">{mgtUserMsg}</div>}
+          </div>
+
+          <div className={cardClass + ' space-y-3'}>
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-lg font-semibold">Benutzer</h2>
+              <div className="flex gap-2">
+                <input
+                  value={usersQ}
+                  onChange={(e)=>setUsersQ(e.target.value)}
+                  onKeyDown={(e)=>{ if (e.key==='Enter') { setUsersPage(1); usersLoad(1, usersQ); } }}
+                  placeholder="Suche E-Mail/Name…"
+                  className={inputClass + ' w-56'}
+                />
+                <button
+                  type="button"
+                  onClick={()=>{ setUsersPage(1); usersLoad(1, usersQ); }}
+                  className="px-3 py-2 rounded-lg bg-blue-600 text-white"
+                >
+                  Suchen
+                </button>
+              </div>
+            </div>
+
+            {usersLoading ? (
+              <div className="text-sm text-gray-500">lädt…</div>
+            ) : (
+              <>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm border border-gray-200 dark:border-gray-800 rounded-lg overflow-hidden">
+                    <thead className="bg-gray-50 dark:bg-gray-800/60 text-left">
+                      <tr>
+                        <th className="px-3 py-2">E-Mail</th>
+                        <th className="px-3 py-2">Name</th>
+                        <th className="px-3 py-2">Rolle</th>
+                        <th className="px-3 py-2">Letzter Login</th>
+                        <th className="px-3 py-2">Angelegt</th>
+                        <th className="px-3 py-2 text-right">Aktionen</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {usersRows.map(u => (
+                        <tr key={u.id} className="border-t border-gray-100 dark:border-gray-800">
+                          <td className="px-3 py-2 font-mono truncate max-w-[36ch]">{u.email}</td>
+                          <td className="px-3 py-2">{u.name ?? '—'}</td>
+                          <td className="px-3 py-2">{u.role}</td>
+                          <td className="px-3 py-2 text-gray-500">{u.last_login_at ? new Date(u.last_login_at).toLocaleString() : '—'}</td>
+                          <td className="px-3 py-2 text-gray-500">{u.created_at ? new Date(u.created_at).toLocaleString() : '—'}</td>
+                          <td className="px-3 py-2 text-right">
+                            <div className="inline-flex gap-2">
+                              <button className="px-2 py-1 rounded border dark:border-gray-700" onClick={()=>usersStartEdit(u)}>Bearbeiten</button>
+                              <button className="px-2 py-1 rounded bg-red-600 text-white" onClick={()=>usersDelete(u.id)}>Löschen</button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                      {usersRows.length === 0 && (
+                        <tr>
+                          <td colSpan={6} className="px-3 py-6 text-center text-gray-500">Keine Einträge.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="flex items-center justify-between pt-3">
+                  <div className="text-xs text-gray-500">{usersTotal} Einträge</div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      disabled={usersPage <= 1}
+                      onClick={() => { const n = usersPage - 1; setUsersPage(n); usersLoad(n, usersQ); }}
+                      className="px-3 py-1.5 rounded border disabled:opacity-50"
+                    >
+                      Zurück
+                    </button>
+                    <span className="text-sm">Seite {usersPage} / {Math.max(1, Math.ceil(usersTotal / usersPageSize))}</span>
+                    <button
+                      disabled={usersPage >= Math.max(1, Math.ceil(usersTotal / usersPageSize))}
+                      onClick={() => { const n = usersPage + 1; setUsersPage(n); usersLoad(n, usersQ); }}
+                      className="px-3 py-1.5 rounded border disabled:opacity-50"
+                    >
+                      Weiter
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </>
+      )}
+
+
+
 
       {/* ========== TERMINE ========== */}
       {sessionOK && isAdmin && tab === 'termine' && (
@@ -1638,6 +1901,8 @@ export default function AdminPage() {
           </div>
         </>
       )}
+
+      
     </div>
   );
 }

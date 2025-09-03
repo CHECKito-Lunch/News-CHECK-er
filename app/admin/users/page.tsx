@@ -28,7 +28,7 @@ const cardClass =
 const btnBase =
   'px-3 py-2 rounded-lg text-sm font-medium transition border ' +
   'bg-white text-gray-700 hover:bg-gray-50 border-gray-200 ' +
-  'dark:bg-white/10 dark:text-white dark:hover:bg-white/20 dark:border-gray-700';
+  'dark:bg:white/10 dark:text-white dark:hover:bg-white/20 dark:border-gray-700';
 
 const btnPrimary =
   'px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium shadow disabled:opacity-50';
@@ -178,13 +178,13 @@ export default function UsersAdminPage() {
         <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Benutzerverwaltung</h1>
 
         <Link
-            href="/"
-            className="px-3 py-2 rounded-lg border text-sm
-                       bg-white hover:bg-gray-50
-                       dark:bg-white/10 dark:hover:bg-white/20 dark:border-gray-700"
-          >
-            ← Zur Startseite
-          </Link>
+          href="/"
+          className="px-3 py-2 rounded-lg border text-sm
+                     bg-white hover:bg-gray-50
+                     dark:bg-white/10 dark:hover:bg-white/20 dark:border-gray-700"
+        >
+          ← Zur Startseite
+        </Link>
       </div>
 
       {/* Formular (Neu/Update) */}

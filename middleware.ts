@@ -1,42 +1,38 @@
-// middleware.ts (ersetzt vorhandene)
+// middleware.ts
 import { NextResponse, NextRequest } from 'next/server';
 
 type Role = 'admin' | 'moderator' | 'user';
 
-function isPublic(pathname: string) {
-  // Login & Login-API sind öffentlich, Assets ebenso
-  if (pathname === '/login') return true;
-  if (pathname.startsWith('/api/login')) return true;
+function isPublic(pathname: string, method: string) {
+  // Login / Registrierung (Seite + API)
+  if (pathname === '/login' || pathname === '/register') return true;
+  if (pathname.startsWith('/api/login') || pathname.startsWith('/api/register')) return true;
+
+  // Next statics / Assets
   if (pathname.startsWith('/_next')) return true;
   if (pathname === '/favicon.ico') return true;
   if (pathname === '/header.svg') return true;
+
   return false;
 }
 
-function allowed(role: Role | undefined, pathname: string) {
-  if (!role) return false;
-
-  // Admin-only Bereiche (Userverwaltung)
-  if (pathname.startsWith('/admin/users') || pathname.startsWith('/api/admin/users')) {
-    return role === 'admin';
-  }
-
-  // Admin-Bereich & Admin-APIs (Beiträge/Taxonomien)
-  if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
-    return role === 'admin' || role === 'moderator';
-  }
-
-  // sonstige Seiten: nur eingeloggt (user, moderator, admin)
-  return true;
+function isAdminArea(pathname: string) {
+  return (
+    pathname.startsWith('/admin') ||
+    pathname.startsWith('/api/admin') ||
+    pathname.startsWith('/api/news/admin')
+  );
 }
 
 export function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
-  if (isPublic(pathname)) return NextResponse.next();
+  const method = req.method;
+
+  if (isPublic(pathname, method)) return NextResponse.next();
 
   const role = req.cookies.get('user_role')?.value as Role | undefined;
 
-  // nicht eingeloggt → redirect auf Login (Pages)
+  // Nicht eingeloggt → immer zum Login
   if (!role) {
     if (pathname.startsWith('/api')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -46,8 +42,8 @@ export function middleware(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // eingeloggt, aber keine Rechte → 403 oder Redirect
-  if (!allowed(role, pathname)) {
+  // Eingeloggt, aber Admin-Bereich erfordert admin/moderator
+  if (isAdminArea(pathname) && !(role === 'admin' || role === 'moderator')) {
     if (pathname.startsWith('/api')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }

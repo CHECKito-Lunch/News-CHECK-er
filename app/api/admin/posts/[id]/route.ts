@@ -1,104 +1,137 @@
 // app/api/admin/posts/[id]/route.ts
-import { NextResponse, type NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
-// -------- GET /api/admin/posts/:id ------------------------------------------
-export async function GET(
-  _req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const { id } = await params;
-  const postId = Number(id);
-  if (!postId) return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
-
-  const db = supabaseAdmin();
-  const { data, error } = await db
-    .from('posts_view')
-    .select(`
-      id, title, slug, summary, content, status,
-      pinned_until, effective_from, vendor_id,
-      created_at, updated_at, author_name,
-      categories:post_categories ( category:categories ( id, name, color ) ),
-      badges:post_badges ( badge:badges ( id, name, color, kind ) ),
-      sources:post_sources ( url, label, sort_order )
-    `)
-    .eq('id', postId)
-    .single();
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 404 });
-
-  const categories = (data?.categories ?? []).map((c: any) => c.category);
-  const badges = (data?.badges ?? []).map((b: any) => b.badge);
-
-  return NextResponse.json({ data: { ...data, categories, badges } });
+function toId(v: unknown) {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-// -------- PATCH /api/admin/posts/:id ----------------------------------------
-export async function PATCH(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const { id } = await params;
-  const postId = Number(id);
-  if (!postId) return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
+const SELECT_DETAIL = `
+  id, title, slug, summary, content, status, pinned_until, effective_from,
+  vendor_id, author_id, created_at, updated_at,
+  post_categories:post_categories ( category:category_id ( id, name, color ) ),
+  post_badges:post_badges ( badge:badge_id ( id, name, color, kind ) ),
+  sources:post_sources ( url, label, sort_order )
+`;
 
-  const body = await req.json().catch(() => null);
-  if (!body?.post) return NextResponse.json({ error: 'Missing payload' }, { status: 400 });
+export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
+  const id = toId(params.id);
+  if (!id) return NextResponse.json({ error: 'Ungültige ID' }, { status: 400 });
 
-  const db = supabaseAdmin();
+  const s = supabaseAdmin();
+  const { data, error } = await s.from('posts').select(SELECT_DETAIL).eq('id', id).single();
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (!data) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-  // 1) Post-Felder
-  const { error: upErr } = await db.from('posts').update(body.post).eq('id', postId);
-  if (upErr) return NextResponse.json({ error: upErr.message }, { status: 400 });
+  // Autorname optional auflösen
+  let author_name: string | null = null;
+  if (data.author_id) {
+    const { data: u } = await s.from('app_users').select('name').eq('user_id', data.author_id).maybeSingle();
+    author_name = u?.name ?? null;
+  }
 
-  // 2) Relationen
+  const categories = (data.post_categories ?? []).map((pc: any) => pc?.category).filter(Boolean);
+  const badges     = (data.post_badges ?? []).map((pb: any) => pb?.badge).filter(Boolean);
+
+  return NextResponse.json({
+    data: {
+      id: data.id,
+      title: data.title,
+      slug: data.slug,
+      summary: data.summary,
+      content: data.content,
+      status: data.status,
+      pinned_until: data.pinned_until,
+      effective_from: data.effective_from,
+      vendor_id: data.vendor_id,
+      author_name,
+      created_at: data.created_at,
+      updated_at: data.updated_at,
+      categories,
+      badges,
+      sources: data.sources ?? [],
+    },
+  });
+}
+
+export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+  const id = toId(params.id);
+  if (!id) return NextResponse.json({ error: 'Ungültige ID' }, { status: 400 });
+
+  type Body = {
+    post?: Partial<{
+      title: string; summary: string|null; content: string|null; slug: string|null;
+      status: 'draft'|'scheduled'|'published';
+      pinned_until: string|null; effective_from: string|null; vendor_id: number|null;
+      author_id?: string|null; // optional, falls du mal setzen willst
+    }>;
+    categoryIds?: number[];
+    badgeIds?: number[];
+    sources?: Array<{ url: string; label?: string|null; sort_order?: number|null }>;
+  };
+
+  const body = (await req.json().catch(() => ({}))) as Body;
+  const s = supabaseAdmin();
+
+  if (body.post && Object.keys(body.post).length) {
+    const { error: e1 } = await s.from('posts').update(body.post).eq('id', id);
+    if (e1) return NextResponse.json({ error: e1.message }, { status: 500 });
+  }
+
   if (Array.isArray(body.categoryIds)) {
-    await db.from('post_categories').delete().eq('post_id', postId);
+    const { error } = await s.from('post_categories').delete().eq('post_id', id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     if (body.categoryIds.length) {
-      const rows = body.categoryIds.map((cid: number) => ({ post_id: postId, category_id: cid }));
-      await db.from('post_categories').insert(rows);
+      const rows = body.categoryIds.map(cid => ({ post_id: id, category_id: cid }));
+      const { error: insErr } = await s.from('post_categories').insert(rows);
+      if (insErr) return NextResponse.json({ error: insErr.message }, { status: 500 });
     }
   }
 
   if (Array.isArray(body.badgeIds)) {
-    await db.from('post_badges').delete().eq('post_id', postId);
+    const { error } = await s.from('post_badges').delete().eq('post_id', id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     if (body.badgeIds.length) {
-      const rows = body.badgeIds.map((bid: number) => ({ post_id: postId, badge_id: bid }));
-      await db.from('post_badges').insert(rows);
+      const rows = body.badgeIds.map(bid => ({ post_id: id, badge_id: bid }));
+      const { error: insErr } = await s.from('post_badges').insert(rows);
+      if (insErr) return NextResponse.json({ error: insErr.message }, { status: 500 });
     }
   }
 
   if (Array.isArray(body.sources)) {
-    await db.from('post_sources').delete().eq('post_id', postId);
+    const { error } = await s.from('post_sources').delete().eq('post_id', id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     if (body.sources.length) {
-      const rows = body.sources.map((s: any) => ({ post_id: postId, ...s }));
-      await db.from('post_sources').insert(rows);
+      const rows = body.sources
+        .filter(x => x?.url && String(x.url).trim())
+        .map((x, i) => ({
+          post_id: id,
+          url: String(x.url).trim(),
+          label: x.label ?? null,
+          sort_order: x.sort_order ?? i,
+        }));
+      if (rows.length) {
+        const { error: insErr } = await s.from('post_sources').insert(rows);
+        if (insErr) return NextResponse.json({ error: insErr.message }, { status: 500 });
+      }
     }
   }
 
-  return NextResponse.json({ ok: true, id: postId });
+  return NextResponse.json({ ok: true, id });
 }
 
-// -------- DELETE /api/admin/posts/:id ---------------------------------------
-export async function DELETE(
-  _req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const { id } = await params;
-  const postId = Number(id);
-  if (!postId) return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
+export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
+  const id = toId(params.id);
+  if (!id) return NextResponse.json({ error: 'Ungültige ID' }, { status: 400 });
 
-  const db = supabaseAdmin();
-  // Reihenfolge: erst Relationen, dann Haupttabelle (wenn kein FK CASCADE)
-  await db.from('post_sources').delete().eq('post_id', postId);
-  await db.from('post_badges').delete().eq('post_id', postId);
-  await db.from('post_categories').delete().eq('post_id', postId);
+  const s = supabaseAdmin();
+  await s.from('post_sources').delete().eq('post_id', id);
+  await s.from('post_badges').delete().eq('post_id', id);
+  await s.from('post_categories').delete().eq('post_id', id);
 
-  const { error } = await db.from('posts').delete().eq('id', postId);
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  const { error } = await s.from('posts').delete().eq('id', id);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, id });
 }
-
-// Optional:
-// export const dynamic = 'force-dynamic';

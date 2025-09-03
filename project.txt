@@ -1,0 +1,85 @@
+.
+├── app
+│   ├── (auth)
+│   │   ├── layout.tsx
+│   │   ├── login
+│   │   └── register
+│   ├── (site)
+│   │   ├── layout.tsx
+│   │   ├── news
+│   │   ├── page.tsx
+│   │   └── profile
+│   ├── admin
+│   │   ├── TaxonomyEditor.tsx
+│   │   ├── VendorGroups.tsx
+│   │   ├── kpis
+│   │   ├── layout.tsx
+│   │   ├── page.tsx
+│   │   ├── termine
+│   │   ├── tools
+│   │   └── users
+│   ├── api
+│   │   ├── admin
+│   │   ├── cron
+│   │   ├── debug
+│   │   ├── fetch-travel-news
+│   │   ├── kpis
+│   │   ├── login
+│   │   ├── logout
+│   │   ├── me
+│   │   ├── meta
+│   │   ├── news
+│   │   ├── profile
+│   │   ├── register
+│   │   ├── termine
+│   │   ├── tools
+│   │   └── travel-news
+│   ├── components
+│   │   ├── LogoutButton.tsx
+│   │   ├── RichTextEditor.tsx
+│   │   ├── SiteHeader.tsx
+│   │   └── ThemeToggle.tsx
+│   ├── favicon.ico
+│   ├── globals.css
+│   ├── head.tsx
+│   └── layout.tsx
+├── eslint.config.mjs
+├── lib
+│   ├── absoluteUrl.ts
+│   ├── auth.ts
+│   ├── getUserFromRequest.ts
+│   ├── holidays.ts
+│   ├── localizer.ts
+│   ├── newsAgent.ts
+│   ├── openai.ts
+│   ├── requireAdmin.ts
+│   ├── server
+│   │   └── cronSecret.ts
+│   ├── supabase-server.ts
+│   ├── supabaseAdmin.ts
+│   ├── supabaseClient.ts
+│   └── tables.ts
+├── middleware.ts
+├── next-env.d.ts
+├── next.config.ts
+├── package-lock.json
+├── package.json
+├── postcss.config.js
+├── postcss.config.mjs
+├── project-structure.txt
+├── project.txt
+├── public
+│   ├── file.svg
+│   ├── fullcalendar
+│   │   ├── common.css
+│   │   ├── daygrid.css
+│   │   └── list.css
+│   ├── globe.svg
+│   ├── header.svg
+│   ├── next.svg
+│   ├── vercel.svg
+│   └── window.svg
+├── tailwind.config.js
+└── tsconfig.json
+
+34 directories, 49 files

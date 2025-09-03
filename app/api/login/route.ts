@@ -1,68 +1,33 @@
 // app/api/login/route.ts
-import { NextResponse } from 'next/server';
-import bcrypt from 'bcryptjs';
+import { NextRequest, NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { T } from '@/lib/tables';
+import { AUTH_COOKIE, signSession, type Role } from '@/lib/auth';
 
-// erzwinge Node.js Runtime (Supabase Service-Role + bcrypt)
-export const runtime = 'nodejs';
+export async function POST(req: NextRequest) {
+  const jar = await cookies();
 
-type Role = 'admin' | 'moderator' | 'user';
-type AppUser = {
-  id: number;
-  email: string;
-  name: string | null;
-  role: Role;
-  password_hash: string | null;
-};
+  const auth = req.headers.get('authorization') || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  if (!token) return NextResponse.json({ error: 'Missing bearer token' }, { status: 400 });
 
-export async function POST(req: Request) {
-  try {
-    const body = await req.json().catch(() => ({}));
-    const emailRaw = (body.email as string | undefined) || '';
-    const password = (body.password as string | undefined) || '';
+  const sb = supabaseAdmin();
+  const { data, error } = await sb.auth.getUser(token);
+  if (error || !data?.user) return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
 
-    const email = emailRaw.trim().toLowerCase();
-    if (!email || !password) {
-      return NextResponse.json({ error: 'E-Mail und Passwort erforderlich.' }, { status: 400 });
-    }
+  const { data: row } = await sb.from('app_users').select('role,name').eq('user_id', data.user.id).maybeSingle();
+  const role = (row?.role as Role) ?? 'user';
+  const name = row?.name ?? data.user.email ?? undefined;
 
-    const s = supabaseAdmin();
+  const jwt = await signSession({ sub: data.user.id, role, name });
 
-    // nur die benötigten Spalten holen
-    const { data, error } = await s
-      .from(T.appUsers)
-      .select('id,email,name,role,password_hash')
-      .eq('email', email)
-      .single<AppUser>();
+  const common = { path: '/', sameSite: 'lax' as const, secure: true, maxAge: 60 * 60 * 24 * 7 };
+  jar.set(AUTH_COOKIE, jwt, { ...common, httpOnly: true });
+  jar.set('user_role', role, { ...common, httpOnly: false });
 
-    // Einmalige Dummy-Compare, um Timing nicht zu verraten (optional)
-    // Falls user nicht existiert oder kein Hash vorhanden:
-    if (error || !data || !data.password_hash) {
-      // Dummy-Hash-Compare, um gleiche Laufzeit zu erzielen (Option: aus ENV holen)
-      await bcrypt.compare(password, '$2a$12$CwTycUXWue0Thq9StjUM0uJ8Yb6m3/6uD3c6q8x5kVn1W9qz3YQy2'); // Hash von "invalid"
-      return NextResponse.json({ error: 'Login fehlgeschlagen.' }, { status: 401 });
-    }
+  return NextResponse.json({ ok: true, role });
+}
 
-    const ok = await bcrypt.compare(password, data.password_hash);
-    if (!ok) {
-      return NextResponse.json({ error: 'Login fehlgeschlagen.' }, { status: 401 });
-    }
-
-    // Cookies über die Response setzen (Next 15-konform)
-    const res = NextResponse.json({ ok: true });
-    const maxAge = 60 * 60 * 8; // 8h Session
-    const base = { httpOnly: true, secure: true, sameSite: 'lax' as const, path: '/', maxAge };
-
-    res.cookies.set('user_role', String(data.role), base);
-    res.cookies.set('user_email', String(data.email), base);
-    if (data.name) res.cookies.set('user_name', String(data.name), base);
-
-    // Caching verhindern
-    res.headers.set('Cache-Control', 'no-store');
-
-    return res;
-  } catch (e) {
-    return NextResponse.json({ error: 'Serverfehler' }, { status: 500 });
-  }
+export async function GET() {
+  return NextResponse.json({ error: 'Method Not Allowed' }, { status: 405 });
 }
