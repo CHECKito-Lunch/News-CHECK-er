@@ -5,6 +5,7 @@ import { cookies } from 'next/headers';
 import { verifyToken, AUTH_COOKIE, type Role } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 export default async function AdminLayout({ children }: { children: ReactNode }) {
   const jar = await cookies();

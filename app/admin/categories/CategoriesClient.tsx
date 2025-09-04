@@ -1,0 +1,22 @@
+// app/admin/categories/CategoriesClient.tsx
+'use client';
+
+import AdminTabs from '../_shared/AdminTabs';
+import TaxonomyEditor from '../_components/TaxonomyEditor';
+
+export default function CategoriesClient() {
+  return (
+    <div className="container max-w-5xl mx-auto py-6 space-y-5">
+      <h1 className="text-2xl font-bold">Kategorien</h1>
+      <AdminTabs />
+      <div className="card p-4 rounded-2xl border dark:border-gray-800">
+        <TaxonomyEditor
+          title="Kategorien"
+          endpoint="/api/admin/categories"
+          columns={['name','color']}
+          showCategoryFlags
+        />
+      </div>
+    </div>
+  );
+}
