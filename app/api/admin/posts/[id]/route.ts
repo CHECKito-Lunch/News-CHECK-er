@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
+// Hilfsfunktion zur ID-Prüfung
 function toId(v: unknown) {
   const n = Number(v);
   return Number.isFinite(n) && n > 0 ? n : null;
@@ -15,8 +16,9 @@ const SELECT_DETAIL = `
   sources:post_sources ( url, label, sort_order )
 `;
 
-export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
-  const id = toId(params.id);
+// ✅ GET /api/admin/posts/[id]
+export async function GET(req: NextRequest, context: { params: { id: string } }) {
+  const id = toId(context.params.id);
   if (!id) return NextResponse.json({ error: 'Ungültige ID' }, { status: 400 });
 
   const s = supabaseAdmin();
@@ -24,7 +26,6 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if (!data) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-  // Autorname optional auflösen
   let author_name: string | null = null;
   if (data.author_id) {
     const { data: u } = await s.from('app_users').select('name').eq('user_id', data.author_id).maybeSingle();
@@ -32,7 +33,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   }
 
   const categories = (data.post_categories ?? []).map((pc: any) => pc?.category).filter(Boolean);
-  const badges     = (data.post_badges ?? []).map((pb: any) => pb?.badge).filter(Boolean);
+  const badges = (data.post_badges ?? []).map((pb: any) => pb?.badge).filter(Boolean);
 
   return NextResponse.json({
     data: {
@@ -55,20 +56,21 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   });
 }
 
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
-  const id = toId(params.id);
+// ✅ PATCH /api/admin/posts/[id]
+export async function PATCH(req: NextRequest, context: { params: { id: string } }) {
+  const id = toId(context.params.id);
   if (!id) return NextResponse.json({ error: 'Ungültige ID' }, { status: 400 });
 
   type Body = {
     post?: Partial<{
-      title: string; summary: string|null; content: string|null; slug: string|null;
-      status: 'draft'|'scheduled'|'published';
-      pinned_until: string|null; effective_from: string|null; vendor_id: number|null;
-      author_id?: string|null; // optional, falls du mal setzen willst
+      title: string; summary: string | null; content: string | null; slug: string | null;
+      status: 'draft' | 'scheduled' | 'published';
+      pinned_until: string | null; effective_from: string | null; vendor_id: number | null;
+      author_id?: string | null;
     }>;
     categoryIds?: number[];
     badgeIds?: number[];
-    sources?: Array<{ url: string; label?: string|null; sort_order?: number|null }>;
+    sources?: Array<{ url: string; label?: string | null; sort_order?: number | null }>;
   };
 
   const body = (await req.json().catch(() => ({}))) as Body;
@@ -102,27 +104,26 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   if (Array.isArray(body.sources)) {
     const { error } = await s.from('post_sources').delete().eq('post_id', id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    if (body.sources.length) {
-      const rows = body.sources
-        .filter(x => x?.url && String(x.url).trim())
-        .map((x, i) => ({
-          post_id: id,
-          url: String(x.url).trim(),
-          label: x.label ?? null,
-          sort_order: x.sort_order ?? i,
-        }));
-      if (rows.length) {
-        const { error: insErr } = await s.from('post_sources').insert(rows);
-        if (insErr) return NextResponse.json({ error: insErr.message }, { status: 500 });
-      }
+    const rows = body.sources
+      .filter(x => x?.url && String(x.url).trim())
+      .map((x, i) => ({
+        post_id: id,
+        url: String(x.url).trim(),
+        label: x.label ?? null,
+        sort_order: x.sort_order ?? i,
+      }));
+    if (rows.length) {
+      const { error: insErr } = await s.from('post_sources').insert(rows);
+      if (insErr) return NextResponse.json({ error: insErr.message }, { status: 500 });
     }
   }
 
   return NextResponse.json({ ok: true, id });
 }
 
-export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
-  const id = toId(params.id);
+// ✅ DELETE /api/admin/posts/[id]
+export async function DELETE(_req: NextRequest, context: { params: { id: string } }) {
+  const id = toId(context.params.id);
   if (!id) return NextResponse.json({ error: 'Ungültige ID' }, { status: 400 });
 
   const s = supabaseAdmin();
