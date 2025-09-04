@@ -7,11 +7,16 @@ function isPublic(pathname: string, method: string) {
   // Login / Registrierung (Seite + API)
   if (pathname === '/login' || pathname === '/register') return true;
   if (pathname.startsWith('/api/login') || pathname.startsWith('/api/register')) return true;
+  if (pathname.startsWith('/api/me')) return true;
+
+  
 
   // Next statics / Assets
   if (pathname.startsWith('/_next')) return true;
   if (pathname === '/favicon.ico') return true;
   if (pathname === '/header.svg') return true;
+ 
+
 
   return false;
 }

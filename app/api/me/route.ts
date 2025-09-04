@@ -2,20 +2,26 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
-
-type Role = 'admin'|'moderator'|'user';
+type Role = 'admin' | 'moderator' | 'user';
+type Me = { user: { sub: string; role: Role; name?: string } | null };
 
 export async function GET() {
-  const c = await cookies(); // in Next 15 kann cookies() async sein
-  const email = c.get('user_email')?.value || '';
-  const role = c.get('user_role')?.value as Role | undefined;
-  const name = c.get('user_name')?.value || undefined;
+  // In deiner Next-Version ist cookies() async -> await!
+  const c = await cookies();
 
-  const res = NextResponse.json({
-    user: email && role ? { sub: email, role, name } : null
+  const role = c.get('user_role')?.value as Role | undefined;
+
+  // Wenn kein user_role-Cookie: nicht eingeloggt
+  if (!role) {
+    return NextResponse.json<Me>({ user: null });
+  }
+
+  // Wir kennen hier nur die Rolle zuverlässig (ohne weitere Session-Dekodierung)
+  // sub/name kannst du später anreichern, wenn du eine Server-Session verwendest.
+  return NextResponse.json<Me>({
+    user: {
+      sub: 'unknown', // optional: durch echte User-ID ersetzen, wenn verfügbar
+      role,
+    },
   });
-  res.headers.set('Cache-Control', 'no-store');
-  return res;
 }
