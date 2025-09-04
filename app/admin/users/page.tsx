@@ -311,28 +311,38 @@ export default function UsersAdminPage() {
                       <td className="px-3 py-2 truncate max-w-[22ch]">{u.name ?? '—'}</td>
                       <td className="px-3 py-2">{u.role}</td>
                       <td className="px-3 py-2">
-                        <span className="text-xs">{u.active ? 'aktiv' : 'inaktiv'}</span>
+                        <input
+                          type="checkbox"
+                          checked={u.active}
+                          onChange={async (e) => {
+                            const newActive = e.target.checked;
+                            const res = await fetch(`/api/admin/users/${u.id}`, {
+                              method: 'PATCH',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ active: newActive }),
+                            });
+                            if (res.ok) {
+                              setUsers((prev) =>
+                                prev.map((x) => (x.id === u.id ? { ...x, active: newActive } : x))
+                              );
+                            } else {
+                              const j = await res.json().catch(() => ({}));
+                              alert(j.error ?? 'Aktualisierung fehlgeschlagen');
+                            }
+                          }}
+                        />
                       </td>
                       <td className="px-3 py-2 text-gray-500">
                         {u.created_at ? new Date(u.created_at).toLocaleString() : '—'}
                       </td>
                       <td className="px-3 py-2 text-right space-x-2">
-                        <button
-                          className={btnBase}
-                          onClick={() => startEdit(u.id)}
-                        >
+                        <button className={btnBase} onClick={() => startEdit(u.id)}>
                           Bearbeiten
                         </button>
-                        <button
-                          className={btnBase}
-                          onClick={() => deleteUser(u.id)}
-                        >
+                        <button className={btnBase} onClick={() => deleteUser(u.id)}>
                           Löschen
                         </button>
-                        <button
-                          className={btnBase}
-                          onClick={() => setPasswordForUser(u)}
-                        >
+                        <button className={btnBase} onClick={() => setPasswordForUser(u)}>
                           Passwort
                         </button>
                       </td>
@@ -341,9 +351,9 @@ export default function UsersAdminPage() {
                 </tbody>
               </table>
             </div>
-            <div className="flex items-center justify-between text-sm">
-              <div>
-                Seite {page} von {pages} ({total} Benutzer)
+            <div className="flex justify-between items-center pt-3">
+              <div className="text-sm text-gray-500">
+                Seite {page} von {pages}
               </div>
               <div className="flex gap-2">
                 <button
