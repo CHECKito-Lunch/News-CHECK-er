@@ -48,7 +48,7 @@ export default function UsersAdminPage() {
   const [fName, setFName] = useState('');
   const [fRole, setFRole] = useState<Role>('user');
   const [fActive, setFActive] = useState(true);
-  const [fPassword, setFPassword] = useState(''); // <-- NEU: initiales Passwort nur bei Neuanlage
+  const [fPassword, setFPassword] = useState('');
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
 
@@ -68,7 +68,9 @@ export default function UsersAdminPage() {
     setLoading(false);
   }, [q, page, pageSize]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   function resetForm() {
     setEditingId(null);
@@ -86,7 +88,6 @@ export default function UsersAdminPage() {
 
     const creating = editingId === null;
 
-    // Validierung
     if (!fEmail.trim()) {
       setMsg('E-Mail ist erforderlich.');
       setSaving(false);
@@ -119,7 +120,7 @@ export default function UsersAdminPage() {
 
       setMsg(creating ? 'Benutzer angelegt.' : 'Aktualisiert.');
       await load();
-      if (creating) resetForm(); // nach Neuanlage Formular leeren
+      if (creating) resetForm();
     } catch (e: unknown) {
       setMsg(e instanceof Error ? e.message : 'Fehler');
     } finally {
@@ -129,14 +130,14 @@ export default function UsersAdminPage() {
 
   async function startEdit(id: number) {
     setMsg('');
-    const u = users.find(x => x.id === id);
+    const u = users.find((x) => x.id === id);
     if (!u) return;
     setEditingId(u.id);
     setFEmail(u.email);
     setFName(u.name ?? '');
     setFRole(u.role);
     setFActive(u.active);
-    setFPassword(''); // Passwortfeld wird bei Bearbeitung nicht angezeigt/genutzt
+    setFPassword('');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
@@ -175,8 +176,9 @@ export default function UsersAdminPage() {
   return (
     <div className="container max-w-5xl mx-auto py-6 space-y-5">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Benutzerverwaltung</h1>
-
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+          Benutzerverwaltung
+        </h1>
         <Link
           href="/"
           className="px-3 py-2 rounded-lg border text-sm
@@ -187,18 +189,17 @@ export default function UsersAdminPage() {
         </Link>
       </div>
 
-      {/* Formular (Neu/Update) */}
+      {/* Formular */}
       <div className={cardClass + ' space-y-3'}>
         <h2 className="text-lg font-semibold">
           {editingId ? `Benutzer bearbeiten (ID: ${editingId})` : 'Neuen Benutzer anlegen'}
         </h2>
-
         <div className="grid md:grid-cols-5 gap-3 items-end">
           <div className="md:col-span-2">
             <label className="form-label">E-Mail</label>
             <input
               value={fEmail}
-              onChange={e => setFEmail(e.target.value)}
+              onChange={(e) => setFEmail(e.target.value)}
               className={inputClass}
               placeholder="name@firma.de"
               type="email"
@@ -208,38 +209,46 @@ export default function UsersAdminPage() {
             <label className="form-label">Name</label>
             <input
               value={fName}
-              onChange={e => setFName(e.target.value)}
+              onChange={(e) => setFName(e.target.value)}
               className={inputClass}
               placeholder="optional"
             />
           </div>
           <div>
             <label className="form-label">Rolle</label>
-            <select value={fRole} onChange={e => setFRole(e.target.value as Role)} className={inputClass}>
+            <select
+              value={fRole}
+              onChange={(e) => setFRole(e.target.value as Role)}
+              className={inputClass}
+            >
               <option value="user">User</option>
               <option value="moderator">Moderator</option>
               <option value="admin">Admin</option>
             </select>
           </div>
           <div className="flex items-center gap-2">
-            <input id="active" type="checkbox" checked={fActive} onChange={e => setFActive(e.target.checked)} />
-            <label htmlFor="active" className="text-sm">Aktiv</label>
+            <input
+              id="active"
+              type="checkbox"
+              checked={fActive}
+              onChange={(e) => setFActive(e.target.checked)}
+            />
+            <label htmlFor="active" className="text-sm">
+              Aktiv
+            </label>
           </div>
-
-          {/* Initiales Passwort – nur bei Neuanlage */}
           {editingId === null && (
             <div className="md:col-span-2">
               <label className="form-label">Initiales Passwort</label>
               <input
                 type="password"
                 value={fPassword}
-                onChange={e => setFPassword(e.target.value)}
+                onChange={(e) => setFPassword(e.target.value)}
                 className={inputClass}
                 placeholder="mind. 8 Zeichen"
               />
             </div>
           )}
-
           <div className="flex gap-2 md:col-span-3">
             <button
               disabled={!fEmail || saving}
@@ -249,35 +258,36 @@ export default function UsersAdminPage() {
             >
               {saving ? 'Speichern…' : 'Speichern'}
             </button>
-            <button
-              onClick={resetForm}
-              className={btnBase}
-              type="button"
-            >
+            <button onClick={resetForm} className={btnBase} type="button">
               Neu
             </button>
           </div>
         </div>
-
         {msg && <div className="text-sm text-gray-600 dark:text-gray-300">{msg}</div>}
       </div>
 
-      {/* Liste / Suche */}
+      {/* Liste */}
       <div className={cardClass + ' space-y-3'}>
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-lg font-semibold">Benutzer</h2>
           <div className="flex gap-2">
             <input
               value={q}
-              onChange={e => setQ(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') { setPage(1); load(); } }}
+              onChange={(e) => setQ(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  setPage(1);
+                  load();
+                }
+              }}
               className={inputClass + ' w-64'}
               placeholder="Suche E-Mail/Name…"
             />
-            <button className={btnBase} onClick={() => { setPage(1); load(); }}>Suchen</button>
+            <button className={btnBase} onClick={() => { setPage(1); load(); }}>
+              Suchen
+            </button>
           </div>
         </div>
-
         {loading ? (
           <div className="text-sm text-gray-500">lädt…</div>
         ) : (
@@ -295,7 +305,7 @@ export default function UsersAdminPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {users.map(u => (
+                  {users.map((u) => (
                     <tr key={u.id} className="border-t border-gray-100 dark:border-gray-800">
                       <td className="px-3 py-2 font-medium truncate max-w-[28ch]">{u.email}</td>
                       <td className="px-3 py-2 truncate max-w-[22ch]">{u.name ?? '—'}</td>
@@ -306,61 +316,49 @@ export default function UsersAdminPage() {
                       <td className="px-3 py-2 text-gray-500">
                         {u.created_at ? new Date(u.created_at).toLocaleString() : '—'}
                       </td>
-                      <td className="px-3 py-2 text-right">
-                        <div className="inline-flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => startEdit(u.id)}
-                            className="px-2 py-1 rounded border dark:border-gray-700"
-                          >
-                            Bearbeiten
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setPasswordForUser(u)}
-                            className="px-2 py-1 rounded border dark:border-gray-700"
-                          >
-                            Passwort
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => deleteUser(u.id)}
-                            className="px-2 py-1 rounded bg-red-600 text-white"
-                          >
-                            Löschen
-                          </button>
-                        </div>
+                      <td className="px-3 py-2 text-right space-x-2">
+                        <button
+                          className={btnBase}
+                          onClick={() => startEdit(u.id)}
+                        >
+                          Bearbeiten
+                        </button>
+                        <button
+                          className={btnBase}
+                          onClick={() => deleteUser(u.id)}
+                        >
+                          Löschen
+                        </button>
+                        <button
+                          className={btnBase}
+                          onClick={() => setPasswordForUser(u)}
+                        >
+                          Passwort
+                        </button>
                       </td>
                     </tr>
                   ))}
-                  {users.length === 0 && (
-                    <tr>
-                      <td colSpan={6} className="px-3 py-6 text-center text-gray-500">
-                        Keine Einträge.
-                      </td>
-                    </tr>
-                  )}
                 </tbody>
               </table>
             </div>
-
-            <div className="flex items-center justify-between pt-3">
-              <div className="text-xs text-gray-500">{total} Einträge</div>
-              <div className="flex items-center gap-2">
+            <div className="flex items-center justify-between text-sm">
+              <div>
+                Seite {page} von {pages} ({total} Benutzer)
+              </div>
+              <div className="flex gap-2">
                 <button
+                  className={btnBase}
                   disabled={page <= 1}
-                  onClick={() => setPage(p => Math.max(1, p - 1))}
-                  className="px-3 py-1.5 rounded border disabled:opacity-50"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
                 >
-                  Zurück
+                  ← Zurück
                 </button>
-                <span className="text-sm">Seite {page} / {pages}</span>
                 <button
+                  className={btnBase}
                   disabled={page >= pages}
-                  onClick={() => setPage(p => p + 1)}
-                  className="px-3 py-1.5 rounded border disabled:opacity-50"
+                  onClick={() => setPage((p) => Math.min(pages, p + 1))}
                 >
-                  Weiter
+                  Weiter →
                 </button>
               </div>
             </div>

@@ -46,20 +46,28 @@ export async function GET(req: Request) {
 }
 
 // POST /api/admin/users
-// body: { email: string; name?: string; role?: Role; active?: boolean; password: string }
+// body: { email: string; name?: string; role?: Role; password: string }
 export async function POST(req: Request) {
   const s = supabaseAdmin();
   const body = await req.json().catch(() => ({}));
   const email = String(body.email ?? '').trim().toLowerCase();
   const name  = (body.name ?? '').trim() || null;
   const role  = (['admin','moderator','user'].includes(body.role) ? body.role : 'user') as Role;
-  const active: boolean = body.active ?? true;
   const password: string | undefined = typeof body.password === 'string' ? body.password : undefined;
 
-  if (!email) return NextResponse.json({ error: 'E-Mail ist erforderlich.' }, { status: 400 });
+  if (!email) {
+    return NextResponse.json({ error: 'E-Mail ist erforderlich.' }, { status: 400 });
+  }
 
-  const insert: any = { email, name, role, active };
-  if (password && password.length >= 8) insert.password_hash = await bcrypt.hash(password, 12);
+  // Nur @check24.de E-Mails zulassen
+  if (!email.endsWith('@check24.de')) {
+    return NextResponse.json({ error: 'Nur @check24.de E-Mails sind erlaubt.' }, { status: 400 });
+  }
+
+  const insert: any = { email, name, role, active: false }; // Neue User immer inaktiv
+  if (password && password.length >= 8) {
+    insert.password_hash = await bcrypt.hash(password, 12);
+  }
 
   const { data, error } = await s.from(T.appUsers).insert(insert).select('id').single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

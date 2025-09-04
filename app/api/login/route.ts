@@ -2,12 +2,8 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
-/**
- * Erwartet: Authorization: Bearer <access_token> (vom Supabase-Client nach signIn)
- * Tut:  - prüft Token (sub = user_id, email)
- *       - holt Rolle aus app_users (service role, keine RLS-Probleme)
- *       - setzt httpOnly auth-marker (optional) + user_role Cookie
- */
+type Role = 'admin' | 'moderator' | 'user';
+
 export async function POST(req: Request) {
   const auth = req.headers.get('authorization') || '';
   const m = auth.match(/^Bearer\s+(.+)$/i);
@@ -16,12 +12,9 @@ export async function POST(req: Request) {
   }
   const accessToken = m[1];
 
-  // Falls du das Token validieren willst, kannst du z. B. über Supabase Admin getUser() gehen.
-  // Für Rolle reicht uns hier die user_id aus dem JWT, die du dir i. d. R. im Client schon hast.
-  // Wir zeigen hier den robusten Weg: role per email/user_id aus der DB ziehen.
   const s = supabaseAdmin();
 
-  // user_id + email aus dem JWT auslesen (leichtgewichtig)
+  // user_id + email aus dem JWT lesen
   let userId: string | null = null;
   let email: string | null = null;
   try {
@@ -38,30 +31,54 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
   }
 
-  // Rolle sicher serverseitig (Service Role) lesen – keine RLS-Probleme
-  let role: 'admin' | 'moderator' | 'user' = 'user';
+  // Rolle + active aus DB holen
+  let role: Role = 'user';
+  let active = false;
+  let id: number | null = null;
+
   if (email) {
-    const { data } = await s
+    const { data, error } = await s
       .from('app_users')
-      .select('role')
+      .select('id, role, active')
       .eq('email', email.toLowerCase())
       .maybeSingle();
-    if (data?.role) role = data.role as any;
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    if (data) {
+      role = data.role as Role;
+      active = !!data.active;
+      id = data.id;
+    }
   } else if (userId) {
-    const { data } = await s
+    const { data, error } = await s
       .from('app_users')
-      .select('role')
+      .select('id, role, active')
       .eq('user_id', userId)
       .maybeSingle();
-    if (data?.role) role = data.role as any;
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    if (data) {
+      role = data.role as Role;
+      active = !!data.active;
+      id = data.id;
+    }
+  }
+
+  if (!active) {
+    return NextResponse.json({ error: 'Benutzer ist noch nicht aktiviert.' }, { status: 403 });
+  }
+
+  // --- letzter Login setzen ---
+  if (id) {
+    await s.from('app_users').update({ last_login: new Date().toISOString() }).eq('id', id);
   }
 
   // Cookies setzen
   const res = NextResponse.json({ ok: true, role });
-  // Wichtig: in Prod Secure setzen; Domain NICHT setzen -> Host-spezifisch (vermeidet www./Apex-Mismatch)
   const isProd = process.env.NODE_ENV === 'production';
 
-  // httpOnly Marker (optional – falls du so einen nutzt)
   res.cookies.set('auth', '1', {
     httpOnly: true,
     sameSite: 'lax',
@@ -70,13 +87,12 @@ export async function POST(req: Request) {
     maxAge: 60 * 60 * 24 * 7, // 7 Tage
   });
 
-  // Rolle für Middleware
   res.cookies.set('user_role', role, {
-    httpOnly: true,          // Middleware darf per Request headers lesen, Client nicht
+    httpOnly: true,
     sameSite: 'lax',
-    secure: isProd,          // In Prod zwingend, sonst droppt der Browser unter HTTPS
+    secure: isProd,
     path: '/',
-    maxAge: 60 * 60 * 12,    // 12h reicht meist
+    maxAge: 60 * 60 * 12, // 12 Stunden
   });
 
   return res;

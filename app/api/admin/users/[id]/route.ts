@@ -22,7 +22,7 @@ export async function GET(
   const s = supabaseAdmin();
   const { data, error } = await s
     .from(T.appUsers)
-    .select('id,email,name,role,active,created_at,updated_at')
+    .select('id,email,name,role,active,created_at,updated_at,last_login') // <- last_login hinzugefügt
     .eq('id', num)
     .single();
 
@@ -49,6 +49,9 @@ export async function PATCH(
   if ('name' in body) update.name = (body.name ?? '') === '' ? null : body.name;
   if (typeof body.role === 'string' && ['admin','moderator','user'].includes(body.role)) update.role = body.role as Role;
   if (typeof body.active === 'boolean') update.active = body.active;
+
+  // Wichtig: last_login wird NICHT hier administrativ gesetzt/überschrieben.
+  // Das passiert ausschließlich in der Login-Route nach erfolgreichem Login.
 
   if (Object.keys(update).length === 0) {
     return NextResponse.json({ error: 'Nichts zu aktualisieren.' }, { status: 400 });
