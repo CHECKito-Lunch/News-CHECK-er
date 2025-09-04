@@ -1,8 +1,7 @@
 // app/api/admin/posts/[id]/route.ts
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
-// Hilfsfunktion zur ID-Prüfung
 function toId(v: unknown) {
   const n = Number(v);
   return Number.isFinite(n) && n > 0 ? n : null;
@@ -16,9 +15,9 @@ const SELECT_DETAIL = `
   sources:post_sources ( url, label, sort_order )
 `;
 
-// ✅ GET /api/admin/posts/[id]
-export async function GET(req: NextRequest, context: { params: { id: string } }) {
-  const id = toId(context.params.id);
+// GET /api/admin/posts/[id]
+export async function GET(_req: Request, context: any) {
+  const id = toId(context?.params?.id);
   if (!id) return NextResponse.json({ error: 'Ungültige ID' }, { status: 400 });
 
   const s = supabaseAdmin();
@@ -56,9 +55,9 @@ export async function GET(req: NextRequest, context: { params: { id: string } })
   });
 }
 
-// ✅ PATCH /api/admin/posts/[id]
-export async function PATCH(req: NextRequest, context: { params: { id: string } }) {
-  const id = toId(context.params.id);
+// PATCH /api/admin/posts/[id]
+export async function PATCH(req: Request, context: any) {
+  const id = toId(context?.params?.id);
   if (!id) return NextResponse.json({ error: 'Ungültige ID' }, { status: 400 });
 
   type Body = {
@@ -121,9 +120,9 @@ export async function PATCH(req: NextRequest, context: { params: { id: string } 
   return NextResponse.json({ ok: true, id });
 }
 
-// ✅ DELETE /api/admin/posts/[id]
-export async function DELETE(_req: NextRequest, context: { params: { id: string } }) {
-  const id = toId(context.params.id);
+// DELETE /api/admin/posts/[id]
+export async function DELETE(_req: Request, context: any) {
+  const id = toId(context?.params?.id);
   if (!id) return NextResponse.json({ error: 'Ungültige ID' }, { status: 400 });
 
   const s = supabaseAdmin();
