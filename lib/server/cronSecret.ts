@@ -1,26 +1,32 @@
 // lib/server/cronSecret.ts
-export function isCronAuthorized(req: Request) {
-  const secret =
-    process.env.NEWS_AGENT_CRON_SECRET?.trim() ||
-    process.env.CRON_SECRET?.trim(); // Fallback erlaubt
+function getSecrets(): string[] {
+  const vals = [
+    process.env.NEWS_AGENT_CRON_SECRET,
+    process.env.CRON_SECRET,              // fallback, for compatibility
+  ]
+    .filter(Boolean)
+    .map(s => String(s).trim())
+    .filter(s => s.length > 0);
 
-  if (!secret) return false;
+  return Array.from(new Set(vals)); // unique
+}
+
+export function isCronAuthorized(req: Request) {
+  const secrets = getSecrets();
+  if (secrets.length === 0) return false;
 
   const h = req.headers;
 
-  // Header (case-insensitive)
+  // a) Custom header
   const viaHeader = (h.get('x-cron-auth') || '').trim();
-  if (viaHeader && viaHeader === secret) return true;
 
-  // Bearer
+  // b) Bearer
   const bearer = (h.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
-  if (bearer && bearer === secret) return true;
 
-  // Query-Param
-  const key = new URL(req.url).searchParams.get('key');
-  if (key && key === secret) return true;
+  // c) Query param
+  const key = new URL(req.url).searchParams.get('key')?.trim() || '';
 
-  return false;
+  return secrets.includes(viaHeader) || secrets.includes(bearer) || secrets.includes(key);
 }
 
 export function getDryFlag(req: Request) {
