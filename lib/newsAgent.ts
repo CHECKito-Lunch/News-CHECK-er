@@ -134,6 +134,8 @@ async function summarizeWithOpenAI(cfg: AgentConfig, arts: NewsArticle[]) {
   return content;
 }
 
+
+
 function makeSlug(title: string) {
   return title
     .toLowerCase()
@@ -197,17 +199,30 @@ async function insertPostFromAgent(
 }
 
 /** Lokale Uhrzeit "HH:mm" in gewünschter Zeitzone (Default Europe/Berlin) */
+
+function safeTimeZone(tz?: string | null): string {
+  const candidate = (tz || '').trim();
+  try {
+    // wirft, wenn ungültig
+    new Intl.DateTimeFormat('de-DE', { timeZone: candidate });
+    return candidate;
+  } catch {
+    return 'Europe/Berlin'; // fallback
+  }
+}
+
+
 function nowHHMMInTZ(tz?: string) {
-  const timeZone = tz && tz.trim() ? tz : 'Europe/Berlin';
+  const timeZone = safeTimeZone(tz);
   const parts = new Intl.DateTimeFormat('de-DE', {
     timeZone,
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
   }).formatToParts(new Date());
-  const hh = parts.find(p => p.type === 'hour')?.value || '00';
-  const mm = parts.find(p => p.type === 'minute')?.value || '00';
-  return `${hh}:${mm}`;
+  const h = parts.find(p => p.type === 'hour')?.value ?? '00';
+  const m = parts.find(p => p.type === 'minute')?.value ?? '00';
+  return `${h}:${m}`;
 }
 
 function isDue(now: string, times: string[], windowMin=10) {

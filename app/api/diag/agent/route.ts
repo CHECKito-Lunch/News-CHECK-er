@@ -5,6 +5,19 @@ import { getConfig } from '@/lib/newsAgent';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
+function safeTimeZone(tz?: string | null): string {
+  const candidate = (tz || '').trim();
+  try {
+    if (!candidate) throw new Error('empty');
+    // Wirft bei ungültiger TZ:
+    new Intl.DateTimeFormat('de-DE', { timeZone: candidate });
+    return candidate;
+  } catch {
+    return 'Europe/Berlin';
+  }
+}
+
+
 function toMin(hhmm: string) {
   const [H, M] = hhmm.split(':').map(n => Number(n));
   if (!Number.isFinite(H) || !Number.isFinite(M)) return NaN;
@@ -47,14 +60,12 @@ export async function GET(req: Request) {
       | null;
 
     // Timezone ermitteln: aus Config → ENV TZ → Fallback
-    const tz =
-      // @ts-ignore – falls du später cfg.timezone hinzufügst
-      (cfg as any)?.timezone ||
-      process.env.TZ ||
-      'Europe/Berlin';
+   const tzRaw = (cfg as any)?.timezone || process.env.TZ || 'Europe/Berlin';
+    const tz = safeTimeZone(tzRaw);
 
     const nowLocal = nowHHMMInTZ(tz);
     const due = isDue(nowLocal, cfg?.times || [], windowMin);
+
 
     // praktische Zusatzinfos
     const hasNEWS = !!(process.env.NEWS_API_KEY && String(process.env.NEWS_API_KEY).trim());
