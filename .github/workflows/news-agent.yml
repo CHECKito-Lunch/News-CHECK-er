@@ -1,5 +1,10 @@
+# .github/workflows/news-agent.yml
 name: News Agent
+
 on:
+  schedule:
+    # Läuft alle 10 Minuten (UTC!)
+    - cron: '*/10 * * * *'
   workflow_dispatch:
     inputs:
       dry:
@@ -8,20 +13,31 @@ on:
       force:
         description: 'Force'
         default: 'true'
+
 jobs:
   run:
     runs-on: ubuntu-latest
     env:
-      BASE_URL: ${{ secrets.BASE_URL }}            # z.B. https://news-check-puce.vercel.app
-      CRON_SECRET: ${{ secrets.NEWS_AGENT_CRON_SECRET }}
-      DRY: ${{ inputs.dry }}
-      FORCE: ${{ inputs.force }}
+      BASE_URL: ${{ secrets.BASE_URL }}                 # z.B. https://news-check-puce.vercel.app
+      CRON_SECRET: ${{ secrets.NEWS_AGENT_CRON_SECRET }}# MUSS exakt = Vercel-Env NEWS_AGENT_CRON_SECRET
+      # Bei schedule-runs: DRY/FORCE leer -> Server entscheidet anhand Zeiten.
+      DRY: ${{ github.event_name == 'schedule' && '' || inputs.dry }}
+      FORCE: ${{ github.event_name == 'schedule' && '' || inputs.force }}
     steps:
       - name: Run agent
         shell: bash
         run: |
           set -euo pipefail
-          URL="${BASE_URL%/}/api/admin/news-agent/run?dry=${DRY:+1}&force=${FORCE:+1}&key=${CRON_SECRET}"
+
+          dry_flag=""
+          force_flag=""
+          [ "${DRY:-}" = "true" ]  && dry_flag="1"
+          [ "${FORCE:-}" = "true" ] && force_flag="1"
+
+          URL="${BASE_URL%/}/api/admin/news-agent/run?key=${CRON_SECRET}"
+          [ -n "$dry_flag" ] && URL="$URL&dry=$dry_flag"
+          [ -n "$force_flag" ] && URL="$URL&force=$force_flag"
+
           echo "POST $URL"
           http_code=$(curl -sS -o /tmp/resp.json -w "%{http_code}" -X POST \
             -H "Accept: application/json" \

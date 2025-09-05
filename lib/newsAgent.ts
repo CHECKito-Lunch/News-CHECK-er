@@ -6,7 +6,6 @@ const AGENT_BADGE_COLOR = '#f59e0b'; // amber
 
 async function ensureAgentBadgeId(): Promise<number> {
   const db = supabaseAdmin();
-  // 1) Suchen
   const { data: found, error: e1 } = await db
     .from('badges')
     .select('id')
@@ -15,7 +14,6 @@ async function ensureAgentBadgeId(): Promise<number> {
   if (e1) throw e1;
   if (found?.id) return found.id;
 
-  // 2) Anlegen, wenn es nicht existiert
   const { data: created, error: e2 } = await db
     .from('badges')
     .insert({ name: AGENT_BADGE_NAME, color: AGENT_BADGE_COLOR, kind: 'info' })
@@ -30,7 +28,7 @@ export type AgentConfig = {
   language: 'de'|'en'|'fr'|'it'|'es';
   countries: string[];
   terms: string[];
-  times: string[];           // "HH:mm"
+  times: string[];           // "HH:mm" in lokaler TZ
   maxArticles: number;
   autoPublish: boolean;
   defaultVendorId: number|null;
@@ -38,6 +36,7 @@ export type AgentConfig = {
   defaultBadgeIds: number[];
   model?: string;
   temperature?: number;
+  timezone?: string;         // NEU, z. B. "Europe/Berlin"
 };
 
 type NewsArticle = {
@@ -81,10 +80,7 @@ function buildQuery(terms: string[]) {
 }
 
 async function fetchNews(cfg: AgentConfig): Promise<NewsArticle[]> {
-  if (!hasEnv('NEWS_API_KEY')) {
-    // Kein Key: leere Liste (im Dry-Run ok, sonst Fehler höher)
-    return [];
-  }
+  if (!hasEnv('NEWS_API_KEY')) return [];
   const apiKey = process.env.NEWS_API_KEY!;
   const q = buildQuery(cfg.terms || []);
   const params = new URLSearchParams({
@@ -105,7 +101,6 @@ async function fetchNews(cfg: AgentConfig): Promise<NewsArticle[]> {
 async function summarizeWithOpenAI(cfg: AgentConfig, arts: NewsArticle[]) {
   if (!arts.length) return '';
   if (!hasEnv('OPENAI_API_KEY')) {
-    // Fallback: einfache Stichpunkte ohne OpenAI
     return arts.slice(0, 10).map(a => `- ${a.title} — ${a.url}`).join('\n');
   }
 
@@ -113,7 +108,6 @@ async function summarizeWithOpenAI(cfg: AgentConfig, arts: NewsArticle[]) {
   const temperature = cfg.temperature ?? 0.2;
 
   const sys = `Du bist ein News-Analyst für Reise & Tourismus. Erstelle kurze Bulletpoints (Deutsch) mit Fokus auf Streiks, Sperrungen, IT-Ausfälle, Reisewarnungen.`;
-
   const list = arts.map(a => `- ${a.title} (${a.source?.name || ''}) – ${a.url}`).join('\n');
 
   const payload = {
@@ -167,8 +161,7 @@ async function insertPostFromAgent(
 
   if (dryRun) return { insertedId: null };
 
-  
-// NEU: Agent-Badge sicherstellen
+  // ⚡ Agent-Badge sicherstellen und zusammenführen
   const agentBadgeId = await ensureAgentBadgeId();
   const mergedBadgeIds = Array.from(new Set([...(cfg.defaultBadgeIds || []), agentBadgeId]));
 
@@ -191,7 +184,6 @@ async function insertPostFromAgent(
     await db.from('post_categories').insert({ post_id: post.id, category_id: cfg.defaultCategoryId });
   }
 
-  // ⚡ Immer Agent-Badge + evtl. weitere Standard-Badges
   for (const b of mergedBadgeIds) {
     await db.from('post_badges').insert({ post_id: post.id, badge_id: b });
   }
@@ -204,13 +196,20 @@ async function insertPostFromAgent(
   return { insertedId: post.id };
 }
 
-
-function nowHHMM() {
-  const d = new Date();
-  const h = String(d.getHours()).padStart(2,'0');
-  const m = String(d.getMinutes()).padStart(2,'0');
-  return `${h}:${m}`;
+/** Lokale Uhrzeit "HH:mm" in gewünschter Zeitzone (Default Europe/Berlin) */
+function nowHHMMInTZ(tz?: string) {
+  const timeZone = tz && tz.trim() ? tz : 'Europe/Berlin';
+  const parts = new Intl.DateTimeFormat('de-DE', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date());
+  const hh = parts.find(p => p.type === 'hour')?.value || '00';
+  const mm = parts.find(p => p.type === 'minute')?.value || '00';
+  return `${hh}:${mm}`;
 }
+
 function isDue(now: string, times: string[], windowMin=10) {
   const toMin = (t:string)=>{ const [H,M]=t.split(':').map(n=>+n); return H*60+M; };
   const n = toMin(now);
@@ -241,9 +240,9 @@ export async function runAgent({ force=false, dry=false } = {}) {
 
   try {
     if (!force) {
-      const now = nowHHMM();
-      if (!isDue(now, cfg.times || [], 10)) {
-        return { skipped: `not due (${now})` };
+      const nowLocal = nowHHMMInTZ(cfg.timezone);
+      if (!isDue(nowLocal, cfg.times || [], 10)) {
+        return { skipped: `not due (${nowLocal} ${cfg.timezone || 'Europe/Berlin'})` };
       }
     }
 
@@ -261,7 +260,6 @@ export async function runAgent({ force=false, dry=false } = {}) {
         try { markdown = await summarizeWithOpenAI(cfg, articles.slice(0, cfg.maxArticles || 30)); usedOpenAI = true; } catch { markdown = ''; }
       }
       if (!markdown) {
-        // Fallback-Preview
         markdown = (articles.slice(0, 10).map(a => `- ${a.title} — ${a.url}`)).join('\n') || '_Keine Inhalte im Dry-Run verfügbar._';
       }
 
