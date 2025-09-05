@@ -3,6 +3,7 @@ import { supabaseAdmin } from './supabaseAdmin';
 
 const AGENT_BADGE_NAME = '⚡ Agent';
 const AGENT_BADGE_COLOR = '#f59e0b'; // amber
+const NEWS_ENDPOINT = 'https://newsapi.org/v2/everything';
 
 async function ensureAgentBadgeId(): Promise<number> {
   const db = supabaseAdmin();
@@ -36,7 +37,7 @@ export type AgentConfig = {
   defaultBadgeIds: number[];
   model?: string;
   temperature?: number;
-  timezone?: string;         // NEU, z. B. "Europe/Berlin"
+  timezone?: string;         // z. B. "Europe/Berlin"
 };
 
 type NewsArticle = {
@@ -48,12 +49,90 @@ type NewsArticle = {
   content?: string|null;
 };
 
-const NEWS_ENDPOINT = 'https://newsapi.org/v2/everything';
-
+// ---------- Helpers ----------
 function hasEnv(name: string) {
   return !!process.env[name] && String(process.env[name]).trim().length > 0;
 }
 
+/** Terms sanitisieren (Trim, Duplikate, max Länge, max Anzahl) */
+function sanitizeTerms(raw: string[], maxTerms = 100, maxLen = 120) {
+  return Array.from(new Set(
+    (raw || [])
+      .map(s => s.trim())
+      .filter(s => s && s.length <= maxLen)
+  )).slice(0, maxTerms);
+}
+
+/** macht aus ["a","b","c"] => ["(a) OR (b)", "(c)"]  mit Char-Limit */
+function chunkQueries(terms: string[], maxQChars = 450): string[] {
+  const cleaned = sanitizeTerms(terms);
+  const chunks: string[] = [];
+  let cur = '';
+
+  for (const t of cleaned) {
+    const wrapped = `(${t})`;
+    if (!cur) { cur = wrapped; continue; }
+    // + 4 wegen " OR "
+    if ((cur.length + 4 + wrapped.length) <= maxQChars) {
+      cur += ` OR ${wrapped}`;
+    } else {
+      chunks.push(cur);
+      cur = wrapped;
+    }
+  }
+  if (cur) chunks.push(cur);
+  return chunks.length ? chunks : ['(Reisewarnung)']; // Fallback
+}
+
+/** dedupliziert News anhand URL */
+function mergeDedup(arts: NewsArticle[]): NewsArticle[] {
+  const seen = new Set<string>();
+  const out: NewsArticle[] = [];
+  for (const a of arts) {
+    const key = (a.url || '').trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(a);
+  }
+  return out;
+}
+
+/** sichere TZ (fällt auf Europe/Berlin zurück) */
+function safeTimeZone(tz?: string | null): string {
+  const candidate = (tz || '').trim();
+  if (!candidate) return 'Europe/Berlin';
+  try {
+    new Intl.DateTimeFormat('de-DE', { timeZone: candidate });
+    return candidate;
+  } catch {
+    return 'Europe/Berlin';
+  }
+}
+
+function nowHHMMInTZ(tz?: string) {
+  const timeZone = safeTimeZone(tz);
+  const parts = new Intl.DateTimeFormat('de-DE', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date());
+  const h = parts.find(p => p.type === 'hour')?.value ?? '00';
+  const m = parts.find(p => p.type === 'minute')?.value ?? '00';
+  return `${h}:${m}`;
+}
+
+function isDue(now: string, times: string[], windowMin=10) {
+  const toMin = (t:string)=>{ const [H,M]=t.split(':').map(n=>+n); return H*60+M; };
+  const n = toMin(now);
+  if (!Number.isFinite(n)) return false;
+  return (times||[]).some(t => {
+    const tm = toMin(t);
+    return Number.isFinite(tm) && Math.abs(tm - n) <= windowMin;
+  });
+}
+
+// ---------- Config ----------
 async function loadConfig(): Promise<AgentConfig> {
   const db = supabaseAdmin();
   const { data, error } = await db
@@ -64,40 +143,66 @@ async function loadConfig(): Promise<AgentConfig> {
   if (error) throw error;
   const cfg = (data?.value ?? null) as AgentConfig | null;
   if (!cfg) throw new Error('news_agent config missing');
+  // direkt sanitisieren
+  cfg.terms = sanitizeTerms(cfg.terms);
   return cfg;
 }
 
 export async function saveConfig(cfg: AgentConfig) {
+  // Sanitize bevor speichern
+  const clean: AgentConfig = {
+    ...cfg,
+    terms: sanitizeTerms(cfg.terms),
+  };
   const db = supabaseAdmin();
   await db
     .from('app_settings')
-    .upsert({ key: 'news_agent', value: cfg, updated_at: new Date().toISOString() })
+    .upsert({ key: 'news_agent', value: clean, updated_at: new Date().toISOString() })
     .eq('key', 'news_agent');
 }
 
-function buildQuery(terms: string[]) {
-  return terms.map(t => `(${t.trim()})`).filter(Boolean).join(' OR ');
-}
-
+// ---------- NewsAPI ----------
 async function fetchNews(cfg: AgentConfig): Promise<NewsArticle[]> {
   if (!hasEnv('NEWS_API_KEY')) return [];
   const apiKey = process.env.NEWS_API_KEY!;
-  const q = buildQuery(cfg.terms || []);
-  const params = new URLSearchParams({
-    q: q || 'Reisewarnung OR Flughafen Streik',
-    language: cfg.language || 'de',
-    sortBy: 'publishedAt',
-    pageSize: String(Math.min(100, Math.max(5, cfg.maxArticles || 30))),
-  });
-  const res = await fetch(`${NEWS_ENDPOINT}?${params.toString()}`, {
-    headers: { 'X-Api-Key': apiKey },
-    cache: 'no-store',
-  });
-  const json = await res.json().catch(()=> ({}));
-  if (!res.ok) throw new Error(json?.message || 'NewsAPI error');
-  return (json.articles || []) as NewsArticle[];
+  const batches = chunkQueries(cfg.terms || [], 450);
+
+  const targetLimit = Math.max(1, cfg.maxArticles || 30);
+  const perBatch = Math.min(100, Math.max(5, targetLimit));
+  const lang = cfg.language || 'de';
+
+  const all: NewsArticle[] = [];
+
+  for (const q of batches) {
+    const params = new URLSearchParams({
+      q,
+      language: lang,
+      sortBy: 'publishedAt',
+      pageSize: String(perBatch),
+    });
+    const res = await fetch(`${NEWS_ENDPOINT}?${params.toString()}`, {
+      headers: { 'X-Api-Key': apiKey },
+      cache: 'no-store',
+    });
+
+    let json: any = {};
+    try { json = await res.json(); } catch {}
+    if (!res.ok) {
+      // Optional: interne Notiz/Logging – hier still weiter
+      continue;
+    }
+
+    const arr = Array.isArray(json.articles) ? (json.articles as NewsArticle[]) : [];
+    all.push(...arr);
+
+    if (all.length >= targetLimit) break; // früh abbrechen
+  }
+
+  const deduped = mergeDedup(all);
+  return deduped.slice(0, targetLimit);
 }
 
+// ---------- OpenAI ----------
 async function summarizeWithOpenAI(cfg: AgentConfig, arts: NewsArticle[]) {
   if (!arts.length) return '';
   if (!hasEnv('OPENAI_API_KEY')) {
@@ -108,6 +213,7 @@ async function summarizeWithOpenAI(cfg: AgentConfig, arts: NewsArticle[]) {
   const temperature = cfg.temperature ?? 0.2;
 
   const sys = `Erstelle kurze, prägnante Bulletpoints auf Deutsch mit Fokus auf aktuelle Ereignisse, die den internationalen Tourismus beeinflussen. Relevanz besteht für Reisende, Reisebüros und die Tourismusbranche. Berücksichtige dabei Streiks, Sperrungen, Demonstrationen, Naturkatastrophen, extreme Wetterereignisse, IT-Ausfälle im Flug- und Bahnverkehr, Sicherheitswarnungen, politische Unruhen, Reisewarnungen, Hotelschließungen, Insolvenzen von Airlines oder Reiseveranstaltern sowie sonstige Störungen, die Reisen, Unterkünfte oder touristische Infrastruktur weltweit beeinträchtigen.`;
+
   const list = arts.map(a => `- ${a.title} (${a.source?.name || ''}) – ${a.url}`).join('\n');
 
   const payload = {
@@ -134,8 +240,7 @@ async function summarizeWithOpenAI(cfg: AgentConfig, arts: NewsArticle[]) {
   return content;
 }
 
-
-
+// ---------- Insert Post ----------
 function makeSlug(title: string) {
   return title
     .toLowerCase()
@@ -198,42 +303,11 @@ async function insertPostFromAgent(
   return { insertedId: post.id };
 }
 
-/** Lokale Uhrzeit "HH:mm" in gewünschter Zeitzone (Default Europe/Berlin) */
-
-function safeTimeZone(tz?: string | null): string {
-  const candidate = (tz || '').trim();
-  try {
-    // wirft, wenn ungültig
-    new Intl.DateTimeFormat('de-DE', { timeZone: candidate });
-    return candidate;
-  } catch {
-    return 'Europe/Berlin'; // fallback
-  }
-}
-
-
-function nowHHMMInTZ(tz?: string) {
-  const timeZone = safeTimeZone(tz);
-  const parts = new Intl.DateTimeFormat('de-DE', {
-    timeZone,
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).formatToParts(new Date());
-  const h = parts.find(p => p.type === 'hour')?.value ?? '00';
-  const m = parts.find(p => p.type === 'minute')?.value ?? '00';
-  return `${h}:${m}`;
-}
-
-function isDue(now: string, times: string[], windowMin=10) {
-  const toMin = (t:string)=>{ const [H,M]=t.split(':').map(n=>+n); return H*60+M; };
-  const n = toMin(now);
-  return (times||[]).some(t => Math.abs(toMin(t)-n) <= windowMin);
-}
-
+// ---------- Orchestrierung ----------
 export async function runAgent({ force=false, dry=false } = {}) {
   const t0 = Date.now();
   const cfg = await loadConfig();
+
   if (!cfg.enabled && !force) {
     await logRun(Date.now()-t0, 0, 0, !!dry, 'disabled');
     return { skipped: 'disabled' };
@@ -257,7 +331,7 @@ export async function runAgent({ force=false, dry=false } = {}) {
     if (!force) {
       const nowLocal = nowHHMMInTZ(cfg.timezone);
       if (!isDue(nowLocal, cfg.times || [], 10)) {
-        return { skipped: `not due (${nowLocal} ${cfg.timezone || 'Europe/Berlin'})` };
+        return { skipped: `not due (${nowLocal} ${safeTimeZone(cfg.timezone)})` };
       }
     }
 
@@ -306,6 +380,7 @@ export async function runAgent({ force=false, dry=false } = {}) {
   }
 }
 
+// ---------- Logging ----------
 export async function logRun(tookMs: number, found: number, inserted: number, dryRun: boolean, note?: string) {
   const db = supabaseAdmin();
   await db.from('agent_runs').insert({
@@ -316,6 +391,7 @@ export async function logRun(tookMs: number, found: number, inserted: number, dr
   });
 }
 
+// ---------- API-Wrapper ----------
 export async function getLogs(limit = 20){
   const db = supabaseAdmin();
   const { data } = await db
