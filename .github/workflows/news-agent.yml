@@ -1,49 +1,72 @@
-# .github/workflows/news-agent.yml
 name: News Agent
 
 on:
-  schedule:
-    # Läuft alle 10 Minuten (UTC!)
-    - cron: '*/10 * * * *'
   workflow_dispatch:
     inputs:
       dry:
         description: 'Dry run'
+        required: false
         default: 'true'
       force:
-        description: 'Force'
+        description: 'Force run (ignore schedule)'
+        required: false
         default: 'true'
+
+  schedule:
+  - cron: '10 8,13,16 * * 1-5'  # z.B. Mo–Fr 06:10/10:10/15:10 UTC
+
+concurrency:
+  group: news-agent
+  cancel-in-progress: false
 
 jobs:
   run:
     runs-on: ubuntu-latest
     env:
-      BASE_URL: ${{ secrets.BASE_URL }}                 # z.B. https://news-check-puce.vercel.app
-      CRON_SECRET: ${{ secrets.NEWS_AGENT_CRON_SECRET }}# MUSS exakt = Vercel-Env NEWS_AGENT_CRON_SECRET
-      # Bei schedule-runs: DRY/FORCE leer -> Server entscheidet anhand Zeiten.
-      DRY: ${{ github.event_name == 'schedule' && '' || inputs.dry }}
-      FORCE: ${{ github.event_name == 'schedule' && '' || inputs.force }}
+      BASE_URL: ${{ secrets.BASE_URL }}                
+      CRON_SECRET: ${{ secrets.NEWS_AGENT_CRON_SECRET }}
+      DRY: ${{ inputs.dry }}
+      FORCE: ${{ inputs.force }}
+
     steps:
-      - name: Run agent
+      - name: Compose request URL (with optional flags)
+        id: vars
         shell: bash
         run: |
           set -euo pipefail
+          base="${BASE_URL%/}"
+          path="/api/admin/news-agent/run"
+          qs=""
+          [ "${DRY:-}"   = "true" ] && qs="${qs:+$qs&}dry=1"
+          [ "${FORCE:-}" = "true" ] && qs="${qs:+$qs&}force=1"
+          url="$base$path"; [ -n "$qs" ] && url="$url?$qs"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "POST $url"
 
-          dry_flag=""
-          force_flag=""
-          [ "${DRY:-}" = "true" ]  && dry_flag="1"
-          [ "${FORCE:-}" = "true" ] && force_flag="1"
-
-          URL="${BASE_URL%/}/api/admin/news-agent/run?key=${CRON_SECRET}"
-          [ -n "$dry_flag" ] && URL="$URL&dry=$dry_flag"
-          [ -n "$force_flag" ] && URL="$URL&force=$force_flag"
-
-          echo "POST $URL"
-          http_code=$(curl -sS -o /tmp/resp.json -w "%{http_code}" -X POST \
+      - name: Call run endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="${{ steps.vars.outputs.url }}"
+          code=$(curl -sS -o /tmp/resp.json -w "%{http_code}" -X POST \
             -H "Accept: application/json" \
-            "$URL")
-          echo "HTTP $http_code"
+            -H "X-Cron-Auth: ${CRON_SECRET}" \
+            "$url")
+          echo "HTTP $code"
           echo "---- Response ----"
           cat /tmp/resp.json || true
           echo "------------------"
-          test "$http_code" -ge 200 -a "$http_code" -lt 300
+          if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
+            exit 1
+          fi
+
+      - name: Show X-Route-Version header (diagnostics)
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="${{ steps.vars.outputs.url }}"
+          curl -sSI -X POST \
+            -H "X-Cron-Auth: ${CRON_SECRET}" \
+            "$url" | grep -i '^X-Route-Version:' || true
+
