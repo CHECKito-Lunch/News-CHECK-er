@@ -4,7 +4,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import AdminTabs from '../_shared/AdminTabs';
+import AdminTabs from '../shared/AdminTabs';
 
 type Trend = 'up'|'down'|'flat'|null;
 type KPI = {

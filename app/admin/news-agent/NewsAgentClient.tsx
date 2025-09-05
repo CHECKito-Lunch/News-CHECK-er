@@ -1,10 +1,10 @@
 'use client';
 
 import { useEffect, useState, useMemo } from 'react';
-import AdminTabs from '../_shared/AdminTabs';
-import { useAdminAuth } from '../_shared/auth';
-import { inputClass, cardClass } from '../_shared/ui';
-import type { AgentConfig, AgentLog, Option } from '../_shared/types';
+import AdminTabs from '../shared/AdminTabs';
+import { useAdminAuth } from '../shared/auth';
+import { inputClass, cardClass } from '../shared/ui';
+import type { AgentConfig, AgentLog, Option } from '../shared/types';
 
 export default function NewsAgentClient() {
   const { loading, sessionOK, isAdmin, authMsg, userEmail, setUserEmail, userPassword, setUserPassword, doLogin } = useAdminAuth();

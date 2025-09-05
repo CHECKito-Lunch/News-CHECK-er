@@ -3,11 +3,11 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import AdminTabs from '../_shared/AdminTabs';
-import { useAdminAuth } from '../_shared/auth';
-import { inputClass, cardClass } from '../_shared/ui';
-import { slugify, toLocalInput, fromLocalInput } from '../_shared/helpers';
-import type { Option, SourceRow, PostRow } from '../_shared/types';
+import AdminTabs from '../shared/AdminTabs';
+import { useAdminAuth } from '../shared/auth';
+import { inputClass, cardClass } from '../shared/ui';
+import { slugify, toLocalInput, fromLocalInput } from '../shared/helpers';
+import type { Option, SourceRow, PostRow } from '../shared/types';
 import RichTextEditor from '../../components/RichTextEditor'; // Pfad prüfen: app/components/RichTextEditor
 
 const EMOJI_CHOICES = ['📌','📅','🗓️','📣','📊','📝','🧑‍💻','🤝','☕','🎉','🛠️','🧪'];

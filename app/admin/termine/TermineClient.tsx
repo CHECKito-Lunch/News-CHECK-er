@@ -2,7 +2,7 @@
 
 
 import { useEffect, useMemo, useState } from 'react';
-import AdminTabs from '../_shared/AdminTabs';
+import AdminTabs from '../shared/AdminTabs';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import listPlugin from '@fullcalendar/list';

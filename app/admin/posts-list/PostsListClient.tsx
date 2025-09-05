@@ -3,11 +3,11 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import AdminTabs from '../_shared/AdminTabs';
-import { useAdminAuth } from '../_shared/auth';
-import { inputClass, cardClass } from '../_shared/ui';
-import { statusDE } from '../_shared/helpers';
-import type { Option, PostRow, Revision } from '../_shared/types';
+import AdminTabs from '../shared/AdminTabs';
+import { useAdminAuth } from '../shared/auth';
+import { inputClass, cardClass } from '../shared/ui';
+import { statusDE } from '../shared/helpers';
+import type { Option, PostRow, Revision } from '../shared/types';
 
 export default function PostsListClient() {
   const { loading, sessionOK, isAdmin, authMsg, setAuthMsg, userEmail, setUserEmail, userPassword, setUserPassword, doLogin } = useAdminAuth();

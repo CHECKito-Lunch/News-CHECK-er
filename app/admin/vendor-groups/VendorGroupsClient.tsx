@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
-import AdminTabs from '../_shared/AdminTabs';
+import AdminTabs from '../shared/AdminTabs';
 
 type Vendor = { id:number; name:string };
 type Group = { id:number; name:string; members?: number[] };

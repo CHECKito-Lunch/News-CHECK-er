@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import AdminTabs from '../_shared/AdminTabs';
+import AdminTabs from '../shared/AdminTabs';
 
 type Tool = { id:number; title:string; icon:string|null; href:string; sort:number };
 

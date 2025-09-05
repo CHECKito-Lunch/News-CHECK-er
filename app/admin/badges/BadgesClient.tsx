@@ -1,8 +1,8 @@
 // app/admin/badges/BadgesClient.tsx
 'use client';
 
-import AdminTabs from '../_shared/AdminTabs';
-import TaxonomyEditor from '../_components/TaxonomyEditor';
+import AdminTabs from '../shared/AdminTabs';
+import TaxonomyEditor from '../components/TaxonomyEditor';
 
 export default function BadgesClient() {
   return (
