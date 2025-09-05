@@ -1,7 +1,6 @@
-// app/admin/news-agent/NewsAgentClient.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import AdminTabs from '../_shared/AdminTabs';
 import { useAdminAuth } from '../_shared/auth';
 import { inputClass, cardClass } from '../_shared/ui';
@@ -31,8 +30,22 @@ export default function NewsAgentClient() {
   const [logs, setLogs] = useState<AgentLog[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
 
-  useEffect(() => { fetch('/api/meta', { credentials:'same-origin' }).then(r=>r.json()).then(setMeta).catch(()=>setMeta({categories:[],badges:[],vendors:[]})); }, []);
+  // NEU: Cron-Diagnose
+  const [cronInfo, setCronInfo] = useState<{ hasSecret: boolean }|null>(null);
+
+  useEffect(() => {
+    fetch('/api/meta', { credentials:'same-origin' })
+      .then(r=>r.json()).then(setMeta)
+      .catch(()=>setMeta({categories:[],badges:[],vendors:[]}));
+  }, []);
+
   useEffect(() => { if (sessionOK && isAdmin) loadConfig(); }, [sessionOK, isAdmin]);
+
+  useEffect(() => {
+    fetch('/api/_diag/cron-info', { credentials:'same-origin' })
+      .then(r=>r.json()).then(j => setCronInfo({ hasSecret: !!j?.hasNEWS_AGENT_CRON_SECRET }))
+      .catch(()=> setCronInfo({ hasSecret: false }));
+  }, []);
 
   async function loadConfig() {
     setAgentLoading(true); setAgentMsg('');
@@ -70,7 +83,6 @@ export default function NewsAgentClient() {
       await loadLogs();
     } catch(e:any) { setAgentMsg(e?.message || 'Testlauf fehlgeschlagen.'); }
     finally { setAgentLoading(false); }
-    
   }
 
   async function loadLogs() {
@@ -82,10 +94,63 @@ export default function NewsAgentClient() {
     } finally { setLogsLoading(false); }
   }
 
+  // ===== Cron-Snippets (ohne Secret im Klartext) =====
+  const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://example.com';
+
+const curlSnippet = useMemo(() => {
+  return [
+    '# GitHub Actions oder Terminal (Secret NICHT im Klartext notieren)',
+    'curl -sS -X POST \\',
+    // --------------- vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+    `  "${baseUrl}/api/admin/news-agent/run?dry=1&force=1&key=\\\${NEWS_AGENT_CRON_SECRET}"`,
+    // --------------- ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  ].join('\n');
+}, [baseUrl]);
+
+const ghaSnippet = useMemo(() => {
+  return `name: News Agent
+on:
+  schedule:
+    - cron: '0 8,12,17 * * *'  # UTC! anpassen
+  workflow_dispatch:
+    inputs:
+      dry:
+        description: "Dry run?"
+        type: boolean
+        default: true
+      force:
+        description: "Force regardless of schedule?"
+        type: boolean
+        default: true
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call agent
+        env:
+          BASE_URL: \\\${{ vars.BASE_URL }}   # z.B. https://news-check-puce.vercel.app
+          CRON_SECRET: \\\${{ secrets.NEWS_AGENT_CRON_SECRET }}
+          DRY: \\\${{ github.event.inputs.dry }}
+          FORCE: \\\${{ github.event.inputs.force }}
+        run: |
+          set -euo pipefail
+          URL="\\\${BASE_URL%/}/api/admin/news-agent/run?dry=\\\${DRY:+1}&force=\\\${FORCE:+1}&key=\\\${CRON_SECRET}"
+          echo "POST \\\$URL"
+          code=$(curl -sS -o /tmp/resp.json -w "%{http_code}" -X POST "\\\$URL")
+          echo "HTTP \\\$code"
+          cat /tmp/resp.json || true
+          test "\\\$code" -ge 200 -a "\\\$code" -lt 300
+`;
+}, [baseUrl]);
+  function copy(text: string) {
+    navigator.clipboard.writeText(text).catch(()=>{});
+  }
+
   // ---------- RENDER ----------
   return (
     <div className="container max-w-15xl mx-auto py-6 space-y-5">
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">Admin · News‑Agent</h1>
+      <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">Admin · News-Agent</h1>
       <AdminTabs />
 
       {!loading && !sessionOK && (
@@ -117,7 +182,7 @@ export default function NewsAgentClient() {
                   <input type="checkbox" checked={agent.enabled} onChange={(e)=>setAgent(a=>({ ...a, enabled: e.target.checked }))} />
                   Aktiv
                 </label>
-                <button type="button" onClick={runDry} className="px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white">Jetzt ausführen (Dry‑Run)</button>
+                <button type="button" onClick={runDry} className="px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white">Jetzt ausführen (Dry-Run)</button>
                 <button type="button" onClick={saveConfig} className="px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white">Speichern</button>
               </div>
             </div>
@@ -159,7 +224,7 @@ export default function NewsAgentClient() {
                 <div>
                   <label className="form-label">Länder (ISO-2, komma-separiert)</label>
                   <input className={inputClass} value={agent.countries.join(',')} onChange={(e)=>setAgent(a=>({ ...a, countries: e.target.value.split(',').map(s=>s.trim().toUpperCase()).filter(Boolean) }))} placeholder="DE,AT,CH,EU" />
-                  <p className="text-xs text-gray-500 mt-1">„EU“ steht für EU‑weite Quellen (intern behandelt).</p>
+                  <p className="text-xs text-gray-500 mt-1">„EU“ steht für EU-weite Quellen (intern behandelt).</p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
@@ -237,7 +302,7 @@ export default function NewsAgentClient() {
                         <li key={l.id} className="py-2 text-sm flex items-center justify-between">
                           <div>
                             <div className="font-medium">{new Date(l.ranAt).toLocaleString()}</div>
-                            <div className="text-gray-500">gefunden: {l.found} · eingefügt: {l.inserted} · {l.dryRun ? 'Dry‑Run' : 'Live'}{l.note ? ` · ${l.note}` : ''}</div>
+                            <div className="text-gray-500">gefunden: {l.found} · eingefügt: {l.inserted} · {l.dryRun ? 'Dry-Run' : 'Live'}{l.note ? ` · ${l.note}` : ''}</div>
                           </div>
                           <div className="text-gray-500">{Math.round(l.tookMs)} ms</div>
                         </li>
@@ -252,7 +317,48 @@ export default function NewsAgentClient() {
               <button type="button" onClick={saveConfig} disabled={agentLoading} className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50">
                 {agentLoading ? 'Speichert…' : 'Speichern'}
               </button>
-              <span className="text-sm text-gray-600 dark:text-gray-300">Der Server‑Cron liest diese Konfiguration und triggert den Agenten zu den Zeiten.</span>
+              <span className="text-sm text-gray-600 dark:text-gray-300">Der Server-Cron liest diese Konfiguration und triggert den Agenten zu den Zeiten.</span>
+            </div>
+          </div>
+
+          {/* ===== Cron & Automatisierung ===== */}
+          <div className={cardClass + ' space-y-3'}>
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold">Cron & Automatisierung</h2>
+              <span className={`text-sm px-2 py-0.5 rounded-full border ${cronInfo?.hasSecret ? 'border-green-400 text-green-700' : 'border-red-400 text-red-700'}`}>
+                Server-Secret: {cronInfo?.hasSecret ? 'vorhanden' : 'fehlt'}
+              </span>
+            </div>
+
+            <p className="text-sm text-gray-600 dark:text-gray-300">
+              Live-Läufe sind nur via Cron/Webhook erlaubt. Aus der UI startet <em>Dry-Run</em>.
+              Hinterlege in GitHub Actions ein Secret <code>NEWS_AGENT_CRON_SECRET</code> und eine Variable <code>BASE_URL</code>.
+            </p>
+
+            <div className="grid md:grid-cols-2 gap-4">
+              <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-3">
+                <div className="flex items-center justify-between">
+                  <div className="font-medium">curl-Test (lokal/GHA)</div>
+                  <button className="px-3 py-1.5 text-sm rounded border dark:border-gray-700" onClick={()=>copy(curlSnippet)} type="button">Copy</button>
+                </div>
+                <pre className="mt-2 text-xs overflow-x-auto"><code>{curlSnippet}</code></pre>
+                <div className="text-xs text-gray-500 mt-2">
+                  Health-Check: <code>{baseUrl}/api/_diag/cron?key=***</code> → <em>authorized:true</em> erwartet.
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-3">
+                <div className="flex items-center justify-between">
+                  <div className="font-medium">GitHub Action (Beispiel)</div>
+                  <button className="px-3 py-1.5 text-sm rounded border dark:border-gray-700" onClick={()=>copy(ghaSnippet)} type="button">Copy</button>
+                </div>
+                <pre className="mt-2 text-xs overflow-x-auto"><code>{ghaSnippet}</code></pre>
+                <ul className="text-xs text-gray-500 mt-2 list-disc pl-4 space-y-1">
+                  <li>Secret <code>NEWS_AGENT_CRON_SECRET</code> in GitHub anlegen.</li>
+                  <li>Variable <code>BASE_URL</code> → deine Vercel-URL (Prod).</li>
+                  <li>Cron-Zeiten sind UTC (oben anpassen).</li>
+                </ul>
+              </div>
             </div>
           </div>
         </>

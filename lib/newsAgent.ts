@@ -1,6 +1,30 @@
 // lib/newsAgent.ts
 import { supabaseAdmin } from './supabaseAdmin';
 
+const AGENT_BADGE_NAME = '⚡ Agent';
+const AGENT_BADGE_COLOR = '#f59e0b'; // amber
+
+async function ensureAgentBadgeId(): Promise<number> {
+  const db = supabaseAdmin();
+  // 1) Suchen
+  const { data: found, error: e1 } = await db
+    .from('badges')
+    .select('id')
+    .eq('name', AGENT_BADGE_NAME)
+    .maybeSingle();
+  if (e1) throw e1;
+  if (found?.id) return found.id;
+
+  // 2) Anlegen, wenn es nicht existiert
+  const { data: created, error: e2 } = await db
+    .from('badges')
+    .insert({ name: AGENT_BADGE_NAME, color: AGENT_BADGE_COLOR, kind: 'info' })
+    .select('id')
+    .single();
+  if (e2) throw e2;
+  return created!.id;
+}
+
 export type AgentConfig = {
   enabled: boolean;
   language: 'de'|'en'|'fr'|'it'|'es';
@@ -143,6 +167,11 @@ async function insertPostFromAgent(
 
   if (dryRun) return { insertedId: null };
 
+  
+// NEU: Agent-Badge sicherstellen
+  const agentBadgeId = await ensureAgentBadgeId();
+  const mergedBadgeIds = Array.from(new Set([...(cfg.defaultBadgeIds || []), agentBadgeId]));
+
   const { data: post, error: e1 } = await db
     .from('posts')
     .insert({
@@ -153,8 +182,6 @@ async function insertPostFromAgent(
       status,
       effective_from: new Date().toISOString(),
       vendor_id: cfg.defaultVendorId ?? null,
-      // author_id: null, // optional, wenn vorhanden
-      // author_name: 'News-Agent', // nur falls Spalte existiert
     })
     .select('id')
     .single();
@@ -163,9 +190,12 @@ async function insertPostFromAgent(
   if (cfg.defaultCategoryId) {
     await db.from('post_categories').insert({ post_id: post.id, category_id: cfg.defaultCategoryId });
   }
-  for (const b of (cfg.defaultBadgeIds || [])) {
+
+  // ⚡ Immer Agent-Badge + evtl. weitere Standard-Badges
+  for (const b of mergedBadgeIds) {
     await db.from('post_badges').insert({ post_id: post.id, badge_id: b });
   }
+
   for (let i = 0; i < sources.length; i++) {
     const s = sources[i];
     await db.from('post_sources').insert({ post_id: post.id, url: s.url, label: s.label ?? null, sort_order: i });
@@ -173,6 +203,7 @@ async function insertPostFromAgent(
 
   return { insertedId: post.id };
 }
+
 
 function nowHHMM() {
   const d = new Date();
