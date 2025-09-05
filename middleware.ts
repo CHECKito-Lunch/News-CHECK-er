@@ -3,22 +3,33 @@ import { NextResponse, NextRequest } from 'next/server';
 
 type Role = 'admin' | 'moderator' | 'user';
 
-function isPublic(pathname: string, method: string) {
-  // Login / Registrierung (Seite + API)
+function isPublic(pathname: string) {
+  // Seiten + offene APIs
   if (pathname === '/login' || pathname === '/register') return true;
   if (pathname.startsWith('/api/login') || pathname.startsWith('/api/register')) return true;
   if (pathname.startsWith('/api/me')) return true;
 
-  
+  // ➜ Diagnose-Route IMMER zulassen
+  if (pathname.startsWith('/api/_diag/cron')) return true;
 
   // Next statics / Assets
   if (pathname.startsWith('/_next')) return true;
   if (pathname === '/favicon.ico') return true;
   if (pathname === '/header.svg') return true;
- 
-
 
   return false;
+}
+
+// Cron-Auth nur für Middleware (Edge-safe)
+function isCronAuthorizedInMiddleware(req: NextRequest) {
+  const secret = process.env.NEWS_AGENT_CRON_SECRET?.trim();
+  if (!secret) return false;
+
+  const h = req.headers.get('x-cron-auth')?.trim() || '';
+  const bearer = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
+  const key = req.nextUrl.searchParams.get('key')?.trim() || '';
+
+  return h === secret || bearer === secret || key === secret;
 }
 
 function isAdminArea(pathname: string) {
@@ -31,13 +42,18 @@ function isAdminArea(pathname: string) {
 
 export function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
-  const method = req.method;
 
-  if (isPublic(pathname, method)) return NextResponse.next();
+  // a) Public direkt durch
+  if (isPublic(pathname)) return NextResponse.next();
 
+  // b) Cron: Run-Endpoint darf mit Secret immer durch
+  if (pathname.startsWith('/api/admin/news-agent/run') && isCronAuthorizedInMiddleware(req)) {
+    return NextResponse.next();
+  }
+
+  // c) Ab hier normale Auth
   const role = req.cookies.get('user_role')?.value as Role | undefined;
 
-  // Nicht eingeloggt → immer zum Login
   if (!role) {
     if (pathname.startsWith('/api')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -47,7 +63,6 @@ export function middleware(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Eingeloggt, aber Admin-Bereich erfordert admin/moderator
   if (isAdminArea(pathname) && !(role === 'admin' || role === 'moderator')) {
     if (pathname.startsWith('/api')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
