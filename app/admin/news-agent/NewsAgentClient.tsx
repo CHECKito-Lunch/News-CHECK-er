@@ -320,47 +320,6 @@ jobs:
               <span className="text-sm text-gray-600 dark:text-gray-300">Der Server-Cron liest diese Konfiguration und triggert den Agenten zu den Zeiten.</span>
             </div>
           </div>
-
-          {/* ===== Cron & Automatisierung ===== */}
-          <div className={cardClass + ' space-y-3'}>
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold">Cron & Automatisierung</h2>
-              <span className={`text-sm px-2 py-0.5 rounded-full border ${cronInfo?.hasSecret ? 'border-green-400 text-green-700' : 'border-red-400 text-red-700'}`}>
-                Server-Secret: {cronInfo?.hasSecret ? 'vorhanden' : 'fehlt'}
-              </span>
-            </div>
-
-            <p className="text-sm text-gray-600 dark:text-gray-300">
-              Live-Läufe sind nur via Cron/Webhook erlaubt. Aus der UI startet <em>Dry-Run</em>.
-              Hinterlege in GitHub Actions ein Secret <code>NEWS_AGENT_CRON_SECRET</code> und eine Variable <code>BASE_URL</code>.
-            </p>
-
-            <div className="grid md:grid-cols-2 gap-4">
-              <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-3">
-                <div className="flex items-center justify-between">
-                  <div className="font-medium">curl-Test (lokal/GHA)</div>
-                  <button className="px-3 py-1.5 text-sm rounded border dark:border-gray-700" onClick={()=>copy(curlSnippet)} type="button">Copy</button>
-                </div>
-                <pre className="mt-2 text-xs overflow-x-auto"><code>{curlSnippet}</code></pre>
-                <div className="text-xs text-gray-500 mt-2">
-                  Health-Check: <code>{baseUrl}/api/_diag/cron?key=***</code> → <em>authorized:true</em> erwartet.
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-3">
-                <div className="flex items-center justify-between">
-                  <div className="font-medium">GitHub Action (Beispiel)</div>
-                  <button className="px-3 py-1.5 text-sm rounded border dark:border-gray-700" onClick={()=>copy(ghaSnippet)} type="button">Copy</button>
-                </div>
-                <pre className="mt-2 text-xs overflow-x-auto"><code>{ghaSnippet}</code></pre>
-                <ul className="text-xs text-gray-500 mt-2 list-disc pl-4 space-y-1">
-                  <li>Secret <code>NEWS_AGENT_CRON_SECRET</code> in GitHub anlegen.</li>
-                  <li>Variable <code>BASE_URL</code> → deine Vercel-URL (Prod).</li>
-                  <li>Cron-Zeiten sind UTC (oben anpassen).</li>
-                </ul>
-              </div>
-            </div>
-          </div>
         </>
       )}
     </div>
