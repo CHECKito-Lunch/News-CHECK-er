@@ -11,7 +11,7 @@ function isPublic(pathname: string) {
   if (pathname.startsWith('/api/admin/news-agent/run')) return true;
  
   // ➜ Diagnose-Route IMMER zulassen
-  if (pathname.startsWith('/api/_diag/cron')) return true;
+  if (pathname.startsWith('/api/_diag')) return true;
 
   // Next statics / Assets
   if (pathname.startsWith('/_next')) return true;
