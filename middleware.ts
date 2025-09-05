@@ -4,11 +4,11 @@ import { NextResponse, NextRequest } from 'next/server';
 type Role = 'admin' | 'moderator' | 'user';
 
 function isPublic(pathname: string) {
-  // Seiten + offene APIs
   if (pathname === '/login' || pathname === '/register') return true;
   if (pathname.startsWith('/api/login') || pathname.startsWith('/api/register')) return true;
   if (pathname.startsWith('/api/me')) return true;
-  if (pathname.startsWith('/api/admin/news-agent/run')) return true;
+
+  // Diagnose offen lassen
   if (pathname.startsWith('/api/_diag')) return true;
 
   // Next statics / Assets
