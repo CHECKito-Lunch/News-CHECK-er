@@ -107,7 +107,7 @@ async function summarizeWithOpenAI(cfg: AgentConfig, arts: NewsArticle[]) {
   const model = cfg.model || 'gpt-4o-mini';
   const temperature = cfg.temperature ?? 0.2;
 
-  const sys = `Du bist ein News-Analyst für Reise & Tourismus. Erstelle kurze Bulletpoints (Deutsch) mit Fokus auf Streiks, Sperrungen, IT-Ausfälle, Reisewarnungen.`;
+  const sys = `Erstelle kurze, prägnante Bulletpoints auf Deutsch mit Fokus auf aktuelle Ereignisse, die den internationalen Tourismus beeinflussen. Relevanz besteht für Reisende, Reisebüros und die Tourismusbranche. Berücksichtige dabei Streiks, Sperrungen, Demonstrationen, Naturkatastrophen, extreme Wetterereignisse, IT-Ausfälle im Flug- und Bahnverkehr, Sicherheitswarnungen, politische Unruhen, Reisewarnungen, Hotelschließungen, Insolvenzen von Airlines oder Reiseveranstaltern sowie sonstige Störungen, die Reisen, Unterkünfte oder touristische Infrastruktur weltweit beeinträchtigen.`;
   const list = arts.map(a => `- ${a.title} (${a.source?.name || ''}) – ${a.url}`).join('\n');
 
   const payload = {
