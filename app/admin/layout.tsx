@@ -21,7 +21,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-30 border-b border-gray-200 bg-white/70 dark:bg-gray-900/70 backdrop-blur">
-        <div className="container max-w-7xl mx-auto flex items-center justify-between py-3">
+        <div className="container max-w-15xl mx-auto flex items-center justify-between py-3">
           <Link
             href="/"
             className="inline-flex items-center gap-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-white/10 hover:bg-gray-50 dark:hover:bg-white/20 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-100 shadow-sm"

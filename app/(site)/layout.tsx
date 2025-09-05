@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import SiteHeader from '../components/SiteHeader';
 
 // gleiche Breite wie im Admin (bei Bedarf hier zentral ändern):
-const SHELL_WIDTH = 'max-w-7xl';
+const SHELL_WIDTH = 'max-w-15xl';
 
 export default function SiteLayout({ children }: { children: ReactNode }) {
   return (

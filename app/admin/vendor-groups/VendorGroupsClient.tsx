@@ -91,6 +91,7 @@ export default function VendorGroups() {
       </div>
 
       {/* Anlegen */}
+      <div className="container max-w-15xl mx-auto py-6 space-y-5">
       <div className="grid sm:grid-cols-4 gap-2 items-end">
         <div className="sm:col-span-3">
           <label className="form-label">Gruppenname</label>
@@ -100,7 +101,7 @@ export default function VendorGroups() {
           <button className="btn btn-primary" disabled={!newName || creating} onClick={createGroup}>Anlegen</button>
         </div>
       </div>
-
+</div>
       {/* Gruppenliste + Auswahl */}
       <div className="grid md:grid-cols-3 gap-4">
         <div className="md:col-span-1 border rounded-xl p-3 space-y-2">

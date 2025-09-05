@@ -1,4 +1,5 @@
 // app/api/admin/users/[id]/password/route.ts
+import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
@@ -8,13 +9,11 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
+type RouteContext = { params: { id: string } };
+
 async function resolveRoleFromCookies(): Promise<Role | null> {
   const jar = await cookies();
-
-  // 1) Primär wie im Layout: user_role-Cookie
   let role = jar.get('user_role')?.value as Role | undefined;
-
-  // 2) Fallback (Legacy): JWT aus AUTH_COOKIE verifizieren
   if (!role) {
     const jwt = jar.get(AUTH_COOKIE)?.value;
     if (jwt) {
@@ -25,12 +24,8 @@ async function resolveRoleFromCookies(): Promise<Role | null> {
   return (role ?? null) as Role | null;
 }
 
-export async function PATCH(
-  req: Request,
-  { params }: { params: { id: string } }
-) {
+export async function PATCH(req: NextRequest, { params }: RouteContext) {
   try {
-    // --- Admin-/Moderator-Only Guard (jetzt kompatibel mit deinem Login) ---
     const role = await resolveRoleFromCookies();
     if (role !== 'admin' && role !== 'moderator') {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
@@ -52,7 +47,6 @@ export async function PATCH(
 
     const s = supabaseAdmin();
 
-    // App-User → auth.user_id ermitteln
     const { data: row, error: fetchErr } = await s
       .from('app_users')
       .select('user_id, email')
@@ -69,7 +63,6 @@ export async function PATCH(
       );
     }
 
-    // Passwort setzen (Service-Role erforderlich)
     const { error: updErr } = await s.auth.admin.updateUserById(row.user_id, {
       password,
     });

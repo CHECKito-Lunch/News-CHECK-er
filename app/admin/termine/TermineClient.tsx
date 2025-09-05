@@ -79,7 +79,7 @@ export default function AdminTerminePage() {
   ];
 
   return (
-    <div className="container max-w-6xl mx-auto py-6 space-y-6">
+    <div className="container max-w-15xl mx-auto py-6 space-y-6">
       <h1 className="text-2xl font-bold">Termine verwalten</h1>
       <AdminTabs />
 

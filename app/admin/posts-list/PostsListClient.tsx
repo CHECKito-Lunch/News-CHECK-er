@@ -65,7 +65,7 @@ export default function PostsListClient() {
 
   // ---------- RENDER ----------
   return (
-    <div className="container max-w-5xl mx-auto py-6 space-y-5">
+    <div className="container max-w-15xl mx-auto py-6 space-y-5">
       <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">Admin · Beiträge</h1>
       <AdminTabs />
 

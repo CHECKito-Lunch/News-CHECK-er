@@ -6,7 +6,7 @@ import TaxonomyEditor from '../_components/TaxonomyEditor';
 
 export default function BadgesClient() {
   return (
-    <div className="container max-w-5xl mx-auto py-6 space-y-5">
+    <div className="container max-w-15xl mx-auto py-6 space-y-5">
       <h1 className="text-2xl font-bold">Badges</h1>
       <AdminTabs />
       <div className="card p-4 rounded-2xl border dark:border-gray-800">
