@@ -1,11 +1,28 @@
 // lib/server/cronSecret.ts
-export function isCronAuthorized(req: Request): boolean {
-  const hdr = req.headers.get('x-cron-secret');
-  const expected = process.env.CRON_SECRET?.trim();
-  return Boolean(hdr && expected && hdr === expected);
+export function isCronAuthorized(req: Request) {
+  const secret = process.env.NEWS_AGENT_CRON_SECRET?.trim();
+  if (!secret) return false;
+
+  const h = req.headers;
+
+  // a) Eigener Header
+  const viaHeader = (h.get('x-cron-auth') || '').trim();
+  if (viaHeader && viaHeader === secret) return true;
+
+  // b) Als Bearer
+  const bearer = (h.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
+  if (bearer && bearer === secret) return true;
+
+  // c) Optional: als Query-Param ?key=...
+  const key = new URL(req.url).searchParams.get('key');
+  if (key && key === secret) return true;
+
+  return false;
 }
 
-export function getDryFlag(req: Request): boolean {
-  const url = new URL(req.url);
-  return url.searchParams.get('dry') === '1';
+export function getDryFlag(req: Request) {
+  return new URL(req.url).searchParams.get('dry') === '1';
+}
+export function getForceFlag(req: Request) {
+  return new URL(req.url).searchParams.get('force') === '1';
 }
