@@ -4,16 +4,17 @@ on:
   workflow_dispatch:
     inputs:
       dry:
-        description: 'Dry run'
+        description: "Dry run (nur Vorschau)"
         required: false
-        default: 'true'
+        default: "false"
       force:
-        description: 'Force run (ignore schedule)'
+        description: "Force run (Zeitfenster ignorieren)"
         required: false
-        default: 'true'
+        default: "false"
 
+  
   schedule:
-  - cron: '30 9 * * 1-7'  
+    - cron: "*/10 * * * *"
 
 concurrency:
   group: news-agent
@@ -23,22 +24,27 @@ jobs:
   run:
     runs-on: ubuntu-latest
     env:
-      BASE_URL: ${{ secrets.BASE_URL }}                
-      CRON_SECRET: ${{ secrets.NEWS_AGENT_CRON_SECRET }}
+      BASE_URL: ${{ secrets.BASE_URL }}                   
+      CRON_SECRET: ${{ secrets.NEWS_AGENT_CRON_SECRET }}  
       DRY: ${{ inputs.dry }}
       FORCE: ${{ inputs.force }}
 
     steps:
-      - name: Compose request URL (with optional flags)
+      - name: Compose request URL (event-aware flags)
         id: vars
         shell: bash
         run: |
           set -euo pipefail
           base="${BASE_URL%/}"
           path="/api/admin/news-agent/run"
+
+          # Flags nur bei manueller Ausführung respektieren.
           qs=""
-          [ "${DRY:-}"   = "true" ] && qs="${qs:+$qs&}dry=1"
-          [ "${FORCE:-}" = "true" ] && qs="${qs:+$qs&}force=1"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            [ "${DRY:-}"   = "true" ] && qs="${qs:+$qs&}dry=1"
+            [ "${FORCE:-}" = "true" ] && qs="${qs:+$qs&}force=1"
+          fi
+
           url="$base$path"; [ -n "$qs" ] && url="$url?$qs"
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "POST $url"
@@ -48,7 +54,8 @@ jobs:
         run: |
           set -euo pipefail
           url="${{ steps.vars.outputs.url }}"
-          code=$(curl -sS -o /tmp/resp.json -w "%{http_code}" -X POST \
+          # -L folgt evtl. 308/307 Redirects von Vercel
+          code=$(curl -sS -L -o /tmp/resp.json -w "%{http_code}" -X POST \
             -H "Accept: application/json" \
             -H "X-Cron-Auth: ${CRON_SECRET}" \
             "$url")
@@ -56,9 +63,8 @@ jobs:
           echo "---- Response ----"
           cat /tmp/resp.json || true
           echo "------------------"
-          if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
-            exit 1
-          fi
+          # 2xx = ok (auch wenn 'skipped: not due' zurückkommt)
+          test "$code" -ge 200 -a "$code" -lt 300
 
       - name: Show X-Route-Version header (diagnostics)
         if: always()
@@ -66,7 +72,6 @@ jobs:
         run: |
           set -euo pipefail
           url="${{ steps.vars.outputs.url }}"
-          curl -sSI -X POST \
+          curl -sSI -L -X POST \
             -H "X-Cron-Auth: ${CRON_SECRET}" \
             "$url" | grep -i '^X-Route-Version:' || true
-
