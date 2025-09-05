@@ -1,19 +1,22 @@
 // lib/server/cronSecret.ts
 export function isCronAuthorized(req: Request) {
-  const secret = process.env.NEWS_AGENT_CRON_SECRET?.trim();
+  const secret =
+    process.env.NEWS_AGENT_CRON_SECRET?.trim() ||
+    process.env.CRON_SECRET?.trim(); // Fallback erlaubt
+
   if (!secret) return false;
 
   const h = req.headers;
 
-  // a) Eigener Header
+  // Header (case-insensitive)
   const viaHeader = (h.get('x-cron-auth') || '').trim();
   if (viaHeader && viaHeader === secret) return true;
 
-  // b) Als Bearer
+  // Bearer
   const bearer = (h.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
   if (bearer && bearer === secret) return true;
 
-  // c) Optional: als Query-Param ?key=...
+  // Query-Param
   const key = new URL(req.url).searchParams.get('key');
   if (key && key === secret) return true;
 
