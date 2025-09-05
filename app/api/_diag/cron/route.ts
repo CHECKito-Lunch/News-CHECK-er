@@ -1,24 +1,27 @@
-// app/api/_diag/cron/route.ts
 import { NextResponse } from 'next/server';
-import { isCronAuthorized } from '@/lib/server/cronSecret';
 
 export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
 
 export async function GET(req: Request) {
-  const hasNews = !!process.env.NEWS_AGENT_CRON_SECRET?.trim();
-  const hasCron = !!process.env.CRON_SECRET?.trim();
   const url = new URL(req.url);
-  const key = url.searchParams.get('key') || null;
-  const hdr = req.headers.get('x-cron-auth') || null;
-  const auth = req.headers.get('authorization') || null;
+  const key = url.searchParams.get('key')?.trim() || '';
+
+  const envRaw = process.env.NEWS_AGENT_CRON_SECRET ?? '';
+  const env = envRaw.trim();
+
+  const hdr = req.headers.get('x-cron-auth')?.trim() || '';
+  const bearer = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
+
+  const authorized = !!env && (key === env || hdr === env || bearer === env);
 
   return NextResponse.json({
-    routeVersion: 'diag-v1',
-    hasNEWS_AGENT_CRON_SECRET: hasNews,
-    hasCRON_SECRET: hasCron,
-    provided: { key, 'x-cron-auth': hdr, authorization: auth },
-    authorized: isCronAuthorized(req)
+    hasNEWS_AGENT_CRON_SECRET: !!env,
+    NEWS_AGENT_CRON_SECRET_len: env.length,
+    received: {
+      key_len: key.length,
+      x_cron_auth_len: hdr.length,
+      bearer_len: bearer.length,
+    },
+    authorized,
   });
 }
