@@ -54,14 +54,14 @@ export default function RegisterPage() {
       <form onSubmit={handleSubmit} className="space-y-4">
         <input
           type="text"
-          placeholder="Dein Name (optional)"
+          placeholder="Dein Name"
           value={name}
           onChange={e => setName(e.target.value)}
           className="w-full border px-3 py-2 rounded-lg bg-white dark:bg-white/10 dark:text-white"
         />
         <input
           type="email"
-          placeholder="E-Mail-Adresse (@check24.de)"
+          placeholder="E-Mail-Adresse"
           value={email}
           onChange={e => setEmail(e.target.value)}
           className="w-full border px-3 py-2 rounded-lg bg-white dark:bg-white/10 dark:text-white"
@@ -81,6 +81,13 @@ export default function RegisterPage() {
           className="w-full px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium disabled:opacity-60"
         >
           {loading ? 'Registriere…' : 'Registrieren'}
+        </button>
+        <button
+          type="button"
+          onClick={() => router.push('/login')}
+          className="w-full px-4 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 dark:bg-white/10 dark:text-white"
+        >
+          Zurück zum Login
         </button>
         {msg && <p className="text-sm mt-2 text-center text-gray-700 dark:text-gray-200">{msg}</p>}
       </form>

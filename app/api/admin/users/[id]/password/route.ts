@@ -1,78 +1,89 @@
-// app/api/admin/users/[id]/route.ts
-import { NextResponse, type NextRequest } from 'next/server';
+// app/api/admin/users/[id]/password/route.ts
+import { NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { T } from '@/lib/tables';
+import { verifyToken, AUTH_COOKIE, type Role } from '@/lib/auth';
 
-type Role = 'admin' | 'moderator' | 'user';
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
-function toId(v: unknown) {
-  const n = Number(v);
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
+async function resolveRoleFromCookies(): Promise<Role | null> {
+  const jar = await cookies();
 
-// GET /api/admin/users/[id]
-export async function GET(
-  _req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const { id } = await params;
-  const num = toId(id);
-  if (!num) return NextResponse.json({ error: 'Ungültige ID.' }, { status: 400 });
+  // 1) Primär wie im Layout: user_role-Cookie
+  let role = jar.get('user_role')?.value as Role | undefined;
 
-  const s = supabaseAdmin();
-  const { data, error } = await s
-    .from(T.appUsers)
-    .select('id,email,name,role,active,created_at,updated_at')
-    .eq('id', num)
-    .single();
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  if (!data) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  return NextResponse.json({ data });
-}
-
-// PATCH /api/admin/users/[id]
-export async function PATCH(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const { id } = await params;
-  const num = toId(id);
-  if (!num) return NextResponse.json({ error: 'Ungültige ID.' }, { status: 400 });
-
-  const body = await req.json().catch(
-    () => ({} as Partial<{ email: string; name: string | null; role: Role; active: boolean }>)
-  );
-
-  const update: Record<string, unknown> = {};
-  if (typeof body.email === 'string') update.email = body.email.trim().toLowerCase();
-  if ('name' in body) update.name = (body.name ?? '') === '' ? null : body.name;
-  if (typeof body.role === 'string' && ['admin','moderator','user'].includes(body.role)) update.role = body.role as Role;
-  if (typeof body.active === 'boolean') update.active = body.active;
-
-  if (Object.keys(update).length === 0) {
-    return NextResponse.json({ error: 'Nichts zu aktualisieren.' }, { status: 400 });
+  // 2) Fallback (Legacy): JWT aus AUTH_COOKIE verifizieren
+  if (!role) {
+    const jwt = jar.get(AUTH_COOKIE)?.value;
+    if (jwt) {
+      const session = await verifyToken(jwt).catch(() => null);
+      role = (session?.role as Role) ?? undefined;
+    }
   }
-
-  const s = supabaseAdmin();
-  const { error } = await s.from(T.appUsers).update(update).eq('id', num);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-  return NextResponse.json({ ok: true });
+  return (role ?? null) as Role | null;
 }
 
-// DELETE /api/admin/users/[id]
-export async function DELETE(
-  _req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+export async function PATCH(
+  req: Request,
+  { params }: { params: { id: string } }
 ) {
-  const { id } = await params;
-  const num = toId(id);
-  if (!num) return NextResponse.json({ error: 'Ungültige ID.' }, { status: 400 });
+  try {
+    // --- Admin-/Moderator-Only Guard (jetzt kompatibel mit deinem Login) ---
+    const role = await resolveRoleFromCookies();
+    if (role !== 'admin' && role !== 'moderator') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
 
-  const s = supabaseAdmin();
-  const { error } = await s.from(T.appUsers).delete().eq('id', num);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    const body = await req.json().catch(() => null);
+    const password = (body?.password || '') as string;
+    if (!password || password.length < 8) {
+      return NextResponse.json(
+        { error: 'Passwort ist zu kurz (min. 8 Zeichen).' },
+        { status: 400 }
+      );
+    }
 
-  return NextResponse.json({ ok: true });
+    const id = Number(params.id);
+    if (!Number.isFinite(id)) {
+      return NextResponse.json({ error: 'Ungültige ID' }, { status: 400 });
+    }
+
+    const s = supabaseAdmin();
+
+    // App-User → auth.user_id ermitteln
+    const { data: row, error: fetchErr } = await s
+      .from('app_users')
+      .select('user_id, email')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (fetchErr) {
+      return NextResponse.json({ error: fetchErr.message }, { status: 500 });
+    }
+    if (!row?.user_id) {
+      return NextResponse.json(
+        { error: 'Kein Auth-User für diesen Eintrag (user_id fehlt).' },
+        { status: 400 }
+      );
+    }
+
+    // Passwort setzen (Service-Role erforderlich)
+    const { error: updErr } = await s.auth.admin.updateUserById(row.user_id, {
+      password,
+    });
+    if (updErr) {
+      return NextResponse.json({ error: updErr.message }, { status: 400 });
+    }
+
+    await s.from('app_users')
+      .update({ updated_at: new Date().toISOString() })
+      .eq('id', id);
+
+    return NextResponse.json({ ok: true });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
 }
