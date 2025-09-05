@@ -9,8 +9,6 @@ function isPublic(pathname: string) {
   if (pathname.startsWith('/api/login') || pathname.startsWith('/api/register')) return true;
   if (pathname.startsWith('/api/me')) return true;
   if (pathname.startsWith('/api/admin/news-agent/run')) return true;
- 
-  // ➜ Diagnose-Route IMMER zulassen
   if (pathname.startsWith('/api/_diag')) return true;
 
   // Next statics / Assets
