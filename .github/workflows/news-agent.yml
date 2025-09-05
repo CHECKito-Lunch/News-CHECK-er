@@ -1,65 +1,85 @@
 name: News Agent
 
 on:
-  # Zeitplan: GitHub läuft in UTC.
-  # Europa/Berlin: 08:00, 12:00, 17:00  == UTC: 07:00, 11:00, 16:00 (Winter),
-  # Achtung Sommerzeit! Wir nehmen hier „alle 10 min“ + Zeitfenster-Check im Agenten.
-  schedule:
-    - cron: "*/10 * * * *"
-  # manueller Start aus der Actions UI
   workflow_dispatch:
     inputs:
       dry:
-        description: "Dry run?"
-        type: boolean
-        default: false
-      force:
-        description: "Force run (ignoriert times-Fenster)?"
+        description: "Dry run (nur Vorschau, keine DB-Einträge)"
         type: boolean
         default: true
-
-permissions:
-  contents: read
+        required: true
+      force:
+        description: "Zeiten ignorieren (jetzt ausführen)"
+        type: boolean
+        default: true
+        required: true
+  schedule:
+    # Beispiel: jeden Tag 07:05 UTC
+    - cron: "5 7 * * *"
 
 jobs:
   run-agent:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    concurrency:
-      group: news-agent
-      cancel-in-progress: false
-
     env:
-      NEWS_AGENT_URL: ${{ secrets.NEWS_AGENT_URL }}
-      CRON_SECRET: ${{ secrets.CRON_SECRET }}
-
+      BASE_URL: ${{ secrets.NEWS_AGENT_BASE_URL }}
+      CRON_SECRET: ${{ secrets.NEWS_AGENT_CRON_SECRET }}
+      INPUT_DRY: ${{ github.event.inputs.dry }}
+      INPUT_FORCE: ${{ github.event.inputs.force }}
     steps:
-      - name: Call News Agent (scheduled)
-        if: ${{ github.event_name == 'schedule' }}
+      - name: Validate env
         run: |
-          # scheduled: wir lassen dry=0; der Agent prüft selbst, ob er "due" ist (times/10-Min-Fenster)
-          for i in 1 2 3; do
-            code=$(curl -sS -o /tmp/resp.json -w "%{http_code}" -X POST \
-              -H "x-cron-secret: ${CRON_SECRET}" \
-              "${NEWS_AGENT_URL}")
-            echo "HTTP $code"
-            cat /tmp/resp.json || true
-            [ "$code" -lt 500 ] && break
-            echo "Server 5xx, retry in 10s…"; sleep 10
-          done
-          test "$code" -ge 200 -a "$code" -lt 400
+          if [ -z "$BASE_URL" ]; then
+            echo "ERROR: NEWS_AGENT_BASE_URL secret fehlt."
+            exit 1
+          fi
+          if [ -z "$CRON_SECRET" ]; then
+            echo "ERROR: NEWS_AGENT_CRON_SECRET secret fehlt."
+            exit 1
+          fi
 
-      - name: Call News Agent (manual dispatch)
-        if: ${{ github.event_name == 'workflow_dispatch' }}
+      - name: Build URL
+        id: build
+        shell: bash
         run: |
-          DRY=${{ inputs.dry && '1' || '0' }}
-          FORCE=${{ inputs.force && '1' || '0' }}
+          PATHNAME="/api/admin/news-agent/run"
+          QS=""
+          # inputs können bei schedule leer sein → als "false" behandeln
+          DRY="${INPUT_DRY:-false}"
+          FORCE="${INPUT_FORCE:-false}"
 
-          URL="${NEWS_AGENT_URL}?dry=${DRY}"
-          # "force" ist bereits in deinem Code implizit für Cron; bei manuellem Run nutzen wir Secret ebenfalls:
-          code=$(curl -sS -o /tmp/resp.json -w "%{http_code}" -X POST \
-            -H "x-cron-secret: ${CRON_SECRET}" \
+          if [ "$DRY" = "true" ]; then
+            QS="?dry=1"
+          fi
+          if [ "$FORCE" = "true" ]; then
+            if [ -z "$QS" ]; then
+              QS="?force=1"
+            else
+              QS="$QS&force=1"
+            fi
+          fi
+
+          URL="${BASE_URL}${PATHNAME}${QS}"
+          echo "url=$URL" >> $GITHUB_OUTPUT
+          echo "Calling: ${BASE_URL}${PATHNAME} (Query: ${QS:-<none>})"
+
+      - name: Call News Agent (manual/cron)
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL="${{ steps.build.outputs.url }}"
+          # Header-Name MUSS zu deinem isCronAuthorized() passen (siehe Punkt 4)
+          RESP_FILE="/tmp/resp.json"
+          http_code=$(curl -sS -o "$RESP_FILE" -w "%{http_code}" -X POST \
+            -H "X-Cron-Auth: ${CRON_SECRET}" \
+            -H "Accept: application/json" \
             "$URL")
-          echo "HTTP $code"
-          cat /tmp/resp.json || true
-          test "$code" -ge 200 -a "$code" -lt 400
+
+          echo "HTTP $http_code"
+          echo "---- Response ----"
+          cat "$RESP_FILE" || true
+          echo "------------------"
+
+          if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
+            echo "Request failed (HTTP $http_code)"
+            exit 1
+          fi
