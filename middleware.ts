@@ -9,7 +9,7 @@ function isPublic(pathname: string) {
   if (pathname.startsWith('/api/me')) return true;
 
   // Diagnose offen lassen
-  if (pathname.startsWith('/api/_diag')) return true;
+  if (pathname.startsWith('/api/diag')) return true;
 
   // Next statics / Assets
   if (pathname.startsWith('/_next')) return true;
