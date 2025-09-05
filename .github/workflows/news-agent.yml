@@ -1,16 +1,65 @@
-name: News Agent Cron
+name: News Agent
 
 on:
+  # Zeitplan: GitHub läuft in UTC.
+  # Europa/Berlin: 08:00, 12:00, 17:00  == UTC: 07:00, 11:00, 16:00 (Winter),
+  # Achtung Sommerzeit! Wir nehmen hier „alle 10 min“ + Zeitfenster-Check im Agenten.
   schedule:
-    - cron: "0 8,12,17 * * *"   # UTC-Zeiten, nach Bedarf anpassen
-  workflow_dispatch: {}
+    - cron: "*/10 * * * *"
+  # manueller Start aus der Actions UI
+  workflow_dispatch:
+    inputs:
+      dry:
+        description: "Dry run?"
+        type: boolean
+        default: false
+      force:
+        description: "Force run (ignoriert times-Fenster)?"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
 
 jobs:
   run-agent:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: news-agent
+      cancel-in-progress: false
+
+    env:
+      NEWS_AGENT_URL: ${{ secrets.NEWS_AGENT_URL }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+
     steps:
-      - name: Call API
+      - name: Call News Agent (scheduled)
+        if: ${{ github.event_name == 'schedule' }}
         run: |
-          curl -sS -X POST "${{ secrets.PROD_URL }}/api/admin/news-agent/run" \
-            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
-            --fail
+          # scheduled: wir lassen dry=0; der Agent prüft selbst, ob er "due" ist (times/10-Min-Fenster)
+          for i in 1 2 3; do
+            code=$(curl -sS -o /tmp/resp.json -w "%{http_code}" -X POST \
+              -H "x-cron-secret: ${CRON_SECRET}" \
+              "${NEWS_AGENT_URL}")
+            echo "HTTP $code"
+            cat /tmp/resp.json || true
+            [ "$code" -lt 500 ] && break
+            echo "Server 5xx, retry in 10s…"; sleep 10
+          done
+          test "$code" -ge 200 -a "$code" -lt 400
+
+      - name: Call News Agent (manual dispatch)
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          DRY=${{ inputs.dry && '1' || '0' }}
+          FORCE=${{ inputs.force && '1' || '0' }}
+
+          URL="${NEWS_AGENT_URL}?dry=${DRY}"
+          # "force" ist bereits in deinem Code implizit für Cron; bei manuellem Run nutzen wir Secret ebenfalls:
+          code=$(curl -sS -o /tmp/resp.json -w "%{http_code}" -X POST \
+            -H "x-cron-secret: ${CRON_SECRET}" \
+            "$URL")
+          echo "HTTP $code"
+          cat /tmp/resp.json || true
+          test "$code" -ge 200 -a "$code" -lt 400

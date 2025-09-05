@@ -1,27 +1,19 @@
 // lib/requireAdmin.ts
-import { supabaseAdmin } from './supabaseAdmin';
+import { cookies } from 'next/headers';
+import { verifyToken, AUTH_COOKIE, type Role } from '@/lib/auth';
 
-const allow = (process.env.ADMIN_EMAILS || '')
-  .split(',')
-  .map(s => s.trim().toLowerCase())
-  .filter(Boolean);
-
-export async function requireAdmin(req: Request) {
-  const authHeader =
-    req.headers.get('authorization') ??
-    req.headers.get('Authorization') ??
-    '';
-  const token = authHeader.startsWith('Bearer ')
-    ? authHeader.slice(7)
-    : null;
-  if (!token) return null;
-
-  const sb = supabaseAdmin(); // 👈 Instanz erzeugen
-  const { data, error } = await sb.auth.getUser(token);
-  if (error || !data?.user) return null;
-
-  const email = (data.user.email ?? '').toLowerCase();
-  if (allow.length && !allow.includes(email)) return null;
-
-  return data.user; // ok
+export async function requireAdmin(_req?: Request) {
+  const jar = await cookies();
+  let role = jar.get('user_role')?.value as Role | undefined;
+  if (!role) {
+    const jwt = jar.get(AUTH_COOKIE)?.value;
+    if (jwt) {
+      const session = await verifyToken(jwt).catch(() => null);
+      role = (session?.role as Role) ?? undefined;
+    }
+  }
+  if (role === 'admin' || role === 'moderator') {
+    return { role };
+  }
+  return null;
 }

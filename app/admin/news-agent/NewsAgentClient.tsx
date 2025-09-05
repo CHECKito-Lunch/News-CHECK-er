@@ -70,6 +70,7 @@ export default function NewsAgentClient() {
       await loadLogs();
     } catch(e:any) { setAgentMsg(e?.message || 'Testlauf fehlgeschlagen.'); }
     finally { setAgentLoading(false); }
+    
   }
 
   async function loadLogs() {
