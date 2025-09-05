@@ -4,6 +4,9 @@ import { runAgent } from '@/lib/newsAgent';
 import { isCronAuthorized, getDryFlag } from '@/lib/server/cronSecret';
 import { requireAdmin } from '@/lib/requireAdmin';
 
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 export async function POST(req: Request) {
   try {
     const dry = getDryFlag(req);
