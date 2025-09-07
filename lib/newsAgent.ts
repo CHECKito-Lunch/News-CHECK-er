@@ -254,6 +254,14 @@ function makeSlug(title: string) {
     .slice(0, 80);
 }
 
+/** NEU: Slug mit Sekunden-Zeitstempel, z. B. 2025-09-05-15-32-07 */
+function makeSlugWithTime(title: string) {
+  const now = new Date();
+  // ISO -> 2025-09-05T15:32:07.123Z  →  2025-09-05-15-32-07
+  const stamp = now.toISOString().replace(/[:T]/g, '-').replace(/\.\d+Z$/, '').slice(0, 19);
+  return makeSlug(`${title}-${stamp}`);
+}
+
 async function insertPostFromAgent(
   cfg: AgentConfig,
   summaryMd: string,
@@ -263,8 +271,8 @@ async function insertPostFromAgent(
   const db = supabaseAdmin();
   const status = cfg.autoPublish ? 'published' : 'draft';
   const title = 'Branchen-Update: Reise & Tourismus';
-  const slugBase = makeSlug(`${title}-${new Date().toISOString().slice(0,10)}`);
-  const slug = `${slugBase}`;
+  const baseSlug = makeSlugWithTime(title); // ← eindeutiger Basis-Slug
+  let slug = baseSlug;
 
   if (dryRun) return { insertedId: null };
 
@@ -272,35 +280,49 @@ async function insertPostFromAgent(
   const agentBadgeId = await ensureAgentBadgeId();
   const mergedBadgeIds = Array.from(new Set([...(cfg.defaultBadgeIds || []), agentBadgeId]));
 
-  const { data: post, error: e1 } = await db
-    .from('posts')
-    .insert({
-      title,
-      slug,
-      summary: 'Kurzüberblick der wichtigsten Meldungen.',
-      content: summaryMd,
-      status,
-      effective_from: new Date().toISOString(),
-      vendor_id: cfg.defaultVendorId ?? null,
-    })
-    .select('id')
-    .single();
-  if (e1) throw e1;
+  // kleine Retry-Schleife für theoretische Kollisionen
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const { data: post, error: e1 } = await db
+      .from('posts')
+      .insert({
+        title,
+        slug,
+        summary: 'Kurzüberblick der wichtigsten Meldungen.',
+        content: summaryMd,
+        status,
+        effective_from: new Date().toISOString(),
+        vendor_id: cfg.defaultVendorId ?? null,
+      })
+      .select('id')
+      .single();
 
-  if (cfg.defaultCategoryId) {
-    await db.from('post_categories').insert({ post_id: post.id, category_id: cfg.defaultCategoryId });
+    if (!e1 && post?.id) {
+      // Beziehungen
+      if (cfg.defaultCategoryId) {
+        await db.from('post_categories').insert({ post_id: post.id, category_id: cfg.defaultCategoryId });
+      }
+      for (const b of mergedBadgeIds) {
+        await db.from('post_badges').insert({ post_id: post.id, badge_id: b });
+      }
+      for (let i = 0; i < sources.length; i++) {
+        const s = sources[i];
+        await db.from('post_sources').insert({ post_id: post.id, url: s.url, label: s.label ?? null, sort_order: i });
+      }
+      return { insertedId: post.id };
+    }
+
+    // 23505 = Unique violation → neuen Slug probieren
+    const code = (e1 as any)?.code ?? (e1 as any)?.details?.code;
+    if (code === '23505') {
+      slug = `${baseSlug}-${attempt + 2}`; // -2, -3, ...
+      continue;
+    }
+
+    // anderer Fehler
+    if (e1) throw e1;
   }
 
-  for (const b of mergedBadgeIds) {
-    await db.from('post_badges').insert({ post_id: post.id, badge_id: b });
-  }
-
-  for (let i = 0; i < sources.length; i++) {
-    const s = sources[i];
-    await db.from('post_sources').insert({ post_id: post.id, url: s.url, label: s.label ?? null, sort_order: i });
-  }
-
-  return { insertedId: post.id };
+  throw new Error('Konnte keinen eindeutigen Slug finden (zu viele Kollisionen).');
 }
 
 // ---------- Orchestrierung ----------
