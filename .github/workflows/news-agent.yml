@@ -14,7 +14,7 @@ on:
 
   
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "0 7,15 * * *"
 
 concurrency:
   group: news-agent
