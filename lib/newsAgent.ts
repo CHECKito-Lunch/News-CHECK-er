@@ -97,6 +97,28 @@ function mergeDedup(arts: NewsArticle[]): NewsArticle[] {
   return out;
 }
 
+/** Domain/Label für Quellenzeile */
+function sourceLabelOf(url?: string | null, fallback?: string | null) {
+  if (fallback && fallback.trim()) return fallback.trim();
+  try {
+    const u = new URL(String(url || ''));
+    const host = u.hostname.replace(/^www\./, '');
+    return host || (fallback || '').trim() || 'Quelle';
+  } catch {
+    return (fallback || 'Quelle').trim();
+  }
+}
+
+/** Markdown-Liste „### Quellen“ passend zu Artikeln (1-based Nummerierung) */
+function buildRefsMarkdown(arts: NewsArticle[]) {
+  const lines = arts.map((a, i) => {
+    const label = sourceLabelOf(a.url, a.source?.name || null);
+    const url = a.url || '';
+    return `${i + 1}. ${label} — ${url}`;
+  });
+  return lines.join('\n');
+}
+
 /** sichere TZ (fällt auf Europe/Berlin zurück) */
 function safeTimeZone(tz?: string | null): string {
   const candidate = (tz || '').trim();
@@ -188,7 +210,7 @@ async function fetchNews(cfg: AgentConfig): Promise<NewsArticle[]> {
     let json: any = {};
     try { json = await res.json(); } catch {}
     if (!res.ok) {
-      // Optional: interne Notiz/Logging – hier still weiter
+      // Optional: internes Logging – hier still weiter
       continue;
     }
 
@@ -202,26 +224,53 @@ async function fetchNews(cfg: AgentConfig): Promise<NewsArticle[]> {
   return deduped.slice(0, targetLimit);
 }
 
-// ---------- OpenAI ----------
+// ---------- OpenAI (Bullets mit [n]-Markern) ----------
 async function summarizeWithOpenAI(cfg: AgentConfig, arts: NewsArticle[]) {
   if (!arts.length) return '';
+
+  // Fallback ohne OpenAI: Bullets mit 1:1 Marker, Quellenliste wird später angehängt
   if (!hasEnv('OPENAI_API_KEY')) {
-    return arts.slice(0, 10).map(a => `- ${a.title} — ${a.url}`).join('\n');
+    const bullets = arts.slice(0, 10).map((a, i) => `- ${a.title} [${i + 1}]`).join('\n');
+    return bullets;
   }
 
   const model = cfg.model || 'gpt-4o-mini';
   const temperature = cfg.temperature ?? 0.2;
 
-  const sys = `Erstelle kurze, prägnante Bulletpoints auf Deutsch mit Fokus auf aktuelle Ereignisse, die den internationalen Tourismus beeinflussen. Relevanz besteht für Reisende, Reisebüros und die Tourismusbranche. Berücksichtige dabei Streiks, Sperrungen, Demonstrationen, Naturkatastrophen, extreme Wetterereignisse, IT-Ausfälle im Flug- und Bahnverkehr, Sicherheitswarnungen, politische Unruhen, Reisewarnungen, Hotelschließungen, Insolvenzen von Airlines oder Reiseveranstaltern sowie sonstige Störungen, die Reisen, Unterkünfte oder touristische Infrastruktur weltweit beeinträchtigen.`;
+  // Referenzliste vorbereiten (1-based)
+  const refs = arts.map((a, i) => {
+    const label = sourceLabelOf(a.url, a.source?.name || null);
+    const url = a.url || '';
+    return `[${i + 1}] ${label} — ${url}`;
+  }).join('\n');
 
-  const list = arts.map(a => `- ${a.title} (${a.source?.name || ''}) – ${a.url}`).join('\n');
+  const sys =
+`Du bist News-Analyst:in für Reise & Tourismus.
+Schreibe prägnante Bulletpoints (Deutsch) zu Auswirkungen für Reisende/Branche
+(z. B. Streiks, Sperrungen, IT-Ausfälle, Sicherheitswarnungen, Reisewarnungen, Insolvenzen etc.).
+WICHTIG: Zitiere am Ende jedes Bullets die passenden Quellen-Nummern in eckigen Klammern, z. B. [1] oder [2, 5].
+Verwende ausschließlich Nummern aus der bereitgestellten Quellenliste. Keine eigene „Quellen“-Sektion ausgeben.`;
+
+  const listForModel = arts.map((a, i) => `- (${i + 1}) ${a.title} — ${a.url}`).join('\n');
+
+  const user =
+`Material (max. ${Math.min(arts.length, 30)} Artikel):
+${listForModel}
+
+Quellen (Nummern bitte für die Zitate verwenden):
+${refs}
+
+Aufgabe:
+Erstelle 6–10 kurze, sachliche Bulletpoints. 
+Am Ende jedes Bullets setze die passenden Quellen-Nummern in eckigen Klammern. 
+Keine Einleitung, kein Fazit, KEINE eigene Quellenliste. Nur die Bullets.`;
 
   const payload = {
     model,
     temperature,
     messages: [
       { role: 'system', content: sys },
-      { role: 'user', content: `Fasse kompakt zusammen:\n\n${list}` }
+      { role: 'user', content: user }
     ]
   };
 
@@ -371,8 +420,13 @@ export async function runAgent({ force=false, dry=false } = {}) {
         try { markdown = await summarizeWithOpenAI(cfg, articles.slice(0, cfg.maxArticles || 30)); usedOpenAI = true; } catch { markdown = ''; }
       }
       if (!markdown) {
-        markdown = (articles.slice(0, 10).map(a => `- ${a.title} — ${a.url}`)).join('\n') || '_Keine Inhalte im Dry-Run verfügbar._';
+        // Fallback: einfache Liste (ohne OpenAI) mit Marker
+        markdown = (articles.slice(0, 10).map((a, i) => `- ${a.title} [${i + 1}]`)).join('\n') || '_Keine Inhalte im Dry-Run verfügbar._';
       }
+
+      // Quellenliste anhängen – garantiert konsistent mit den Markern
+      const refsMd = buildRefsMarkdown(articles.slice(0, cfg.maxArticles || 30));
+      const preview = `${markdown}\n\n### Quellen\n${refsMd}`;
 
       await logRun(Date.now()-t0, articles.length, 0, true, 'dry-run');
       return {
@@ -381,7 +435,7 @@ export async function runAgent({ force=false, dry=false } = {}) {
         usedOpenAI,
         previewCount: articles.length,
         previewSources: articles.slice(0, 10).map(a => ({ url: a.url, source: a.source?.name || null })),
-        previewMarkdown: markdown
+        previewMarkdown: preview
       };
     }
     // -------- /DRY-RUN ----------
@@ -390,9 +444,13 @@ export async function runAgent({ force=false, dry=false } = {}) {
     const articles = await fetchNews(cfg);
     const top = articles.slice(0, cfg.maxArticles || 30);
     const srcs = top.map(a => ({ url: a.url, label: a.source?.name || null }));
-    const markdown = await summarizeWithOpenAI(cfg, top);
 
-    const inserted = await insertPostFromAgent(cfg, markdown, srcs, false);
+    // Bullets mit [n]-Markern
+    const bullets = await summarizeWithOpenAI(cfg, top);
+    const refsMd = buildRefsMarkdown(top);
+    const contentMd = `${bullets}\n\n### Quellen\n${refsMd}`;
+
+    const inserted = await insertPostFromAgent(cfg, contentMd, srcs, false);
     const countInserted = inserted.insertedId ? 1 : 0;
 
     await logRun(Date.now()-t0, top.length, countInserted, false, inserted.insertedId ? `post#${inserted.insertedId}` : undefined);
