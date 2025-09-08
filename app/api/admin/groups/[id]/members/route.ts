@@ -5,13 +5,12 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 
-/** Pfad .../groups/:id/members  -> :id holen */
 function getGroupIdFromUrl(url: string): number | null {
   try {
     const u = new URL(url);
     const parts = u.pathname.split('/').filter(Boolean);
     // .../api/admin/groups/{id}/members
-    const idStr = parts[parts.length - 2]; // vor "members"
+    const idStr = parts[parts.length - 2]; // Segment vor "members"
     const idNum = Number(idStr);
     return Number.isFinite(idNum) ? idNum : null;
   } catch {
