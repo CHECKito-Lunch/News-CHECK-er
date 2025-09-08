@@ -2,7 +2,7 @@
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 
 async function appUserIdToUuid(appUserId: number): Promise<string | null> {
@@ -14,19 +14,21 @@ async function appUserIdToUuid(appUserId: number): Promise<string | null> {
 
 // Mitglied hinzufügen
 export async function POST(
-  req: NextRequest,
-  { params }: { params: { id: string } }
+  request: Request,
+  ctx: { params: Record<string, string> } // << wichtig: Index-Typ, nicht { id: string }
 ) {
-  const gid = Number(params.id);
+  const gid = Number(ctx.params.id);
   if (!Number.isFinite(gid)) {
     return NextResponse.json({ ok: false, error: 'invalid_group_id' }, { status: 400 });
-    }
+  }
+
   try {
-    const body = await req.json().catch(() => ({}));
+    const body = await request.json().catch(() => ({}));
     const appUserId = Number(body?.appUserId);
     if (!Number.isFinite(appUserId)) {
       return NextResponse.json({ ok: false, error: 'invalid_app_user_id' }, { status: 400 });
     }
+
     const uuid = await appUserIdToUuid(appUserId);
     if (!uuid) {
       return NextResponse.json({ ok: false, error: 'user_uuid_not_found' }, { status: 404 });
@@ -46,19 +48,21 @@ export async function POST(
 
 // Mitglied entfernen
 export async function DELETE(
-  req: NextRequest,
-  { params }: { params: { id: string } }
+  request: Request,
+  ctx: { params: Record<string, string> } // << gleiches Pattern
 ) {
-  const gid = Number(params.id);
+  const gid = Number(ctx.params.id);
   if (!Number.isFinite(gid)) {
     return NextResponse.json({ ok: false, error: 'invalid_group_id' }, { status: 400 });
   }
+
   try {
-    const body = await req.json().catch(() => ({}));
+    const body = await request.json().catch(() => ({}));
     const appUserId = Number(body?.appUserId);
     if (!Number.isFinite(appUserId)) {
       return NextResponse.json({ ok: false, error: 'invalid_app_user_id' }, { status: 400 });
     }
+
     const uuid = await appUserIdToUuid(appUserId);
     if (!uuid) {
       return NextResponse.json({ ok: false, error: 'user_uuid_not_found' }, { status: 404 });
