@@ -15,7 +15,7 @@ async function appUserIdToUuid(appUserId: number): Promise<string | null> {
 // Mitglied hinzufügen
 export async function POST(
   request: Request,
-  ctx: { params: Record<string, string> } // << wichtig: Index-Typ, nicht { id: string }
+  ctx: { params: Record<string, string> }
 ) {
   const gid = Number(ctx.params.id);
   if (!Number.isFinite(gid)) {
@@ -49,7 +49,7 @@ export async function POST(
 // Mitglied entfernen
 export async function DELETE(
   request: Request,
-  ctx: { params: Record<string, string> } // << gleiches Pattern
+  ctx: { params: Record<string, string> }
 ) {
   const gid = Number(ctx.params.id);
   if (!Number.isFinite(gid)) {
