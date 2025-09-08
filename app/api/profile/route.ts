@@ -2,64 +2,46 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { T } from '@/lib/tables';
+import { AUTH_COOKIE } from '@/lib/auth';
 
-type Role = 'admin'|'moderator'|'user';
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 export async function GET() {
-  const c = await cookies();
-  const email = c.get('user_email')?.value || '';
-  const role = c.get('user_role')?.value as Role | undefined;
-  if (!email || !role) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const c = await cookies(); // WICHTIG: await!
+  const token = c.get(AUTH_COOKIE)?.value;
+
+  if (!token) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
 
   const s = supabaseAdmin();
-  const { data, error } = await s
-    .from(T.appUsers)
-    .select('id,email,name,role, password_hash')
-    .eq('email', email)
-    .single();
+  const { data, error } = await s.auth.getUser(token);
+  if (error || !data?.user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  if (!data)  return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  // Optional: Profildetails aus app_users
+  const userId = data.user.id;
+  const { data: appUser, error: appErr } = await s
+    .from('app_users')
+    .select('id, name, email, role, active, last_login_at')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (appErr) {
+    return NextResponse.json({ error: appErr.message }, { status: 500 });
+  }
 
   return NextResponse.json({
-    data: {
-      id: data.id,
-      email: data.email,
-      name: data.name,
-      role: data.role as Role,
-      hasPassword: Boolean((data as any).password_hash),
-    }
+    ok: true,
+    user: {
+      id: userId,
+      email: data.user.email,
+      name: appUser?.name ?? data.user.user_metadata?.full_name ?? data.user.user_metadata?.name ?? null,
+      role: appUser?.role ?? 'user',
+      active: appUser?.active ?? true,
+      last_login_at: appUser?.last_login_at ?? null,
+    },
   });
-}
-
-export async function PATCH(req: Request) {
-  const c = await cookies();
-  const email = c.get('user_email')?.value || '';
-  const role = c.get('user_role')?.value as Role | undefined;
-  if (!email || !role) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-  const body = await req.json().catch(()=>({}));
-  const nextEmail: string | undefined = typeof body.email === 'string' ? body.email.trim().toLowerCase() : undefined;
-  const nextName: string | null | undefined = typeof body.name === 'string' ? body.name : undefined;
-
-  const update: Record<string, unknown> = {};
-  if (typeof nextName !== 'undefined') update.name = nextName ?? null;
-  if (typeof nextEmail !== 'undefined') {
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(nextEmail)) {
-      return NextResponse.json({ error: 'Ungültige E-Mail.' }, { status: 400 });
-    }
-    update.email = nextEmail;
-  }
-
-  const s = supabaseAdmin();
-  const { error } = await s.from(T.appUsers).update(update).eq('email', email);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-  // Cookies anpassen, falls E-Mail geändert
-  if (typeof nextEmail !== 'undefined' && nextEmail !== email) {
-    c.set({ name: 'user_email', value: nextEmail, httpOnly: true, sameSite: 'lax', path: '/', secure: true, maxAge: 60*60*24*30 });
-  }
-
-  return NextResponse.json({ ok: true });
 }

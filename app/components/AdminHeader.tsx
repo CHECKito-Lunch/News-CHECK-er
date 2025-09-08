@@ -4,17 +4,17 @@ import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
+import type { Role } from '@/lib/auth';
 
-type Role = 'admin' | 'moderator' | 'user';
 type Me = { user: { sub: string; role: Role; name?: string } | null };
 
-export default function SiteHeader() {
+export default function AdminHeader({ initialRole }: { initialRole?: Role }) {
   const pathname = usePathname();
-  const [me, setMe] = useState<Me['user']>(null);
+  const [me, setMe] = useState<Me['user']>(initialRole ? { sub: 'me', role: initialRole } : null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [unread, setUnread] = useState<number>(0);
 
-  // Me laden
+  // Me laden / synchron halten
   useEffect(() => {
     let mounted = true;
     const load = async () => {
@@ -46,26 +46,14 @@ export default function SiteHeader() {
 
     const loadUnread = async () => {
       try {
-        const r = await fetch('/api/unread', {
-          signal: ctrl.signal,
-          cache: 'no-store',
-          credentials: 'include', // <-- Cookies mitgeben!
-        });
+        const r = await fetch('/api/unread', { signal: ctrl.signal, cache: 'no-store' });
         if (!r.ok) return;
         const j = await r.json().catch(() => null);
-        // unterstützt 'unread' ODER 'total'
-        const cnt =
-          j && typeof j.unread === 'number'
-            ? j.unread
-            : j && typeof j.total === 'number'
-              ? j.total
-              : 0;
-        if (!stop) setUnread(cnt);
+        if (!stop && j && typeof j.unread === 'number') setUnread(j.unread);
       } catch {}
     };
 
     loadUnread();
-    // alle 60s aktualisieren
     timer = window.setInterval(loadUnread, 60_000);
 
     const onAuth = () => loadUnread();
@@ -101,7 +89,7 @@ export default function SiteHeader() {
     </span>
   );
 
-  // Schließen bei ESC
+  // ESC schließt Menü
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false); };
     window.addEventListener('keydown', onKey);
@@ -111,48 +99,40 @@ export default function SiteHeader() {
   return (
     <header className="sticky top-0 z-30 border-b border-gray-200 bg-white/70 dark:bg-gray-900/70 backdrop-blur">
       <div className="container max-w-15xl mx-auto flex items-center justify-between py-3">
-        {/* Linke Spalte: Burger (mit Badge) */}
+        {/* Burger (mit Badge) */}
         <div className="w-10 flex items-center">
           <button
             className="relative inline-flex items-center justify-center w-9 h-9 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-white/10 hover:bg-gray-50 dark:hover:bg-white/20 shadow-sm"
             onClick={() => setMenuOpen(v => !v)}
             aria-expanded={menuOpen}
-            aria-controls="global-menu"
+            aria-controls="global-admin-menu"
             aria-label="Menü"
           >
-            {/* Burger-Icon */}
             <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden>
               <path d="M4 6h16M4 12h16M4 18h16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
             </svg>
-
-            {/* Badge direkt am Burger */}
             {me && unread > 0 && <Badge count={unread} />}
           </button>
         </div>
 
-        {/* Mitte: Logo */}
-        <Link
-          href="/"
-          aria-label="Startseite"
-          className="shrink-0 inline-flex items-center gap-2"
-        >
+        {/* Logo zentriert */}
+        <Link href="/" aria-label="Startseite" className="shrink-0 inline-flex items-center gap-2">
           <img src="/header.svg" alt="NewsCHECKer" className="h-8 w-auto dark:opacity-90" />
         </Link>
 
-        {/* Rechte Spalte: Spacer, damit Logo wirklich mittig bleibt */}
+        {/* Spacer rechts */}
         <div className="w-10" />
       </div>
 
-      {/* Ausklappbares Menü (vollbreit, beherbergt komplette Nav + Auth) */}
+      {/* Ausklappbares Menü (blur, keine doppelte Linie) */}
       <AnimatePresence initial={false}>
         {menuOpen && (
           <motion.div
-            id="global-menu"
-            key="global-menu"
+            id="global-admin-menu"
+            key="global-admin-menu"
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            // Blur + gleiche Transparenz wie Header; keine Border -> keine Doppel-Linie
             className="overflow-hidden backdrop-blur bg-white/70 dark:bg-gray-900/70"
           >
             <nav className="container max-w-5xl mx-auto px-4 py-4 grid gap-2">
@@ -171,7 +151,6 @@ export default function SiteHeader() {
                       }`}
                   >
                     <span>{n.label}</span>
-                    {/* reservierter Platz rechts für Badge */}
                     <span className="relative inline-block w-6 h-6">
                       {isProfile && me && unread > 0 && <Badge count={unread} />}
                     </span>
@@ -179,7 +158,7 @@ export default function SiteHeader() {
                 );
               })}
 
-              {/* Auth-Aktion im Menü */}
+              {/* Auth */}
               {me ? (
                 <form action="/api/logout" method="post" onSubmit={() => setMenuOpen(false)} className="mt-2">
                   <button
@@ -187,7 +166,7 @@ export default function SiteHeader() {
                     className="inline-flex items-center gap-2 rounded-xl bg-red-600 hover:bg-red-700 text-white px-3 py-2 text-sm shadow-sm"
                   >
                     <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden className="shrink-0">
-                      <path d="M12 2v10m6.36-6.36a9 9 0 11-12.72 0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                      <path d="M12 2v10m6.36-6.36a9 9 0 11-12.72 0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
                     Abmelden
                   </button>

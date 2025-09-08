@@ -443,9 +443,14 @@ export async function runAgent({ force=false, dry=false } = {}) {
     // Normaler Lauf
     const articles = await fetchNews(cfg);
     const top = articles.slice(0, cfg.maxArticles || 30);
-    const srcs = top.map(a => ({ url: a.url, label: a.source?.name || null }));
 
-    // Bullets mit [n]-Markern
+    // Label hier identisch zu buildRefsMarkdown => 100% Konsistenz
+    const srcs = top.map(a => ({
+      url: a.url,
+      label: sourceLabelOf(a.url, a.source?.name || null)
+    }));
+
+    // Bullets mit [n]-Markern + konsistente Quellenliste
     const bullets = await summarizeWithOpenAI(cfg, top);
     const refsMd = buildRefsMarkdown(top);
     const contentMd = `${bullets}\n\n### Quellen\n${refsMd}`;
@@ -464,10 +469,12 @@ export async function runAgent({ force=false, dry=false } = {}) {
 export async function logRun(tookMs: number, found: number, inserted: number, dryRun: boolean, note?: string) {
   const db = supabaseAdmin();
   await db.from('agent_runs').insert({
+    ran_at: new Date().toISOString(),   // <-- sorgt für gültiges Datum
     took_ms: Math.round(tookMs),
-    found, inserted,
+    found,
+    inserted,
     dry_run: !!dryRun,
-    note: note || null
+    note: note || null,
   });
 }
 

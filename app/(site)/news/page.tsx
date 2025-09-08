@@ -6,7 +6,7 @@ import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useSearchParams } from 'next/navigation';
-import DOMPurify from 'isomorphic-dompurify'; // <-- korrekt: Default-Import
+import DOMPurify from 'isomorphic-dompurify';
 
 // Typen
 type Badge = { id: number; name: string; color: string; kind: string };
@@ -87,6 +87,27 @@ function prettySourceLabel(url: string, fallback?: string | null) {
   } catch {
     return url;
   }
+}
+
+// --- Duplicate-Schutz für Quellenliste ---
+function uniqueSources(srcs: PostSource[] = []) {
+  const seen = new Set<string>();
+  return srcs.filter(s => {
+    const key = (s.url || '').trim();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+// --- Agent-Erkennung & „hat eigene Quellen“-Erkennung ---
+function isAgentPost(it: Item) {
+  return (it.post_badges || []).some(pb => (pb?.badge?.name || '').trim() === '⚡ Agent');
+}
+function contentHasOwnSources(content?: string | null) {
+  if (!content) return false;
+  // erkennt "### Quellen" (Markdown) – tolerant bei Leerzeichen/Zeilenanfang
+  return /\n?#{2,3}\s*Quellen\b/i.test(content);
 }
 
 export default function Page() {
@@ -201,11 +222,9 @@ export default function Page() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // --- useSearchParams wurde in Child ausgelagert ---
-
   return (
     <Suspense fallback={<div className="container max-w-5xl mx-auto py-8">Lade…</div>}>
-      {/* Child liest ?open=... und klappt den passenden Post auf */}
+      {/* öffnet ggf. Post aus ?open=ID */}
       <Suspense fallback={null}>
         <OpenFromSearchParam items={items} setExpanded={setExpanded} />
       </Suspense>
@@ -275,6 +294,16 @@ export default function Page() {
             <ul className="grid gap-4">
               {items.map(it => {
                 const isOpen = expanded.has(it.id);
+                const isAgent = isAgentPost(it);
+                const hasOwnSources = contentHasOwnSources(it.content);
+                const showSeparateSources = !isAgent && !hasOwnSources && (it.sources?.length ?? 0) > 0;
+
+               const sources = uniqueSources(
+  (it.sources ?? [])
+    .slice()
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+);
+
                 return (
                   <li id={`post-${it.id}`} key={it.id} className="p-5 rounded-2xl shadow-sm bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800">
                     {/* Kopf */}
@@ -354,21 +383,18 @@ export default function Page() {
                           ))}
                         </div>
 
-                        {/* Quellen */}
-                        {it.sources && it.sources.length > 0 && (
+                        {/* Quellen – Container am ENDE der Karte; nur wenn NICHT Agent & NICHT bereits inhaltliche Quellen-Sektion vorhanden */}
+                        {showSeparateSources && sources.length > 0 && (
                           <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
                             <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-2">Quellen</h4>
                             <ol className="list-decimal pl-5 space-y-1">
-                              {it.sources
-                                .slice()
-                                .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-                                .map((s, i) => (
-                                  <li key={`${s.url}-${i}`} className="break-words">
-                                    <a href={s.url} target="_blank" rel="noopener noreferrer" className="text-blue-700 dark:text-blue-400 underline break-words">
-                                      {prettySourceLabel(s.url, s.label)}
-                                    </a>
-                                  </li>
-                                ))}
+                              {sources.map((s, i) => (
+                                <li key={`${s.url}-${i}`} className="break-words">
+                                  <a href={s.url} target="_blank" rel="noopener noreferrer" className="text-blue-700 dark:text-blue-400 underline break-words">
+                                    {prettySourceLabel(s.url, s.label)}
+                                  </a>
+                                </li>
+                              ))}
                             </ol>
                           </div>
                         )}

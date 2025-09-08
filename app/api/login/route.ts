@@ -1,31 +1,30 @@
 // app/api/login/route.ts
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { AUTH_COOKIE } from '@/lib/auth'; // <- sicherstellen, dass dieser Name mit deinem Layout übereinstimmt
+import { AUTH_COOKIE } from '@/lib/auth';
 
 type Role = 'admin' | 'moderator' | 'user';
 
 export async function POST(req: Request) {
   const auth = req.headers.get('authorization') || '';
   const m = /^Bearer\s+(.+)$/i.exec(auth);
-  if (!m) {
-    return NextResponse.json({ error: 'Missing Bearer' }, { status: 401 });
-  }
+  if (!m) return NextResponse.json({ error: 'Missing Bearer' }, { status: 401 });
   const accessToken = m[1];
 
   const s = supabaseAdmin();
-
-  // User sicher über Supabase prüfen (statt manuell JWT zu decodieren),
-  // das funktioniert zuverlässig und ist Edge/Node-kompatibel.
   const { data: userData, error: userErr } = await s.auth.getUser(accessToken);
   if (userErr || !userData?.user) {
     return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
   }
 
   const email = userData.user.email?.toLowerCase() ?? null;
-  const userId = userData.user.id ?? null;
+  const userId = userData.user.id;
+  const displayName =
+    (userData.user.user_metadata?.full_name as string | undefined) ||
+    (userData.user.user_metadata?.name as string | undefined) ||
+    undefined;
 
-  // Rolle + Aktiv-Flag aus app_users lesen
+  // Rolle/Aktiv holen
   let role: Role = 'user';
   let active = false;
   let appUserId: number | null = null;
@@ -37,57 +36,45 @@ export async function POST(req: Request) {
       .eq('email', email)
       .maybeSingle();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    if (data) {
-      role = (data.role as Role) || 'user';
-      active = !!data.active;
-      appUserId = data.id;
-    }
-  } else if (userId) {
+    if (data) { role = (data.role as Role) || 'user'; active = !!data.active; appUserId = data.id; }
+  } else {
     const { data, error } = await s
       .from('app_users')
       .select('id, role, active')
       .eq('user_id', userId)
       .maybeSingle();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    if (data) {
-      role = (data.role as Role) || 'user';
-      active = !!data.active;
-      appUserId = data.id;
-    }
+    if (data) { role = (data.role as Role) || 'user'; active = !!data.active; appUserId = data.id; }
   }
 
   if (!active) {
     return NextResponse.json({ error: 'Benutzer ist noch nicht aktiviert.' }, { status: 403 });
   }
 
-  // Letzten Login in der Tabelle vermerken (Spaltenname ggf. anpassen)
   if (appUserId) {
-    await s
-      .from('app_users')
-      .update({ last_login_at: new Date().toISOString() })
-      .eq('id', appUserId);
+    await s.from('app_users').update({ last_login_at: new Date().toISOString() }).eq('id', appUserId);
   }
 
   const res = NextResponse.json({ ok: true, role });
   const isProd = process.env.NODE_ENV === 'production';
 
-  // 1) httpOnly-JWT für serverseitige Verifikation (Layout nutzt AUTH_COOKIE)
+  // Haupt-Cookie (JWT)
   res.cookies.set(AUTH_COOKIE, accessToken, {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: isProd,
-    path: '/',
-    maxAge: 60 * 60 * 24 * 7, // 7 Tage
+    httpOnly: true, sameSite: 'lax', secure: isProd, path: '/', maxAge: 60 * 60 * 24 * 7,
   });
 
-  // 2) Rolle als Zusatz (UI kann sofort unterscheiden)
+  // Zusatzinfos: Rolle, user_id, name (nicht httpOnly, damit Client sie lesen kann)
   res.cookies.set('user_role', role, {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: isProd,
-    path: '/',
-    maxAge: 60 * 60 * 12, // 12 Stunden
+    httpOnly: false, sameSite: 'lax', secure: isProd, path: '/', maxAge: 60 * 60 * 12,
   });
+  res.cookies.set('user_id', userId, {
+    httpOnly: false, sameSite: 'lax', secure: isProd, path: '/', maxAge: 60 * 60 * 24 * 7,
+  });
+  if (displayName) {
+    res.cookies.set('user_name', displayName, {
+      httpOnly: false, sameSite: 'lax', secure: isProd, path: '/', maxAge: 60 * 60 * 24 * 7,
+    });
+  }
 
   return res;
 }

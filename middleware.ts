@@ -7,6 +7,9 @@ function isPublic(pathname: string) {
   if (pathname === '/login' || pathname === '/register') return true;
   if (pathname.startsWith('/api/login') || pathname.startsWith('/api/register')) return true;
   if (pathname.startsWith('/api/me')) return true;
+  if (pathname.startsWith('/api/unread')) return true;
+  if (pathname.startsWith('/api/logout')) return true;
+   if (pathname.startsWith('/api/profile')) return true;
 
   // Diagnose offen lassen
   if (pathname.startsWith('/api/diag')) return true;
