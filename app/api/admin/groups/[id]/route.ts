@@ -5,6 +5,19 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 
+function getGroupIdFromUrl(url: string): number | null {
+  try {
+    const u = new URL(url);
+    const parts = u.pathname.split('/').filter(Boolean);
+    // .../api/admin/groups/{id}/members
+    const idStr = parts[parts.length - 2]; // Segment vor "members"
+    const idNum = Number(idStr);
+    return Number.isFinite(idNum) ? idNum : null;
+  } catch {
+    return null;
+  }
+}
+
 async function appUserIdToUuid(appUserId: number): Promise<string | null> {
   const rows = await sql<{ user_id: string | null }[]>`
     select user_id from public.app_users where id = ${appUserId} limit 1
@@ -13,12 +26,9 @@ async function appUserIdToUuid(appUserId: number): Promise<string | null> {
 }
 
 // Mitglied hinzufügen
-export async function POST(
-  request: Request,
-  { params }: { params: { id: string } }
-) {
-  const gid = Number(params.id);
-  if (!Number.isFinite(gid)) {
+export async function POST(request: Request) {
+  const gid = getGroupIdFromUrl(request.url);
+  if (!gid) {
     return NextResponse.json({ ok: false, error: 'invalid_group_id' }, { status: 400 });
   }
 
@@ -47,12 +57,9 @@ export async function POST(
 }
 
 // Mitglied entfernen
-export async function DELETE(
-  request: Request,
-  { params }: { params: { id: string } }
-) {
-  const gid = Number(params.id);
-  if (!Number.isFinite(gid)) {
+export async function DELETE(request: Request) {
+  const gid = getGroupIdFromUrl(request.url);
+  if (!gid) {
     return NextResponse.json({ ok: false, error: 'invalid_group_id' }, { status: 400 });
   }
 
