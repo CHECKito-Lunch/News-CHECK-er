@@ -1,53 +1,33 @@
 // lib/admin-auth.ts
+import 'server-only';
 import { cookies } from 'next/headers';
-import { sql } from '@/lib/db';
+import { AUTH_COOKIE, verifyToken, type Session } from './auth';
 
-async function decodeJwtSubFromCookie(): Promise<string | null> {
-  // Supabase legt meist "sb-access-token" oder ein JSON in "sb:token" ab
-  const raw =
-    (await cookies()).get('sb-access-token')?.value ??
-    (await cookies()).get('sb:token')?.value ??
-    (await cookies()).get('supabase-auth-token')?.value ??
-    null;
+export type AdminCtx = { session: Session };
 
-  if (!raw) return null;
+/** Liest Session aus dem `auth`-Cookie (Fallback: alte role-/user_-Cookies) */
+export async function getSessionFromCookies(): Promise<Session | null> {
+  const c = await cookies();                          // ← async!
+  // 1) bevorzugt: dein JWT
+  const token = c.get(AUTH_COOKIE)?.value;
+  const s = await verifyToken(token);
+  if (s) return s;
 
-  // Falls "sb:token" ein JSON string mit currentSession ist
-  let token = raw;
-  try {
-    if (raw.trim().startsWith('{')) {
-      const j = JSON.parse(raw);
-      token = j?.currentSession?.access_token ?? j?.access_token ?? token;
-    }
-  } catch {
-    /* ignore */
+  // 2) Fallback (falls noch im Einsatz): einfache Cookies
+  const role = c.get('user_role')?.value as any;
+  if (role) {
+    return {
+      sub: c.get('user_id')?.value ?? '',
+      role,
+      name: c.get('user_name')?.value,
+    } as Session;
   }
-  if (!token) return null;
-
-  const parts = token.split('.');
-  if (parts.length < 2) return null;
-
-  const payloadStr = Buffer.from(parts[1].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
-  try {
-    const payload = JSON.parse(payloadStr);
-    return payload?.sub ?? null; // Supabase user id
-  } catch {
-    return null;
-  }
+  return null;
 }
 
-export async function requireAdmin() {
-  // Dev-Bypass möglich
-  if (process.env.DEV_BYPASS_ADMIN === '1') return { ok: true as const, userId: 'dev-admin' };
-
-  const userId = decodeJwtSubFromCookie();
-  if (!userId) return { ok: false as const, code: 401 as const };
-
-  const [me] = await sql<{ role: string }[]>`
-    select role from public.app_users
-    where user_id = ${await userId} and active = true
-    limit 1
-  `;
-  if (me?.role !== 'admin') return { ok: false as const, code: 403 as const };
-  return { ok: true as const, userId };
+/** Gibt Admin-Kontext zurück oder `null`, wenn nicht eingeloggt/kein Admin */
+export async function getAdminFromCookies(): Promise<AdminCtx | null> {
+  const session = await getSessionFromCookies();
+  if (!session || session.role !== 'admin') return null;
+  return { session };
 }

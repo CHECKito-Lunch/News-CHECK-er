@@ -3,65 +3,77 @@ import 'server-only';
 import dns from 'dns';
 import postgres, { type Sql } from 'postgres';
 
-// IPv4 bevorzugen, aber nur wenn sinnvoll
+// --- IPv4 bevorzugen (ohne harte Annahmen)
 try { dns.setDefaultResultOrder?.('ipv4first'); } catch {}
 
-// Hartes IPv4-Fallback, aber robust: wenn hostname fehlt, durchreichen
+// Fallback: lookup auf IPv4 biegen, aber nur bei gültigem Hostnamen
 const origLookup = dns.lookup as any;
-// @ts-expect-error: wir übersteuern bewusst die Overloads
+// @ts-expect-error Overload ist uns egal: wir leiten korrekt weiter
 dns.lookup = (hostname: any, options?: any, callback?: any) => {
-  // Falls jemand Mist übergibt (undefined/null/leer) → unverändert an Original weiterreichen
   if (typeof hostname !== 'string' || hostname.length === 0) {
-    return origLookup(hostname, options, callback);
+    return (origLookup as any)(hostname, options, callback);
   }
-
-  // (host, cb)
   if (typeof options === 'function') {
-    return origLookup(hostname, { family: 4, all: false }, options);
+    return (origLookup as any)(hostname, { family: 4, all: false }, options);
   }
-  // (host, number, cb)
   if (typeof options === 'number') {
-    return origLookup(hostname, 4, callback);
+    return (origLookup as any)(hostname, 4, callback);
   }
-  // (host, options, cb)
   const opts = { ...(options || {}), family: 4, all: false };
-  return origLookup(hostname, opts, callback);
+  return (origLookup as any)(hostname, opts, callback);
 };
 
 let _sql: Sql<{}> | null = null;
 
+function normalizeUrl(raw: string): string {
+  // sslmode=require anhängen, wenn nicht gesetzt
+  const hasQuery = raw.includes('?');
+  const hasSslMode = /[?&]sslmode=/.test(raw);
+  if (!hasSslMode) return raw + (hasQuery ? '&' : '?') + 'sslmode=require';
+  return raw;
+}
+
 function ensure(): Sql<{}> {
-  const url = process.env.DATABASE_URL;
-  if (!url) {
-    throw new Error('DATABASE_URL fehlt. Bitte in .env.local setzen.');
-  }
+  const raw = process.env.DATABASE_URL;
+  if (!raw) throw new Error('DATABASE_URL fehlt. Bitte in .env.local setzen.');
+
   if (!_sql) {
-    // Kleiner Sanity-Check: Host aus URL extrahieren (hilft beim Debug)
+    let url = normalizeUrl(raw);
+
+    // Validierung + Debug-Hinweis (ohne Geheimnisse zu loggen)
     try {
-      const host = new URL(url).hostname;
-      if (!host) throw new Error('Host aus DATABASE_URL nicht lesbar');
+      const u = new URL(url);
+      if (!u.hostname) throw new Error('Hostname fehlt');
       if (process.env.NODE_ENV !== 'production') {
-        console.log('[db] connecting to', host);
+        console.log('[db] connecting to host:', u.hostname, '(pooler)');
       }
-    } catch (e) {
-      throw new Error(`Ungültige DATABASE_URL: ${url}`);
+    } catch {
+      throw new Error('Ungültige DATABASE_URL.');
     }
 
     _sql = postgres(url, {
+      // Shared/Transaction Pooler:
+      prepare: false,          // WICHTIG bei PgBouncer
       ssl: 'require',
       max: 5,
       idle_timeout: 20,
       connect_timeout: 10,
-      prepare: false,
     });
   }
   return _sql;
 }
 
-// Tag-Funktion: sql`select 1`
-export const sql = ((...args: any[]) => (ensure() as any)(...args)) as unknown as Sql<{}>;
+// Tag-Funktion kompatibel halten (vermeidet TS2556)
+type Tag = <T = any>(strings: TemplateStringsArray, ...values: any[]) => Promise<T[]>;
+const tag: Tag = (strings, ...values) => (ensure() as any)(strings, ...values);
 
-// Methoden typgerecht durchreichen
-(sql as any).begin  = (fn: any) => (ensure() as any).begin(fn);
-(sql as any).unsafe = (text: any, params?: any) => (ensure() as any).unsafe(text, params);
-(sql as any).end    = () => (ensure() as any).end();
+// Helfer-Methoden sauber durchreichen
+(tag as any).begin  = (fn: any) => (ensure() as any).begin(fn);
+(tag as any).unsafe = (text: any, params?: any) => (ensure() as any).unsafe(text, params);
+(tag as any).end    = () => (ensure() as any).end();
+
+export const sql = tag as unknown as Sql<{}>;
+
+export const sqlArray = (...args: any[]) => (ensure() as any).array(...args);
+export const sqlFile  = (...args: any[]) => (ensure() as any).file(...args);
+export const sqlJson  = (v: any) => (ensure() as any).json(v);
