@@ -9,6 +9,19 @@ import { sql } from '@/lib/db';
 type State = 'confirmed' | 'waitlist';
 const json = (data: any, status = 200) => NextResponse.json(data, { status });
 
+// URL-Helfer: .../api/events/:id/rsvp  -> number | null
+function extractId(url: string): number | null {
+  try {
+    const parts = new URL(url).pathname.split('/').filter(Boolean);
+    // [..., 'events', ':id', 'rsvp']
+    const idStr = parts[parts.length - 2];
+    const id = Number(idStr);
+    return Number.isFinite(id) ? id : null;
+  } catch {
+    return null;
+  }
+}
+
 async function getUserIdFromCookies(): Promise<string | null> {
   try {
     const c = await getCookies();
@@ -22,9 +35,7 @@ async function getUserIdFromCookies(): Promise<string | null> {
     if (!auth || !auth.includes('.')) return null;
 
     try {
-      const payloadB64 = auth.split('.')[1]
-        .replace(/-/g, '+')
-        .replace(/_/g, '/');
+      const payloadB64 = auth.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
       const payloadJson = Buffer.from(payloadB64, 'base64').toString('utf8');
       const payload = JSON.parse(payloadJson);
       const sub = typeof payload?.sub === 'string' ? payload.sub : null;
@@ -41,7 +52,7 @@ async function getCounts(eid: number) {
   const [row] = await sql<{ confirmed_count: number; waitlist_count: number }[]>`
     SELECT
       COUNT(*) FILTER (WHERE er.state = 'confirmed') AS confirmed_count,
-      COUNT(*) FILTER (WHERE er.state NOT IN ('confirmed')) AS waitlist_count
+      COUNT(*) FILTER (WHERE er.state NOT IN ('confirmed','cancelled')) AS waitlist_count
     FROM public.event_registrations er
     WHERE er.event_id = ${eid}
   `;
@@ -51,12 +62,10 @@ async function getCounts(eid: number) {
   };
 }
 
-export async function GET(
-  _req: NextRequest,
-  { params }: { params: { id: string } }
-) {
-  const eid = Number(params.id);
-  if (!Number.isFinite(eid)) return json({ ok: false, error: 'invalid_id' }, 400);
+// ------- GET: Status des eingeloggten Nutzers für dieses Event -------
+export async function GET(req: NextRequest) {
+  const eid = extractId(req.url);
+  if (eid === null) return json({ ok: false, error: 'invalid_id' }, 400);
 
   const userId = await getUserIdFromCookies();
   if (!userId) return json({ ok: false, error: 'unauthorized' }, 401);
@@ -67,15 +76,13 @@ export async function GET(
     WHERE event_id = ${eid} AND user_id = ${userId}
     LIMIT 1
   `;
-  return json({ ok: true, state: (row?.state ?? 'none') as any });
+  return json({ ok: true, state: (row?.state ?? 'none') });
 }
 
-export async function POST(
-  req: NextRequest,
-  { params }: { params: { id: string } }
-) {
-  const eid = Number(params.id);
-  if (!Number.isFinite(eid)) return json({ ok: false, error: 'invalid_id' }, 400);
+// ------- POST: join/leave -------
+export async function POST(req: NextRequest) {
+  const eid = extractId(req.url);
+  if (eid === null) return json({ ok: false, error: 'invalid_id' }, 400);
 
   const userId = await getUserIdFromCookies();
   if (!userId) return json({ ok: false, error: 'unauthorized' }, 401);
@@ -95,7 +102,6 @@ export async function POST(
   if (!ev) return json({ ok: false, error: 'event_not_found' }, 404);
 
   if (action === 'leave') {
-    // robustes Abmelden: Eintrag löschen
     await sql`
       DELETE FROM public.event_registrations
       WHERE event_id = ${eid} AND user_id = ${userId}
@@ -115,7 +121,6 @@ export async function POST(
   const isFull = ev.capacity != null && counts.confirmed_count >= Number(ev.capacity);
   const targetState: State = isFull ? 'waitlist' : 'confirmed';
 
-  // Upsert (erfordert UNIQUE (event_id, user_id))
   await sql`
     INSERT INTO public.event_registrations (event_id, user_id, state)
     VALUES (${eid}, ${userId}, ${targetState})
