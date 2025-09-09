@@ -4,6 +4,11 @@ export const dynamic = 'force-dynamic';
 import Link from 'next/link';
 import { sql } from '@/lib/db';
 
+// Client-Komponenten (eigene Dateien, siehe unten)
+import EventRsvpClient from './EventRsvpClient';
+import EventGallery from './EventGallery';
+import EventComments from './EventComments';
+
 type Row = {
   id: number;
   slug: string;
@@ -16,15 +21,46 @@ type Row = {
   capacity: number | null;
   status: string;
   hero_image_url: string | null;
-  gallery_json: any | null;
+  gallery_json: any | null; // jsonb (Array<String>) oder null
   confirmed_count: number;
   waitlist_count: number;
 };
 
-export default async function EventPage(
-  { params }: { params: Promise<{ slug: string }> }
-) {
-  const { slug } = await params;
+function parseGallery(v: any): string[] {
+  if (!v) return [];
+  if (Array.isArray(v)) return v.filter((x) => typeof x === 'string');
+  if (typeof v === 'string') {
+    try {
+      const j = JSON.parse(v);
+      return Array.isArray(j) ? j.filter((x) => typeof x === 'string') : [];
+    } catch { return []; }
+  }
+  return [];
+}
+
+function formatWhen(startISO: string, endISO: string | null, loc?: string | null) {
+  const tz = 'Europe/Berlin';
+  const start = new Date(startISO);
+  const end = endISO ? new Date(endISO) : null;
+
+  const dateFmt = new Intl.DateTimeFormat('de-DE', { timeZone: tz, dateStyle: 'medium' });
+  const timeFmt = new Intl.DateTimeFormat('de-DE', { timeZone: tz, timeStyle: 'short' });
+
+  const dateStr = dateFmt.format(start);
+  const startTime = timeFmt.format(start);
+
+  let range = `${dateStr}, ${startTime}`;
+  if (end) {
+    const sameDay = dateFmt.format(start) === dateFmt.format(end);
+    const endTime = timeFmt.format(end);
+    range = sameDay ? `${dateStr}, ${startTime}–${endTime}` : `${dateStr}, ${startTime} – ${dateFmt.format(end)}, ${endTime}`;
+  }
+
+  return loc ? `${range} · ${loc}` : range;
+}
+
+export default async function EventPage({ params }: { params: { slug: string } }) {
+  const slug = params.slug;
 
   const [row] = await sql<Row[]>`
     select
@@ -48,6 +84,9 @@ export default async function EventPage(
     return <div className="container mx-auto py-8">Event nicht gefunden.</div>;
   }
 
+  const gallery = parseGallery(row.gallery_json);
+  const when = formatWhen(row.starts_at, row.ends_at, row.location);
+
   return (
     <div className="container max-w-3xl mx-auto py-8 space-y-6">
       <Link href="/events" className="text-sm text-blue-600 hover:underline">← Zur Übersicht</Link>
@@ -55,9 +94,17 @@ export default async function EventPage(
       <h1 className="text-3xl font-bold">{row.title}</h1>
 
       <div className="text-sm text-gray-500">
-        {new Date(row.starts_at).toLocaleString('de-DE')}
-        {row.location ? <> · {row.location}</> : null}
+        {when}
       </div>
+
+      {/* Titelbild + Galerie */}
+      {(row.hero_image_url || gallery.length > 0) && (
+        <EventGallery
+          heroUrl={row.hero_image_url}
+          images={gallery}
+          title={row.title}
+        />
+      )}
 
       {row.summary && <p className="text-lg">{row.summary}</p>}
 
@@ -75,17 +122,9 @@ export default async function EventPage(
         confirmed={row.confirmed_count}
         waitlist={row.waitlist_count}
       />
+
+      {/* Kommentare */}
+      <EventComments eventId={row.id} />
     </div>
   );
-}
-
-// kleiner Wrapper damit wir ein Client-Component-Widget einhängen können
-function EventRsvpClient(props: {
-  eventId: number;
-  capacity: number | null;
-  confirmed: number;
-  waitlist: number;
-}) {
-  // @ts-expect-error Server/Client split ist beabsichtigt
-  return <EventRsvpInner {...props} />;
 }

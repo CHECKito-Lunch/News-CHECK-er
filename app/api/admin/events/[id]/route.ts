@@ -6,16 +6,40 @@ import { NextRequest, NextResponse } from 'next/server';
 import { sql, sqlJson } from '@/lib/db';
 import { getAdminFromCookies } from '@/lib/admin-auth';
 
+function normalizeIso(v: unknown): string | null {
+  if (!v) return null;
+  if (typeof v === 'string' && /Z$|[+-]\d{2}:\d{2}$/.test(v)) return v; // already tz-aware
+  const d = new Date(String(v));
+  return isNaN(d.getTime()) ? null : d.toISOString();
+}
+
 function extractId(url: string): number | null {
   try {
     const parts = new URL(url).pathname.split('/').filter(Boolean);
-    // …/api/admin/events/:id
     const idStr = parts[parts.length - 1];
     const id = Number(idStr);
     return Number.isFinite(id) ? id : null;
   } catch {
     return null;
   }
+}
+
+// Body robust lesen (JSON, Form, Fallback)
+async function readBody(req: NextRequest): Promise<any> {
+  const ct = req.headers.get('content-type') || '';
+  if (ct.includes('application/json')) {
+    const raw = await req.text().catch(() => '');
+    try { return raw ? JSON.parse(raw) : {}; } catch { return {}; }
+  }
+  if (ct.includes('multipart/form-data') || ct.includes('application/x-www-form-urlencoded')) {
+    const form = await req.formData().catch(() => null);
+    if (!form) return {};
+    const obj: Record<string, any> = {};
+    for (const [k, v] of form.entries()) obj[k] = typeof v === 'string' ? v : v.name;
+    return obj;
+  }
+  const raw = await req.text().catch(() => '');
+  try { return raw ? JSON.parse(raw) : {}; } catch { return {}; }
 }
 
 export async function PATCH(req: NextRequest) {
@@ -28,20 +52,47 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ ok: false, error: 'invalid_id' }, { status: 400 });
   }
 
-  let b: any = {};
-  try { b = await req.json(); } catch {}
+  const b: any = await readBody(req);
 
+  // Eingaben normalisieren; null = Feld unverändert (via COALESCE)
   const fields = {
-    title: b.title ?? null,
-    summary: b.summary ?? null,
-    content: b.content ?? null,
-    location: b.location ?? null,
-    starts_at: b.starts_at ? new Date(b.starts_at).toISOString() : null,
-    ends_at: b.ends_at ? new Date(b.ends_at).toISOString() : null,
-    capacity: Number.isFinite(Number(b.capacity)) ? Number(b.capacity) : null,
-    status: b.status ?? null,
-    hero_image_url: b.hero_image_url ?? null,
-    gallery_json: Array.isArray(b.gallery) ? sqlJson(b.gallery) : null,
+    title: typeof b.title === 'string' ? b.title : null,
+    summary: typeof b.summary === 'string' ? b.summary : null,
+    content: typeof b.content === 'string' ? b.content : null,
+    location: typeof b.location === 'string' ? b.location : null,
+
+    // akzeptiert starts_at/startsAt, ends_at/endsAt; lokale Zeiten → ISO/UTC
+    starts_at: normalizeIso(b?.starts_at ?? b?.startsAt),
+    ends_at: normalizeIso(b?.ends_at ?? b?.endsAt),
+
+    // int >= 0 oder null
+    capacity:
+      b?.capacity === '' || b?.capacity == null
+        ? null
+        : Number.isFinite(Number(b.capacity))
+          ? Math.max(0, Math.trunc(Number(b.capacity)))
+          : null,
+
+    // nur erlaubte Status; sonst Feld unverändert lassen
+    status: ['draft', 'published', 'cancelled'].includes(b?.status) ? b.status : null,
+
+    hero_image_url: typeof b.hero_image_url === 'string' ? b.hero_image_url : null,
+
+    // Galerie: Array<string> ODER JSON-String in gallery_json
+    gallery_json: (() => {
+      if (Array.isArray(b?.gallery)) {
+        return sqlJson(b.gallery.filter((u: any) => typeof u === 'string'));
+      }
+      if (typeof b?.gallery_json === 'string') {
+        try {
+          const arr = JSON.parse(b.gallery_json);
+          if (Array.isArray(arr)) {
+            return sqlJson(arr.filter((u: any) => typeof u === 'string'));
+          }
+        } catch { /* ignore */ }
+      }
+      return null;
+    })(),
   };
 
   try {

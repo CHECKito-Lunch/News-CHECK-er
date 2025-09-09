@@ -6,10 +6,17 @@ import { NextRequest, NextResponse } from 'next/server';
 import { sql, sqlJson } from '@/lib/db';
 import { getAdminFromCookies } from '@/lib/admin-auth';
 
+function normalizeIso(v: unknown): string | null {
+  if (!v) return null;
+  if (typeof v === 'string' && /Z$|[+-]\d{2}:\d{2}$/.test(v)) return v; // already tz-aware
+  const d = new Date(String(v)); // akzeptiert auch 'YYYY-MM-DDTHH:mm'
+  return isNaN(d.getTime()) ? null : d.toISOString();
+}
+
 const slugify = (s: string) =>
   s.normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
-   .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
-   .slice(0, 80) || 'event';
+    .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+    .slice(0, 80) || 'event';
 
 // ---- robuste Body-Parser-Helfer ----
 async function readBody(req: NextRequest): Promise<any> {
@@ -64,27 +71,46 @@ export async function POST(req: NextRequest) {
 
   // Felder normalisieren
   const title = typeof body?.title === 'string' ? body.title.trim() : '';
-  // erlaubt auch startsAt oder starts_at
-  const startsAtRaw = body?.starts_at ?? body?.startsAt ?? null;
-  const endsAtRaw   = body?.ends_at   ?? body?.endsAt   ?? null;
+
+  // erlaubt auch startsAt / endsAt
+  const startsIso = normalizeIso(body?.starts_at ?? body?.startsAt);
+  const endsIso   = normalizeIso(body?.ends_at   ?? body?.endsAt);
 
   if (!title) {
     return NextResponse.json({ ok:false, error:'title_required' }, { status: 400 });
   }
-
-  const starts_at = startsAtRaw ? new Date(startsAtRaw) : null;
-  if (!starts_at || isNaN(starts_at.getTime())) {
+  if (!startsIso) {
     return NextResponse.json({ ok:false, error:'starts_at_required' }, { status: 400 });
   }
 
-  const ends_at   = endsAtRaw ? new Date(endsAtRaw) : null;
   const summary   = typeof body?.summary  === 'string' ? body.summary  : null;
   const content   = typeof body?.content  === 'string' ? body.content  : null; // Markdown erlaubt
   const location  = typeof body?.location === 'string' ? body.location : null;
-  const capacity  = Number.isFinite(Number(body?.capacity)) ? Number(body.capacity) : null;
-  const status    = (body?.status ?? 'published') as string;
+
+  // Kapazität integer/null
+  const capacity =
+    body?.capacity === '' || body?.capacity == null
+      ? null
+      : Number.isFinite(Number(body.capacity))
+        ? Math.max(0, Math.trunc(Number(body.capacity)))
+        : null;
+
+  // Status absichern
+  const statusRaw = (body?.status ?? 'published') as string;
+  const status = ['draft','published','cancelled'].includes(statusRaw) ? statusRaw : 'published';
+
   const hero      = typeof body?.hero_image_url === 'string' ? body.hero_image_url : null;
-  const gallery   = Array.isArray(body?.gallery) ? body.gallery.filter((u:string)=> typeof u === 'string') : [];
+
+  // Galerie akzeptiert Array<string> oder JSON-String
+  let gallery: string[] = [];
+  if (Array.isArray(body?.gallery)) {
+    gallery = body.gallery.filter((u:string)=> typeof u === 'string');
+  } else if (typeof body?.gallery_json === 'string') {
+    try {
+      const j = JSON.parse(body.gallery_json);
+      if (Array.isArray(j)) gallery = j.filter((u:any)=> typeof u === 'string');
+    } catch { /* ignore */ }
+  }
 
   try {
     const base = slugify(title);
@@ -102,7 +128,7 @@ export async function POST(req: NextRequest) {
          capacity, status, hero_image_url, gallery_json)
       values
         (${final}, ${title}, ${summary}, ${content}, ${location},
-         ${starts_at.toISOString()}, ${ends_at ? ends_at.toISOString() : null},
+         ${startsIso}, ${endsIso},
          ${capacity}, ${status}, ${hero}, ${sqlJson(gallery)})
       returning id, slug
     `;

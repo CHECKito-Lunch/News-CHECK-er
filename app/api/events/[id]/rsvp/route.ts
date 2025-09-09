@@ -3,127 +3,134 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
+import { cookies as getCookies } from 'next/headers';
 import { sql } from '@/lib/db';
-import { AUTH_COOKIE, verifyToken } from '@/lib/auth';
 
-function extractId(url: string): number | null {
+type State = 'confirmed' | 'waitlist';
+const json = (data: any, status = 200) => NextResponse.json(data, { status });
+
+async function getUserIdFromCookies(): Promise<string | null> {
   try {
-    const parts = new URL(url).pathname.split('/').filter(Boolean);
-    // …/api/events/:id/rsvp
-    const idStr = parts[parts.length - 2];
-    const id = Number(idStr);
-    return Number.isFinite(id) ? id : null;
+    const c = await getCookies();
+
+    // 1) bevorzugt explizites user_id-Cookie
+    const uid = c.get('user_id')?.value || null;
+    if (uid) return uid;
+
+    // 2) Fallback: aus "auth" (Supabase access_token) die sub extrahieren
+    const auth = c.get('auth')?.value;
+    if (!auth || !auth.includes('.')) return null;
+
+    try {
+      const payloadB64 = auth.split('.')[1]
+        .replace(/-/g, '+')
+        .replace(/_/g, '/');
+      const payloadJson = Buffer.from(payloadB64, 'base64').toString('utf8');
+      const payload = JSON.parse(payloadJson);
+      const sub = typeof payload?.sub === 'string' ? payload.sub : null;
+      return sub || null;
+    } catch {
+      return null;
+    }
   } catch {
     return null;
   }
 }
 
-async function currentUserId(): Promise<string | null> {
-  const jar = await cookies();
-  // 1) einfacher Cookie, falls gesetzt
-  const explicit = jar.get('user_id')?.value;
-  if (explicit) return explicit;
-  // 2) unser eigenes JWT (siehe lib/auth.ts)
-  const token = jar.get(AUTH_COOKIE)?.value;
-  const sess = await verifyToken(token);
-  return sess?.sub ?? null;
-}
-
-/** Aktuellen RSVP-Status des eingeloggten Users zurückgeben */
-export async function GET(req: NextRequest) {
-  const eventId = extractId(req.url);
-  if (eventId === null) {
-    return NextResponse.json({ ok: false, error: 'invalid_event_id' }, { status: 400 });
-  }
-  const userId = await currentUserId();
-  if (!userId) {
-    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
-  }
-
-  const [row] = await sql<{ state: string | null; position: number | null }[]>`
-    select state, position
-      from public.event_registrations
-     where event_id = ${eventId} and user_id = ${userId}
-     limit 1
+async function getCounts(eid: number) {
+  const [row] = await sql<{ confirmed_count: number; waitlist_count: number }[]>`
+    SELECT
+      COUNT(*) FILTER (WHERE er.state = 'confirmed') AS confirmed_count,
+      COUNT(*) FILTER (WHERE er.state NOT IN ('confirmed')) AS waitlist_count
+    FROM public.event_registrations er
+    WHERE er.event_id = ${eid}
   `;
-  return NextResponse.json({ ok: true, state: row?.state ?? null, position: row?.position ?? null });
+  return {
+    confirmed_count: Number(row?.confirmed_count ?? 0),
+    waitlist_count: Number(row?.waitlist_count ?? 0),
+  };
 }
 
-/** Anmelden – setzt automatisch Warteliste, wenn Kapazität erreicht ist */
-export async function POST(req: NextRequest) {
-  const eventId = extractId(req.url);
-  if (eventId === null) {
-    return NextResponse.json({ ok: false, error: 'invalid_event_id' }, { status: 400 });
-  }
-  const userId = await currentUserId();
-  if (!userId) {
-    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  const eid = Number(params.id);
+  if (!Number.isFinite(eid)) return json({ ok: false, error: 'invalid_id' }, 400);
+
+  const userId = await getUserIdFromCookies();
+  if (!userId) return json({ ok: false, error: 'unauthorized' }, 401);
+
+  const [row] = await sql<{ state: string }[]>`
+    SELECT state
+    FROM public.event_registrations
+    WHERE event_id = ${eid} AND user_id = ${userId}
+    LIMIT 1
+  `;
+  return json({ ok: true, state: (row?.state ?? 'none') as any });
+}
+
+export async function POST(
+  req: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  const eid = Number(params.id);
+  if (!Number.isFinite(eid)) return json({ ok: false, error: 'invalid_id' }, 400);
+
+  const userId = await getUserIdFromCookies();
+  if (!userId) return json({ ok: false, error: 'unauthorized' }, 401);
+
+  let body: any = {};
+  try { body = await req.json(); } catch {}
+
+  const action = String(body?.action ?? '');
+  if (action !== 'join' && action !== 'leave') {
+    return json({ ok: false, error: 'invalid_action' }, 400);
   }
 
-  try {
-    const [info] = await sql<{ capacity: number | null; confirmed: number }[]>`
-      select
-        e.capacity,
-        coalesce((
-          select count(*) from public.event_registrations er
-           where er.event_id = e.id and er.state = 'confirmed'
-        ), 0) as confirmed
-      from public.events e
-     where e.id = ${eventId}
-     limit 1
+  // Event (für capacity)
+  const [ev] = await sql<{ capacity: number | null }[]>`
+    SELECT capacity FROM public.events WHERE id = ${eid} LIMIT 1
+  `;
+  if (!ev) return json({ ok: false, error: 'event_not_found' }, 404);
+
+  if (action === 'leave') {
+    // robustes Abmelden: Eintrag löschen
+    await sql`
+      DELETE FROM public.event_registrations
+      WHERE event_id = ${eid} AND user_id = ${userId}
     `;
-    if (!info) {
-      return NextResponse.json({ ok: false, error: 'event_not_found' }, { status: 404 });
-    }
-
-    const nextState: 'confirmed' | 'waitlist' =
-      info.capacity === null || info.confirmed < info.capacity ? 'confirmed' : 'waitlist';
-
-    let position: number | null = null;
-
-    await sql.begin(async (tx) => {
-      // bestehende Anmeldung bereinigen
-      await tx`delete from public.event_registrations where event_id = ${eventId} and user_id = ${userId}`;
-
-      if (nextState === 'waitlist') {
-        const [p] = await tx<{ pos: number }[]>`
-          select coalesce(max(position), 0) + 1 as pos
-            from public.event_registrations
-           where event_id = ${eventId} and state = 'waitlist'
-        `;
-        position = p?.pos ?? 1;
-      }
-
-      await tx`
-        insert into public.event_registrations (event_id, user_id, state, position)
-        values (${eventId}, ${userId}, ${nextState}, ${position})
-      `;
+    const after = await getCounts(eid);
+    return json({
+      ok: true,
+      state: 'none',
+      confirmed_count: after.confirmed_count,
+      waitlist_count: after.waitlist_count,
+      notice: 'Abmeldung gespeichert.',
     });
-
-    return NextResponse.json({ ok: true, state: nextState, position });
-  } catch (e: any) {
-    console.error('[events/:id/rsvp POST]', e);
-    return NextResponse.json({ ok: false, error: e?.message ?? 'server_error' }, { status: 500 });
-  }
-}
-
-/** Abmelden */
-export async function DELETE(req: NextRequest) {
-  const eventId = extractId(req.url);
-  if (eventId === null) {
-    return NextResponse.json({ ok: false, error: 'invalid_event_id' }, { status: 400 });
-  }
-  const userId = await currentUserId();
-  if (!userId) {
-    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
   }
 
-  try {
-    await sql`delete from public.event_registrations where event_id = ${eventId} and user_id = ${userId}`;
-    return NextResponse.json({ ok: true });
-  } catch (e: any) {
-    console.error('[events/:id/rsvp DELETE]', e);
-    return NextResponse.json({ ok: false, error: e?.message ?? 'server_error' }, { status: 500 });
-  }
+  // action === 'join'
+  const counts = await getCounts(eid);
+  const isFull = ev.capacity != null && counts.confirmed_count >= Number(ev.capacity);
+  const targetState: State = isFull ? 'waitlist' : 'confirmed';
+
+  // Upsert (erfordert UNIQUE (event_id, user_id))
+  await sql`
+    INSERT INTO public.event_registrations (event_id, user_id, state)
+    VALUES (${eid}, ${userId}, ${targetState})
+    ON CONFLICT (event_id, user_id) DO UPDATE
+      SET state = EXCLUDED.state
+  `;
+
+  const after = await getCounts(eid);
+  return json({
+    ok: true,
+    state: targetState,
+    confirmed_count: after.confirmed_count,
+    waitlist_count: after.waitlist_count,
+    notice: isFull
+      ? 'Event ist voll – du bist auf der Warteliste.'
+      : 'Du bist angemeldet.',
+  });
 }

@@ -18,6 +18,22 @@ const card = 'p-4 rounded-2xl shadow-sm bg-white border border-gray-200 dark:bg-
 const input = 'w-full rounded-lg px-3 py-2 bg-white text-gray-900 border border-gray-300 dark:bg-white/10 dark:text-white dark:border-white/10';
 const btn   = 'px-3 py-2 rounded-lg text-sm border bg-white dark:bg-white/10 hover:bg-gray-50 dark:hover:bg-white/20';
 
+/* ---------- Zeit-Helfer ---------- */
+// lokale Eingabe 'YYYY-MM-DDTHH:mm' -> ISO (UTC) oder null
+const toIso = (v: string) => {
+  if (!v) return null;
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? null : d.toISOString();
+};
+// ISO (UTC) -> Wert für <input type="datetime-local"> in lokaler TZ
+const toInputFromIso = (iso: string | null | undefined) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
 export default function AdminEventsPage() {
   // liste
   const [rows, setRows] = useState<EventRow[]>([]);
@@ -71,9 +87,6 @@ export default function AdminEventsPage() {
     setHeroUrl(''); setGallery([]);
     setMsg('');
   }
-
-  // lokale → ISO
-  const toIso = (v: string) => (v ? new Date(v).toISOString() : null);
 
   async function save() {
     setMsg('');
@@ -129,8 +142,8 @@ export default function AdminEventsPage() {
   function startEdit(ev: EventRow) {
     setEditing(ev.id);
     setTitle(ev.title);
-    setStartsAt(ev.starts_at?.slice(0,16));
-    setEndsAt(ev.ends_at?.slice(0,16) || '');
+    setStartsAt(toInputFromIso(ev.starts_at));             // ⬅️ statt slice
+    setEndsAt(toInputFromIso(ev.ends_at));                 // ⬅️ statt slice
     setSummary(ev.summary || '');
     setContent(ev.content || '');
     setLocation(ev.location || '');
@@ -345,7 +358,7 @@ function UploadButton({
           if (!files.length) return;
           const fd = new FormData();
           files.forEach(f => fd.append('files', f));
-          const r = await fetch('/api/admin/uploads', {
+          const r = await fetch('/api/upload', {
             method: 'POST',
             body: fd,
             credentials: 'include'
