@@ -59,8 +59,12 @@ function formatWhen(startISO: string, endISO: string | null, loc?: string | null
   return loc ? `${range} · ${loc}` : range;
 }
 
-export default async function EventPage({ params }: { params: { slug: string } }) {
-  const slug = params.slug;
+// ✅ Next 15: params ist ein Promise
+type RouteParams = { slug: string };
+type PageProps = { params: Promise<RouteParams> };
+
+export default async function EventPage({ params }: PageProps) {
+  const { slug } = await params;
 
   const [row] = await sql<Row[]>`
     select
