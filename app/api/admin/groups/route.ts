@@ -1,32 +1,30 @@
-// app/api/admin/groups/[id]/route.ts
+// app/api/admin/groups/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 
-/** Pfad .../groups/:id -> :id aus URL ziehen */
-function getGroupIdFromUrl(url: string): number | null {
-  try {
-    const u = new URL(url);
-    const parts = u.pathname.split('/').filter(Boolean);
-    // .../api/admin/groups/{id}
-    const idStr = parts[parts.length - 1];
-    const idNum = Number(idStr);
-    return Number.isFinite(idNum) ? idNum : null;
-  } catch {
-    return null;
-  }
-}
-
+// GET /api/admin/groups?q=&page=&pageSize=
 export async function GET(request: Request) {
-  const gid = getGroupIdFromUrl(request.url);
-  if (!gid) {
-    return NextResponse.json({ ok: false, error: 'invalid_group_id' }, { status: 400 });
-  }
   try {
+    const u = new URL(request.url);
+    const q = (u.searchParams.get('q') ?? '').trim();
+    const page = Math.max(1, Number(u.searchParams.get('page') ?? 1));
+    const pageSize = Math.min(100, Math.max(1, Number(u.searchParams.get('pageSize') ?? 20)));
+    const offset = (page - 1) * pageSize;
+
+    const like = q ? `%${q}%` : null;
+
+    const totalRows = await sql<{ c: number }[]>`
+      select count(*)::int as c
+      from public.groups g
+      ${like ? sql`where g.name ilike ${like} or g.description ilike ${like}` : sql``}
+    `;
+    const total = totalRows[0]?.c ?? 0;
+
     const rows = await sql<{
-      id: string;
+      id: number | string;
       name: string;
       description: string | null;
       is_active: boolean;
@@ -40,75 +38,59 @@ export async function GET(request: Request) {
         coalesce(count(m.user_id), 0)::int as member_count
       from public.groups g
       left join public.group_members m on m.group_id = g.id
-      where g.id = ${gid}
+      ${like ? sql`where g.name ilike ${like} or g.description ilike ${like}` : sql``}
       group by g.id, g.name, g.description, g.is_active
-      limit 1
+      order by g.id desc
+      limit ${pageSize} offset ${offset}
     `;
-    if (!rows.length) {
-      return NextResponse.json({ ok: false, error: 'not_found' }, { status: 404 });
-    }
-    const r = rows[0];
-    return NextResponse.json({
-      ok: true,
-      data: {
-        id: Number(r.id),
-        name: r.name,
-        description: r.description,
-        is_active: r.is_active,
-        memberCount: Number(r.member_count ?? 0),
-      },
-    });
+
+    const data = rows.map(r => ({
+      id: Number(r.id),
+      name: r.name,
+      description: r.description,
+      is_active: r.is_active,
+      memberCount: Number(r.member_count ?? 0),
+    }));
+
+    return NextResponse.json({ ok: true, data, total, page, pageSize });
   } catch (e: any) {
+    console.error('GET /admin/groups failed', e);
     return NextResponse.json({ ok: false, error: e?.message ?? 'server_error' }, { status: 500 });
   }
 }
 
-export async function PATCH(request: Request) {
-  const gid = getGroupIdFromUrl(request.url);
-  if (!gid) {
-    return NextResponse.json({ ok: false, error: 'invalid_group_id' }, { status: 400 });
-  }
-
+// POST /api/admin/groups  { name, description?, is_active? }
+export async function POST(request: Request) {
   try {
+    // WICHTIG: client muss Content-Type: application/json senden
     const body = await request.json().catch(() => ({}));
-    const hasName   = Object.prototype.hasOwnProperty.call(body, 'name');
-    const hasDesc   = Object.prototype.hasOwnProperty.call(body, 'description');
-    const hasActive = Object.prototype.hasOwnProperty.call(body, 'is_active');
+    const name = String(body?.name ?? '').trim();
+    const description =
+      body?.description == null ? null : String(body.description);
+    const is_active =
+      body?.is_active == null ? true : Boolean(body.is_active);
 
-    if (!hasName && !hasDesc && !hasActive) {
-      return NextResponse.json({ ok: false, error: 'no_fields' }, { status: 400 });
+    if (!name) {
+      return NextResponse.json(
+        { ok: false, error: 'name_required' },
+        { status: 400 }
+      );
     }
 
-    const name        = hasName   ? (body.name == null ? null : String(body.name).trim()) : null;
-    const description = hasDesc   ? (body.description == null ? null : String(body.description)) : null;
-    const is_active   = hasActive ? Boolean(body.is_active) : null;
-
-    await sql`
-      update public.groups
-      set
-        name        = case when ${hasName}   then ${name}        else name end,
-        description = case when ${hasDesc}   then ${description} else description end,
-        is_active   = case when ${hasActive} then ${is_active}   else is_active end
-      where id = ${gid}
+    const rows = await sql<{ id: number }[]>`
+      insert into public.groups (name, description, is_active)
+      values (${name}, ${description}, ${is_active})
+      returning id
     `;
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json(
+      { ok: true, id: rows[0]?.id ?? null },
+      { status: 201 }
+    );
   } catch (e: any) {
-    const msg = e?.message ?? 'server_error';
-    const status = /unique/i.test(msg) ? 409 : 500;
-    return NextResponse.json({ ok: false, error: msg }, { status });
-  }
-}
-
-export async function DELETE(request: Request) {
-  const gid = getGroupIdFromUrl(request.url);
-  if (!gid) {
-    return NextResponse.json({ ok: false, error: 'invalid_group_id' }, { status: 400 });
-  }
-  try {
-    await sql`delete from public.groups where id = ${gid}`;
-    return NextResponse.json({ ok: true });
-  } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message ?? 'server_error' }, { status: 500 });
+    const msg = String(e?.message ?? '');
+    const status = /duplicate key|unique/i.test(msg) ? 409 : 500;
+    console.error('POST /admin/groups failed', e);
+    return NextResponse.json({ ok: false, error: msg || 'server_error' }, { status });
   }
 }
