@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import AdminTabs from '../shared/AdminTabs';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -40,27 +40,27 @@ export default function AdminEventsPage() {
   const [heroUrl, setHeroUrl] = useState<string>('');
   const [gallery, setGallery] = useState<string[]>([]);
 
-async function load() {
-  setLoading(true);
-  try {
-    const p = new URLSearchParams();
-    if (q.trim()) p.set('q', q.trim());
+  async function load() {
+    setLoading(true);
+    try {
+      const p = new URLSearchParams();
+      if (q.trim()) p.set('q', q.trim());
 
-    const url = p.toString() ? `/api/admin/events?${p}` : '/api/admin/events';
-    const r = await fetch(url, { credentials: 'include' });
+      const url = p.toString() ? `/api/admin/events?${p}` : '/api/admin/events';
+      const r = await fetch(url, { credentials: 'include' });
 
-    const raw = await r.text();
-    const j = raw ? JSON.parse(raw) : { ok: false, error: `HTTP ${r.status}` };
+      const raw = await r.text();
+      const j = raw ? JSON.parse(raw) : { ok: false, error: `HTTP ${r.status}` };
 
-    if (!r.ok || !j.ok) throw new Error(j?.error || `HTTP ${r.status}`);
-    setRows(j.data ?? []);
-  } catch (e: any) {
-    setRows([]);
-    setMsg(e?.message ?? 'Fehler beim Laden');
-  } finally {
-    setLoading(false);
+      if (!r.ok || !j.ok) throw new Error(j?.error || `HTTP ${r.status}`);
+      setRows(j.data ?? []);
+    } catch (e: any) {
+      setRows([]);
+      setMsg(e?.message ?? 'Fehler beim Laden');
+    } finally {
+      setLoading(false);
+    }
   }
-}
   useEffect(()=>{ load(); }, []);
 
   function reset() {
@@ -72,45 +72,53 @@ async function load() {
     setMsg('');
   }
 
-async function save() {
-  setMsg('');
+  // lokale → ISO
+  const toIso = (v: string) => (v ? new Date(v).toISOString() : null);
 
-  const payload: any = {
-    title,
-    starts_at: startsAt || null,
-    ends_at: endsAt || null,
-    summary,
-    content,         // Markdown
-    location,
-    capacity,
-    status,
-    hero_image_url: heroUrl || null,
-    gallery,         // Array<string> (URLs)
-  };
+  async function save() {
+    setMsg('');
 
-  try {
-    const url = editing ? `/api/admin/events/${editing}` : '/api/admin/events';
-    const method = editing ? 'PATCH' : 'POST';
+    // einfache Pflichtfeld-Checks wie vom Server erwartet
+    if (!title.trim()) { setMsg('Bitte einen Titel eingeben.'); return; }
+    if (!startsAt)     { setMsg('Bitte Beginn (Datum/Uhrzeit) wählen.'); return; }
 
-    const r = await fetch(url, {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify(payload),
-    });
+    const payload: any = {
+      title: title.trim(),
+      starts_at: toIso(startsAt),
+      ends_at: toIso(endsAt),
+      summary,
+      content,         // Markdown
+      location,
+      capacity,
+      status,
+      hero_image_url: heroUrl || null,
+      gallery,         // Array<string> (URLs)
+    };
 
-    const raw = await r.text();
-    const j = raw ? JSON.parse(raw) : { ok: false, error: `HTTP ${r.status}` };
+    try {
+      const url = editing ? `/api/admin/events/${editing}` : '/api/admin/events';
+      const method = editing ? 'PATCH' : 'POST';
 
-    if (!r.ok || !j.ok) throw new Error(j?.error || 'save_failed');
+      const r = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(payload),
+      });
 
-    await load();
-    reset();
-    setMsg('Gespeichert.');
-  } catch (e: any) {
-    setMsg(e?.message ?? 'Fehler');
+      const raw = await r.text();
+      const j = raw ? JSON.parse(raw) : { ok: false, error: `HTTP ${r.status}` };
+
+      if (!r.ok || !j.ok) throw new Error(j?.error || 'save_failed');
+
+      await load();
+      reset();
+      setMsg('Gespeichert.');
+    } catch (e: any) {
+      setMsg(e?.message ?? 'Fehler');
+      console.error('save() failed:', e);
+    }
   }
-}
 
   async function del(id:number) {
     if (!confirm('Event löschen?')) return;
@@ -151,7 +159,7 @@ async function save() {
         <div className="grid md:grid-cols-2 gap-3">
           <div>
             <label className="text-sm">Titel</label>
-            <input className={input} value={title} onChange={e=>setTitle(e.target.value)} />
+            <input className={input} value={title} onChange={e=>setTitle(e.target.value)} required />
           </div>
           <div>
             <label className="text-sm">Ort</label>
@@ -159,7 +167,13 @@ async function save() {
           </div>
           <div>
             <label className="text-sm">Beginn</label>
-            <input className={input} type="datetime-local" value={startsAt} onChange={e=>setStartsAt(e.target.value)} />
+            <input
+              className={input}
+              type="datetime-local"
+              value={startsAt}
+              onChange={e=>setStartsAt(e.target.value)}
+              required
+            />
           </div>
           <div>
             <label className="text-sm">Ende (optional)</label>
@@ -167,7 +181,12 @@ async function save() {
           </div>
           <div>
             <label className="text-sm">Kapazität (leer = unbegrenzt)</label>
-            <input className={input} type="number" value={capacity ?? ''} onChange={e=>setCapacity(e.target.value ? Number(e.target.value) : null)} />
+            <input
+              className={input}
+              type="number"
+              value={capacity ?? ''}
+              onChange={e=>setCapacity(e.target.value ? Number(e.target.value) : null)}
+            />
           </div>
           <div>
             <label className="text-sm">Status</label>
@@ -187,7 +206,12 @@ async function save() {
           <div>
             <label className="text-sm">Cover-Bild (URL oder Upload)</label>
             <div className="flex gap-2">
-              <input className={input + ' flex-1'} placeholder="https://…" value={heroUrl} onChange={e=>setHeroUrl(e.target.value)} />
+              <input
+                className={input + ' flex-1'}
+                placeholder="https://…"
+                value={heroUrl}
+                onChange={e=>setHeroUrl(e.target.value)}
+              />
               <UploadButton onUploaded={(urls)=> setHeroUrl(urls[0] || '')} multiple={false} />
             </div>
             {heroUrl && (
