@@ -8,14 +8,14 @@ import { sql } from '@/lib/db';
 
 const json = (data: any, status = 200) => NextResponse.json(data, { status });
 
-// URL: .../api/events/:id/comments  -> number | null
+// …/api/events/:id/comments  -> number | null
 function extractId(url: string): number | null {
   try {
     const parts = new URL(url).pathname.split('/').filter(Boolean);
     // [..., 'events', ':id', 'comments']
     const idStr = parts[parts.length - 2];
-    const id = Number(idStr);
-    return Number.isFinite(id) ? id : null;
+    const n = Number(idStr);
+    return Number.isFinite(n) ? n : null;
   } catch {
     return null;
   }
@@ -24,9 +24,12 @@ function extractId(url: string): number | null {
 async function getUserIdFromCookies(): Promise<string | null> {
   try {
     const c = await getCookies();
+
+    // bevorzugt explizites user_id-Cookie
     const uid = c.get('user_id')?.value || null;
     if (uid) return uid;
 
+    // Fallback: aus "auth" (Supabase access_token) sub extrahieren
     const auth = c.get('auth')?.value;
     if (!auth || !auth.includes('.')) return null;
 
@@ -40,8 +43,26 @@ async function getUserIdFromCookies(): Promise<string | null> {
   } catch { return null; }
 }
 
+// Body robust lesen
+async function readBody(req: NextRequest): Promise<any> {
+  const ct = req.headers.get('content-type') || '';
+  if (ct.includes('application/json')) {
+    const raw = await req.text().catch(() => '');
+    try { return raw ? JSON.parse(raw) : {}; } catch { return {}; }
+  }
+  if (ct.includes('multipart/form-data') || ct.includes('application/x-www-form-urlencoded')) {
+    const form = await req.formData().catch(() => null);
+    if (!form) return {};
+    const obj: Record<string, any> = {};
+    for (const [k, v] of form.entries()) obj[k] = typeof v === 'string' ? v : v.name;
+    return obj;
+  }
+  const raw = await req.text().catch(() => '');
+  try { return raw ? JSON.parse(raw) : {}; } catch { return {}; }
+}
+
 /**
- * GET: Kommentare eines Events (liefert author_name als Alias via JOIN)
+ * GET: Kommentare eines Events (liefert author_name via JOIN)
  * Response: { ok:true, items:[{ id, message, created_at, user_id, author_name }] }
  */
 export async function GET(req: NextRequest) {
@@ -63,7 +84,6 @@ export async function GET(req: NextRequest) {
         ec.user_id,
         ec.message,
         ec.created_at,
-        /* Alias, kein Spaltenbedarf in event_comments */
         COALESCE(au.name, au.email, ec.user_id::text) AS author_name
       FROM public.event_comments ec
       LEFT JOIN public.app_users au
@@ -81,8 +101,8 @@ export async function GET(req: NextRequest) {
 
 /**
  * POST: Kommentar anlegen
- * Body: { message: string }
- * Response: { ok:true, item:{ ... wie oben ... } }
+ * Body: { message: string } (auch 'text' oder 'content' akzeptiert)
+ * Response: { ok:true, item:{ ... } }
  */
 export async function POST(req: NextRequest) {
   const eid = extractId(req.url);
@@ -91,21 +111,18 @@ export async function POST(req: NextRequest) {
   const userId = await getUserIdFromCookies();
   if (!userId) return json({ ok: false, error: 'unauthorized' }, 401);
 
-  let body: any = {};
-  try { body = await req.json(); } catch {}
-
-  const message = (body?.message ?? '').toString().trim();
+  const body = await readBody(req);
+  const message = ((body?.message ?? body?.text ?? body?.content) ?? '').toString().trim();
   if (!message) return json({ ok: false, error: 'message_required' }, 400);
 
   try {
-    // Insert OHNE author_name (nicht vorhanden)
+    // Insert OHNE author_name (kommt als Alias)
     const [ins] = await sql<{ id: number; created_at: string }[]>`
       INSERT INTO public.event_comments (event_id, user_id, message)
       VALUES (${eid}, ${userId}, ${message})
       RETURNING id, created_at
     `;
 
-    // frisch eingefügten Datensatz inkl. author_name-Alias zurückgeben
     const [row] = await sql<{
       id: number;
       event_id: number;
