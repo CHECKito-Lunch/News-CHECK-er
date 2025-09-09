@@ -135,7 +135,7 @@ export async function POST(req: NextRequest) {
     confirmed_count: after.confirmed_count,
     waitlist_count: after.waitlist_count,
     notice: isFull
-      ? 'Event ist voll – du bist auf der Warteliste.'
+      ? 'Event ist voll – du bist auf der Warteliste. :)'
       : 'Du bist angemeldet.',
   });
 }
