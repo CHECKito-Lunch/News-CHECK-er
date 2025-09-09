@@ -8,7 +8,7 @@ import { sql } from '@/lib/db';
 
 const json = (data: any, status = 200) => NextResponse.json(data, { status });
 
-// …/api/events/:id/comments  -> number | null
+// URL: …/api/events/:id/comments  -> number | null
 function extractId(url: string): number | null {
   try {
     const parts = new URL(url).pathname.split('/').filter(Boolean);
@@ -25,11 +25,9 @@ async function getUserIdFromCookies(): Promise<string | null> {
   try {
     const c = await getCookies();
 
-    // bevorzugt explizites user_id-Cookie
     const uid = c.get('user_id')?.value || null;
     if (uid) return uid;
 
-    // Fallback: aus "auth" (Supabase access_token) sub extrahieren
     const auth = c.get('auth')?.value;
     if (!auth || !auth.includes('.')) return null;
 
@@ -43,7 +41,7 @@ async function getUserIdFromCookies(): Promise<string | null> {
   } catch { return null; }
 }
 
-// Body robust lesen
+// Body robust lesen (JSON, form-data, urlencoded, Text→JSON)
 async function readBody(req: NextRequest): Promise<any> {
   const ct = req.headers.get('content-type') || '';
   if (ct.includes('application/json')) {
@@ -61,10 +59,7 @@ async function readBody(req: NextRequest): Promise<any> {
   try { return raw ? JSON.parse(raw) : {}; } catch { return {}; }
 }
 
-/**
- * GET: Kommentare eines Events (liefert author_name via JOIN)
- * Response: { ok:true, items:[{ id, message, created_at, user_id, author_name }] }
- */
+/** GET: Kommentare eines Events */
 export async function GET(req: NextRequest) {
   const eid = extractId(req.url);
   if (eid === null) return json({ ok: false, error: 'invalid_id' }, 400);
@@ -82,9 +77,9 @@ export async function GET(req: NextRequest) {
         ec.id,
         ec.event_id,
         ec.user_id,
-        ec.message,
+        ec.content AS message,                          -- Alias auf content
         ec.created_at,
-        COALESCE(au.name, au.email, ec.user_id::text) AS author_name
+        COALESCE(ec.user_name, au.name, au.email, ec.user_id::text) AS author_name
       FROM public.event_comments ec
       LEFT JOIN public.app_users au
         ON au.user_id = ec.user_id
@@ -99,11 +94,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-/**
- * POST: Kommentar anlegen
- * Body: { message: string } (auch 'text' oder 'content' akzeptiert)
- * Response: { ok:true, item:{ ... } }
- */
+/** POST: Kommentar anlegen */
 export async function POST(req: NextRequest) {
   const eid = extractId(req.url);
   if (eid === null) return json({ ok: false, error: 'invalid_id' }, 400);
@@ -115,14 +106,19 @@ export async function POST(req: NextRequest) {
   const message = ((body?.message ?? body?.text ?? body?.content) ?? '').toString().trim();
   if (!message) return json({ ok: false, error: 'message_required' }, 400);
 
+  // Optionaler Anzeigename aus Cookie (nicht sicherheitskritisch, nur Komfort)
+  const c = await getCookies().catch(() => null);
+  const userName = c?.get('user_name')?.value ?? null;
+
   try {
-    // Insert OHNE author_name (kommt als Alias)
+    // In aktuelles Schema schreiben: content + optional user_name
     const [ins] = await sql<{ id: number; created_at: string }[]>`
-      INSERT INTO public.event_comments (event_id, user_id, message)
-      VALUES (${eid}, ${userId}, ${message})
+      INSERT INTO public.event_comments (event_id, user_id, content, user_name)
+      VALUES (${eid}, ${userId}, ${message}, ${userName})
       RETURNING id, created_at
     `;
 
+    // frisch eingefügten Datensatz inkl. Aliase laden
     const [row] = await sql<{
       id: number;
       event_id: number;
@@ -135,9 +131,9 @@ export async function POST(req: NextRequest) {
         ec.id,
         ec.event_id,
         ec.user_id,
-        ec.message,
+        ec.content AS message,
         ec.created_at,
-        COALESCE(au.name, au.email, ec.user_id::text) AS author_name
+        COALESCE(ec.user_name, au.name, au.email, ec.user_id::text) AS author_name
       FROM public.event_comments ec
       LEFT JOIN public.app_users au
         ON au.user_id = ec.user_id
