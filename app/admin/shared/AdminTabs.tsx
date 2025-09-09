@@ -16,6 +16,8 @@ const tabs = [
   { href: '/admin/news-agent',    label: 'News-Agent' },
   { href: '/admin/kpis',          label: 'KPIs' },
   { href: '/admin/users',         label: 'Benutzer' },
+  { href: '/admin/events',         label: 'Events' },
+
 ];
 
 export default function AdminTabs() {

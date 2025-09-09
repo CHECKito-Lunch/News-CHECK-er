@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -10,8 +10,6 @@ import dayGridPlugin from '@fullcalendar/daygrid';
 import interactionPlugin from '@fullcalendar/interaction';
 import iCalendarPlugin from '@fullcalendar/icalendar';
 import listPlugin from '@fullcalendar/list';
-
-// ❌ CSS-Imports entfernt – alles kommt via CDN über layout.tsx
 
 type Badge = { id: number; name: string; color: string; kind: string | null };
 type Vendor = { id: number; name: string };
@@ -30,7 +28,12 @@ type KPI = {
 type Tool = { id: number; title: string; icon: string; href: string };
 type Termin = { id: number; date: string; title: string };
 
-const card = 'p-4 rounded-2xl shadow-sm bg-white border border-gray-200 dark:bg-gray-900 dark:border-gray-800';
+const card =
+  'rounded-2xl shadow-sm bg-white/80 backdrop-blur border border-gray-200 ' +
+  'dark:bg-gray-900/70 dark:border-gray-800';
+
+const header =
+  'flex items-center justify-between gap-3 mb-3 px-2';
 
 export default function HomePage() {
   const [items, setItems] = useState<Item[]>([]);
@@ -39,84 +42,112 @@ export default function HomePage() {
   const [termine, setTermine] = useState<Termin[]>([]);
   const [meta, setMeta] = useState<{ badges: Badge[] }>({ badges: [] });
 
-  // >>> NEU: Touristische News (vom Agent)
+  // Events aus DB (für Kalender)
+  const [dbEvents, setDbEvents] = useState<any[]>([]);
+
+  // Touristische News (Agent)
   const [tourNews, setTourNews] = useState<Item[]>([]);
   const [tourLoading, setTourLoading] = useState<boolean>(true);
   const [tourErr, setTourErr] = useState<string>('');
 
-  const today = new Date();
-  const [selectedDate, setSelectedDate] = useState<Date>(today);
+  const [loadingFeed, setLoadingFeed] = useState(true);
+  const [loadingSide, setLoadingSide] = useState(true);
 
   const startBadgeId = useMemo(() => {
-    const byKind = meta.badges.find(b => (b.kind ?? '').toLowerCase() === 'start');
-    if (byKind) return byKind.id;
-    const byName = meta.badges.find(b => b.name.toLowerCase().includes('start'));
-    return byName?.id;
-  }, [meta.badges]);
+  const list: Badge[] = Array.isArray(meta?.badges) ? meta.badges : [];
+  const byKind = list.find(b => (b?.kind ?? '').toLowerCase() === 'start');
+  if (byKind) return byKind.id;
+  const byName = list.find(b => (b?.name ?? '').toLowerCase().includes('start'));
+  return byName?.id ?? null;
+}, [meta]);
 
   useEffect(() => {
-    fetch('/api/meta').then(r => r.json()).then(setMeta);
-  }, []);
+  (async () => {
+    try {
+      const r = await fetch('/api/meta', { cache: 'no-store' });
+      const j = await r.json().catch(() => ({}));
 
+      // akzeptiere /api/meta in verschiedenen Varianten:
+      // { badges: [...] } oder { data: { badges: [...] } } oder direkt [...]
+      const badges =
+        Array.isArray(j) ? j
+        : Array.isArray(j?.badges) ? j.badges
+        : Array.isArray(j?.data?.badges) ? j.data.badges
+        : [];
+
+      setMeta({ badges });
+    } catch {
+      setMeta({ badges: [] });
+    }
+  })();
+}, []);
+
+  // KPIs/Tools/Termine + Start-News
   useEffect(() => {
     (async () => {
-      fetch('/api/kpis').then(r => r.json()).then(j => setKpis(j.data ?? []));
-      fetch('/api/tools').then(r => r.json()).then(j => setTools(j.data ?? []));
-      fetch('/api/termine').then(r => r.json()).then(j => setTermine(j.data ?? []));
+      setLoadingSide(true);
+      setLoadingFeed(true);
+      try {
+        const [kpiRes, toolRes, termRes, evRes] = await Promise.all([
+          fetch('/api/kpis'),
+          fetch('/api/tools'),
+          fetch('/api/termine'),
+          fetch('/api/events?calendar=1'), // <- NEU: Events aus DB
+        ]);
+        const [kpiJ, toolJ, termJ, evJ] = await Promise.all([
+          kpiRes.json().catch(() => ({})),
+          toolRes.json().catch(() => ({})),
+          termRes.json().catch(() => ({})),
+          evRes.json().catch(() => ({})),
+        ]);
 
-      // bestehende Start-News (per Badge „start“)
-      if (!startBadgeId) { setItems([]); return; }
-      const p = new URLSearchParams();
-      p.append('badge', String(startBadgeId));
-      p.set('page', '1'); p.set('pageSize', '50');
+        setKpis(kpiJ.data ?? []);
+        setTools(toolJ.data ?? []);
+        setTermine(termJ.data ?? []);
+        setDbEvents(Array.isArray(evJ.events) ? evJ.events : []);
+      } finally {
+        setLoadingSide(false);
+      }
+
+      if (!startBadgeId) { setItems([]); setLoadingFeed(false); return; }
+      const p = new URLSearchParams({ badge: String(startBadgeId), page: '1', pageSize: '50' });
       const r = await fetch(`/api/news?${p}`);
-      const j = await r.json();
+      const j = await r.json().catch(() => ({}));
       setItems(j.data ?? []);
+      setLoadingFeed(false);
     })();
   }, [startBadgeId]);
 
-  // >>> NEU: Agent-News laden (mit Fallbacks)
+  // Agent-News (unten)
   useEffect(() => {
     let cancelled = false;
     async function loadTourNews() {
       setTourLoading(true); setTourErr('');
       try {
-        // 1) bevorzugte, dedizierte Route (falls vorhanden)
         let r = await fetch('/api/news/agent?limit=20');
         let j = await r.json().catch(() => ({}));
         if (r.ok && Array.isArray(j.data) && j.data.length) {
           if (!cancelled) setTourNews(j.data);
           return;
         }
-
-        // 2) Fallback: Query-Flag an /api/news
         r = await fetch('/api/news?agent=1&page=1&pageSize=20');
         j = await r.json().catch(() => ({}));
         if (r.ok && Array.isArray(j.data) && j.data.length) {
           if (!cancelled) setTourNews(j.data);
           return;
         }
-
-        // 3) Fallback: Badge „news-agent“ oder „tourismus“
         const tryBadge = async (name: string) => {
           const rr = await fetch(`/api/news?badgeName=${encodeURIComponent(name)}&page=1&pageSize=20`);
           const jj = await rr.json().catch(() => ({}));
-          return rr.ok && Array.isArray(jj.data) ? jj.data as Item[] : [];
+          return rr.ok && Array.isArray(jj.data) ? (jj.data as Item[]) : [];
         };
         let data = await tryBadge('news-agent');
         if (!data.length) data = await tryBadge('tourismus');
-        if (data.length) {
-          if (!cancelled) setTourNews(data);
-          return;
-        }
+        if (data.length) { if (!cancelled) setTourNews(data); return; }
 
-        // 4) Fallback: Kategorie „Touristische News“
         const rr = await fetch(`/api/news?categoryName=${encodeURIComponent('Touristische News')}&page=1&pageSize=20`);
         const jj = await rr.json().catch(() => ({}));
-        if (rr.ok && Array.isArray(jj.data)) {
-          if (!cancelled) setTourNews(jj.data);
-          return;
-        }
+        if (rr.ok && Array.isArray(jj.data)) { if (!cancelled) setTourNews(jj.data); return; }
 
         if (!cancelled) { setTourNews([]); setTourErr('Keine Agent-News gefunden.'); }
       } catch (e: unknown) {
@@ -129,7 +160,8 @@ export default function HomePage() {
     return () => { cancelled = true; };
   }, []);
 
-  const events = [
+  // Gesamtes Event-Array für den Kalender (Termine + DB-Events + ICS)
+  const events = useMemo(() => ([
     ...termine.map(t => ({
       title: '📌 ' + t.title,
       start: t.date,
@@ -137,175 +169,327 @@ export default function HomePage() {
       backgroundColor: '#2563eb',
       textColor: '#fff',
     })),
-    {
-      url: 'https://feiertage-api.de/api/?bundesland=SN&out=ical',
-      format: 'ics',
-    },
-    {
-      url: 'https://www.schulferien.org/iCal/Ferien/ical/Sachsen.ics',
-      format: 'ics',
-    },
-  ];
+    ...dbEvents, // <- aus /api/events?calendar=1 (grün)
+    { url: 'https://feiertage-api.de/api/?bundesland=SN&out=ical', format: 'ics' as const },
+    { url: 'https://www.schulferien.org/iCal/Ferien/ical/Sachsen.ics', format: 'ics' as const },
+  ]), [termine, dbEvents]);
 
   return (
-    <div className="container max-w-7xl mx-auto py-6">
-      {/* >>> NEU: Touristische News (vom Agent) – oben, über beide Spalten */}
-      <section className="mb-6">
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-xl font-semibold">Touristische News (automatisch)</h2>
-          <Link href="/news" className="text-sm text-blue-600 hover:underline">Alle News ansehen →</Link>
-        </div>
-        <div className={card + ' max-h-[420px] overflow-y-auto'}>
-          {tourLoading && <div className="text-sm text-gray-500">Lade Agent-News…</div>}
-          {!tourLoading && tourErr && <div className="text-sm text-red-600">{tourErr}</div>}
-          {!tourLoading && !tourErr && tourNews.length === 0 && (
-            <div className="text-sm text-gray-500">Aktuell keine Einträge.</div>
-          )}
-          {!tourLoading && !tourErr && tourNews.length > 0 && (
-            <ul className="grid gap-3">
-              {tourNews.map(it => (
-                <li key={it.id} className="border border-gray-200 dark:border-gray-700 rounded p-4 bg-gray-50 dark:bg-gray-800">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="text-lg font-semibold text-blue-700 dark:text-blue-400">
-                      {it.slug ? (
-                        <Link href={`/news/${it.slug}`} className="hover:underline">
-                          {it.title}
-                        </Link>
-                      ) : it.title}
+    <div className="container max-w-7xl mx-auto py-6 space-y-8">
+      {/* Grid: Feed + Sidebar */}
+      <div className="grid grid-cols-12 gap-6">
+        {/* FEED ---------------------------------------------------------- */}
+        <div className="col-span-12 lg:col-span-7 space-y-6">
+          {/* News-Feed */}
+          <section className={card + ' p-4'}>
+            <div className={header}>
+              <h2 className="text-lg font-semibold">Was gibt&apos;s Neues?</h2>
+              <Link href="/news" className="text-sm text-blue-600 hover:underline">
+                Alle News ansehen →
+              </Link>
+            </div>
+
+            {loadingFeed && (
+              <ul className="grid gap-3 animate-pulse">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <li key={i} className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50/70 dark:bg-gray-800/50 h-20" />
+                ))}
+              </ul>
+            )}
+
+            {!loadingFeed && items.length === 0 && (
+              <div className="text-sm text-gray-500 px-2 py-2">Keine Start-News vorhanden.</div>
+            )}
+
+            {!loadingFeed && items.length > 0 && (
+              <ul className="grid gap-3">
+                {items.map(it => (
+                  <li
+                    key={it.id}
+                    className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/60 p-4"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="text-base font-semibold text-blue-700 dark:text-blue-400 leading-snug">
+                        {it.slug ? (
+                          <Link href={`/news/${it.slug}`} className="hover:underline">
+                            {it.title}
+                          </Link>
+                        ) : it.title}
+                      </div>
+                      <div className="flex gap-1.5">
+                        {it.post_badges?.slice(0, 3).map(({ badge }) => (
+                          <span
+                            key={badge.id}
+                            className="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] leading-4
+                                       border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200"
+                            title={badge.name}
+                          >
+                            {badge.name}
+                          </span>
+                        ))}
+                      </div>
                     </div>
-                    <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border border-blue-200 text-blue-700 dark:border-blue-500/40 dark:text-blue-300">
-                      ⚡ Agent
-                    </span>
+
+                    {it.vendor && (
+                      <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">{it.vendor.name}</div>
+                    )}
+
+                    {(it.summary || it.content) && (
+                      <div className="prose dark:prose-invert max-w-none prose-p:my-2 mt-2 text-[13px]">
+                        {it.summary ? (
+                          <p>{it.summary}</p>
+                        ) : (
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {(it.content ?? '').slice(0, 320)}
+                          </ReactMarkdown>
+                        )}
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
+
+        {/* SIDEBAR ------------------------------------------------------ */}
+        <aside className="col-span-12 lg:col-span-5 space-y-6 lg:sticky lg:top-24 self-start">
+          {/* KPIs */}
+          <section className={card + ' p-4'}>
+            <div className={header}>
+              <h2 className="text-lg font-semibold">Kennzahlen</h2>
+            </div>
+
+            {loadingSide && (
+              <div className="grid grid-cols-2 gap-3 animate-pulse">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="h-16 rounded-xl bg-gray-50/70 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-800" />
+                ))}
+              </div>
+            )}
+
+            {!loadingSide && (
+              <div className="grid grid-cols-2 gap-3">
+                {kpis.length === 0 && <div className="text-sm text-gray-500 col-span-2">Noch keine KPIs hinterlegt.</div>}
+                {kpis.slice(0, 6).map(k => (
+                  <div
+                    key={k.id}
+                    className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/60 p-3"
+                  >
+                    <div className="text-[12px] text-gray-500">{k.label}</div>
+                    <div className="mt-0.5 text-2xl font-semibold tracking-tight">
+                      {k.value}
+                      {k.unit && <span className="text-sm font-normal ml-1">{k.unit}</span>}
+                    </div>
+                    {k.trend && (
+                      <div className="text-xs mt-1" style={{ color: k.color || undefined }}>
+                        {k.trend === 'up' ? '▲' : k.trend === 'down' ? '▼' : '→'} Trend
+                      </div>
+                    )}
                   </div>
-                  {it.vendor && (
-                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">{it.vendor.name}</div>
-                  )}
-                  {it.summary && (
-                    <p className="text-gray-700 dark:text-gray-300 mt-2 text-sm">{it.summary}</p>
-                  )}
-                  {!it.summary && it.content && (
-                    <div className="prose dark:prose-invert max-w-none prose-p:my-2 mt-2 text-sm">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {it.content.slice(0, 320)}
-                      </ReactMarkdown>
-                    </div>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* Tools */}
+          <section className={card + ' p-4'}>
+            <div className={header}>
+              <h2 className="text-lg font-semibold">Die wichtigsten Tools</h2>
+            </div>
+
+            {loadingSide && (
+              <div className="grid grid-cols-2 gap-3 animate-pulse">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="h-12 rounded-xl bg-gray-50/70 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-800" />
+                ))}
+              </div>
+            )}
+
+            {!loadingSide && (
+              <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {tools.length === 0 && <li className="text-sm text-gray-500">Keine Tools gefunden.</li>}
+                {tools.map(tool => (
+                  <li key={tool.id}>
+                    <Link
+                      href={tool.href}
+                      className="group flex items-center gap-2 rounded-xl border border-gray-200 dark:border-gray-800
+                                 bg-gray-50 dark:bg-gray-800/60 px-3 py-2 hover:bg-white/70 dark:hover:bg-white/10"
+                    >
+                      <span aria-hidden className="inline-flex h-7 w-7 items-center justify-center rounded-lg border
+                                   border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-white/10">
+                        {tool.icon}
+                      </span>
+                      <span className="truncate">{tool.title}</span>
+                      <svg className="ml-auto h-4 w-4 opacity-60 group-hover:opacity-100" viewBox="0 0 24 24">
+                        <path d="M7 17L17 7M9 7h8v8" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" />
+                      </svg>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          {/* Kalender (modern, Liste als Standard) */}
+          <section className={card + ' p-4'}>
+            <div className={header}>
+              <h2 className="text-lg font-semibold">Termine, Ferien & Feiertage</h2>
+            </div>
+            <CalendarModern events={events} />
+          </section>
+        </aside>
+      </div>
+
+      {/* TOURISTISCHE NEWS (am Seitenende) ----------------------------- */}
+      <section className={card + ' p-4'}>
+        <div className={header}>
+          <h2 className="text-lg font-semibold">Touristische News (automatisch)</h2>
+            <Link href="/news" className="text-sm text-blue-600 hover:underline">Alle News ansehen →</Link>
         </div>
-      </section>
 
-      {/* Rest bleibt: zwei Spalten Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {tourLoading && (
+          <ul className="grid gap-3 animate-pulse">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <li key={i} className="h-20 rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50/70 dark:bg-gray-800/50" />
+            ))}
+          </ul>
+        )}
 
-        {/* Was gibt's Neues? */}
-        <section>
-          <h2 className="text-xl font-semibold mb-2">Was gibt&apos;s Neues?</h2>
-          <div className={card + ' max-h-[400px] overflow-y-auto'}>
-            {items.length === 0 && <div>Keine Start-News vorhanden.</div>}
-            <ul className="grid gap-3">
-              {items.map(it => (
-                <li key={it.id} className="border border-gray-200 dark:border-gray-700 rounded p-4 bg-gray-50 dark:bg-gray-800">
-                  <div className="text-lg font-semibold text-blue-700 dark:text-blue-400">
+        {!tourLoading && tourErr && <div className="text-sm text-red-600">{tourErr}</div>}
+
+        {!tourLoading && !tourErr && tourNews.length === 0 && (
+          <div className="text-sm text-gray-500">Aktuell keine Einträge.</div>
+        )}
+
+        {!tourLoading && !tourErr && tourNews.length > 0 && (
+          <ul className="grid gap-3">
+            {tourNews.map(it => (
+              <li key={it.id} className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/60 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="text-base font-semibold text-blue-700 dark:text-blue-400 leading-snug">
                     {it.slug ? (
                       <Link href={`/news/${it.slug}`} className="hover:underline">
                         {it.title}
                       </Link>
-                    ) : (
-                      it.title
-                    )}
+                    ) : it.title}
                   </div>
-                  {it.vendor && (
-                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">{it.vendor.name}</div>
-                  )}
-                  {it.summary && (
-                    <p className="text-gray-700 dark:text-gray-300 mt-2 text-sm">{it.summary}</p>
-                  )}
-                  {!it.summary && it.content && (
-                    <div className="prose dark:prose-invert max-w-none prose-p:my-2 mt-2 text-sm">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {it.content.slice(0, 300)}
-                      </ReactMarkdown>
-                    </div>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </div>
-        </section>
-
-        {/* KPIs */}
-        <section>
-          <h2 className="text-xl font-semibold mb-2">Kennzahlen</h2>
-          <div className={card + ' max-h-[400px] overflow-y-auto'}>
-            <div className="space-y-3">
-              {kpis.length === 0 && <div>Noch keine KPIs hinterlegt.</div>}
-              {kpis.map(k => (
-                <div key={k.id} className="flex items-center justify-between border border-gray-200 dark:border-gray-700 rounded p-3 bg-gray-50 dark:bg-gray-800">
-                  <div>
-                    <div className="text-sm text-gray-500">{k.label}</div>
-                    <div className="text-2xl font-semibold">
-                      {k.value}{k.unit && <span className="text-base font-normal ml-1">{k.unit}</span>}
-                    </div>
-                  </div>
-                  {k.trend && (
-                    <span
-                      className="text-xl"
-                      style={{ color: k.color || undefined }}
-                      title={k.trend}
-                    >
-                      {k.trend === 'up' ? '▲' : k.trend === 'down' ? '▼' : '→'}
-                    </span>
-                  )}
+                  <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border
+                                   border-blue-200 text-blue-700 dark:border-blue-500/40 dark:text-blue-300">
+                    ⚡ Agent
+                  </span>
                 </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* Tools */}
-        <section>
-          <h2 className="text-xl font-semibold mb-2">Die wichtigsten Tools</h2>
-          <div className={card + ' max-h-[400px] overflow-y-auto'}>
-            <ul className="space-y-3">
-              {tools.length === 0 && <li>Keine Tools gefunden.</li>}
-              {tools.map(tool => (
-                <li key={tool.id}>
-                  <Link href={tool.href} className="flex items-center gap-2 hover:underline">
-                    <span>{tool.icon}</span>
-                    {tool.title}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </section>
-
-        {/* Kalender */}
-        <section>
-          <h2 className="text-xl font-semibold mb-2">Termine, Ferien & Feiertage</h2>
-          <div className={card}>
-            <FullCalendar
-              plugins={[dayGridPlugin, interactionPlugin, iCalendarPlugin, listPlugin]}
-              initialView="dayGridMonth"
-              headerToolbar={{
-                start: 'prev,next today',
-                center: 'title',
-                end: 'dayGridMonth,listWeek',
-              }}
-              locale="de"
-              height={400}
-              events={events}
-              eventClick={(info) => {
-                const clickedDate = info.event.start;
-                if (clickedDate) setSelectedDate(clickedDate);
-              }}
-            />
-          </div>
-        </section>
-      </div>
+                {it.vendor && (
+                  <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">{it.vendor.name}</div>
+                )}
+                {it.summary ? (
+                  <p className="text-gray-700 dark:text-gray-300 mt-2 text-sm">{it.summary}</p>
+                ) : it.content ? (
+                  <div className="prose dark:prose-invert max-w-none prose-p:my-2 mt-2 text-sm">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {it.content.slice(0, 320)}
+                    </ReactMarkdown>
+                  </div>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </div>
+  );
+}
+
+function CalendarModern({ events }: { events: any[] }) {
+  const calRef = useRef<FullCalendar | null>(null);
+  const [title, setTitle] = useState<string>('');
+
+  // "heute 00:00" als Startgrenze
+  const todayStart = useMemo(() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }, []);
+
+  const api = () => calRef.current?.getApi();
+
+  return (
+    <>
+      {/* Eigene Toolbar */}
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <div className="inline-flex rounded-xl overflow-hidden border border-gray-200 dark:border-gray-800">
+          <button
+            onClick={() => api()?.prev()}
+            className="px-3 py-1.5 text-sm bg-white dark:bg-white/10 hover:bg-gray-50 dark:hover:bg-white/20"
+          >
+            ←
+          </button>
+          <button
+            onClick={() => api()?.today()}
+            className="px-3 py-1.5 text-sm bg-white dark:bg-white/10 hover:bg-gray-50 dark:hover:bg-white/20 border-l border-gray-200 dark:border-gray-800"
+          >
+            heute
+          </button>
+          <button
+            onClick={() => api()?.next()}
+            className="px-3 py-1.5 text-sm bg-white dark:bg-white/10 hover:bg-gray-50 dark:hover:bg-white/20 border-l border-gray-200 dark:border-gray-800"
+          >
+            →
+          </button>
+        </div>
+
+        <div className="text-base font-semibold mx-2">{title}</div>
+
+        <div className="ml-auto inline-flex rounded-xl overflow-hidden border border-gray-200 dark:border-gray-800">
+          <button
+            onClick={() => api()?.changeView('listUpcoming')}
+            className="px-3 py-1.5 text-sm bg-white dark:bg-white/10 hover:bg-gray-50 dark:hover:bg-white/20"
+          >
+            Liste
+          </button>
+          <button
+            onClick={() => api()?.changeView('dayGridMonth')}
+            className="px-3 py-1.5 text-sm bg-white dark:bg-white/10 hover:bg-gray-50 dark:hover:bg-white/20 border-l border-gray-200 dark:border-gray-800"
+          >
+            Monat
+          </button>
+        </div>
+      </div>
+
+      <FullCalendar
+        ref={calRef}
+        plugins={[dayGridPlugin, interactionPlugin, iCalendarPlugin, listPlugin]}
+        locale="de"
+        /* Standard: rollende Liste, z. B. 60 Tage ab heute */
+        initialView="listUpcoming"
+        headerToolbar={false}
+        height="auto"
+        firstDay={1}
+        dayMaxEvents
+        stickyHeaderDates
+        initialDate={todayStart}
+        validRange={{ start: todayStart }}     // ❗ alles vor heute ausblenden & nicht ansteuerbar
+        events={events}
+        datesSet={(arg) => setTitle(arg.view.title)}
+        eventClassNames={() =>
+          'rounded-lg border border-blue-500/20 bg-blue-500/10 text-blue-900 dark:text-blue-200'
+        }
+        eventContent={(arg) => (
+          <div className="flex items-center gap-2 px-2 py-1 text-sm">
+            <span>📌</span>
+            {arg.timeText && <span className="opacity-70">{arg.timeText}</span>}
+            {arg.timeText && <span className="opacity-40">·</span>}
+            <span className="font-medium">{arg.event.title}</span>
+          </div>
+        )}
+        buttonText={{ today: 'Heute', month: 'Monat', list: 'Liste', week: 'Woche' }}
+        noEventsText="Keine Termine im ausgewählten Zeitraum."
+        views={{
+          // rollende Liste ab 'initialDate' (heute) über 60 Tage
+          listUpcoming: { type: 'list', duration: { days: 60 }, buttonText: 'Liste' },
+          dayGridMonth: { type: 'dayGridMonth' },
+        }}
+      />
+    </>
   );
 }
