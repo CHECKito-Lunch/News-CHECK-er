@@ -74,7 +74,20 @@ async function load() {
 
 async function save() {
   setMsg('');
-  const payload:any = { /* ... wie gehabt ... */ };
+
+  const payload: any = {
+    title,
+    starts_at: startsAt || null,
+    ends_at: endsAt || null,
+    summary,
+    content,         // Markdown
+    location,
+    capacity,
+    status,
+    hero_image_url: heroUrl || null,
+    gallery,         // Array<string> (URLs)
+  };
+
   try {
     const url = editing ? `/api/admin/events/${editing}` : '/api/admin/events';
     const method = editing ? 'PATCH' : 'POST';
@@ -88,10 +101,13 @@ async function save() {
 
     const raw = await r.text();
     const j = raw ? JSON.parse(raw) : { ok: false, error: `HTTP ${r.status}` };
+
     if (!r.ok || !j.ok) throw new Error(j?.error || 'save_failed');
 
-    await load(); reset(); setMsg('Gespeichert.');
-  } catch (e:any) {
+    await load();
+    reset();
+    setMsg('Gespeichert.');
+  } catch (e: any) {
     setMsg(e?.message ?? 'Fehler');
   }
 }
