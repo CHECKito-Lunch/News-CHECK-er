@@ -133,11 +133,6 @@ export default function Page() {
     return [{ id: 'all', label: 'Alle' }, ...catTabs];
   }, [meta.categories]);
 
-  useEffect(() => {
-    if (tabs.length === 0) return;
-    const general = tabs.find(t => t.id !== 'all' && t.label.toLowerCase() === 'allgemein');
-    setCurrentTab(prev => (prev === 'all' && general ? (general.id as number) : prev));
-  }, [tabs]);
 
   useEffect(() => {
     const nextCats = currentTab === 'all' ? [] : [currentTab];

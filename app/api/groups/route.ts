@@ -1,50 +1,42 @@
 // app/api/groups/route.ts
 import { NextResponse } from 'next/server';
-import { sql } from '@/lib/db';
-import { requireUserSub } from '@/lib/me';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { requireUser } from '@/lib/auth-server';
 
-export async function GET() {
+export const dynamic = 'force-dynamic';
+
+export async function GET(req: Request) {
   try {
-    const sub = await requireUserSub();
+    const { userId } = await requireUser(req);
+    const s = supabaseAdmin();
 
-    const rows = await sql<{
-      id: string; name: string; description: string | null; is_active: boolean; created_at: string;
-      member_count: number; is_member: boolean;
-    }[]>`
-      select
-        g.id,
-        g.name,
-        g.description,
-        g.is_active,
-        g.created_at,
-        coalesce(mc.member_count, 0)::int as member_count,
-        exists (
-          select 1 from public.group_members gm
-          where gm.group_id = g.id and gm.user_id = ${sub}::uuid
-        ) as is_member
-      from public.groups g
-      left join (
-        select group_id, count(*) as member_count
-        from public.group_members
-        group by group_id
-      ) mc on mc.group_id = g.id
-      where g.is_active = true
-      order by g.name asc;
-    `;
+    // Offene Gruppen (falls es eine Spalte visibility gibt)
+    const { data: openGroups, error: gErr } = await s
+      .from('groups')
+      .select('id,name,description,visibility,memberCount:is_member_count') // memberCount optional via View
+      .or('visibility.eq.public,visibility.is.null'); // fallback, wenn Spalte fehlt: or entfernen
+    if (gErr) throw gErr;
 
-    // Formatiere in das Frontend-Shape
-    const data = rows.map(r => ({
-      id: Number(r.id),
-      name: r.name,
-      description: r.description,
-      memberCount: r.member_count,
-      isMember: r.is_member,
+    // Meine Mitgliedschaften
+    const { data: my, error: mErr } = await s
+      .from('group_members')
+      .select('group_id')
+      .eq('user_id', userId);
+    if (mErr) throw mErr;
+
+    const myIds = new Set((my ?? []).map(x => Number(x.group_id)));
+
+    const out = (openGroups ?? []).map(g => ({
+      id: Number(g.id),
+      name: g.name,
+      description: g.description ?? null,
+      memberCount: (g as any).memberCount ?? null,
+      isMember: myIds.has(Number(g.id)),
     }));
 
-    return NextResponse.json({ ok: true, data });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : 'error';
-    const code = msg === 'unauthorized' ? 401 : 500;
-    return NextResponse.json({ ok: false, error: msg }, { status: code });
+    return NextResponse.json({ ok: true, data: out });
+  } catch (e: any) {
+    const status = e?.status || 401;
+    return NextResponse.json({ ok: false, error: e?.message || 'unauthorized' }, { status });
   }
 }

@@ -1,96 +1,66 @@
-// app/api/admin/groups/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
+import { getAdminFromCookies } from '@/lib/admin-auth';
+import bcrypt from 'bcryptjs';
 
-// GET /api/admin/groups?q=&page=&pageSize=
-export async function GET(request: Request) {
-  try {
-    const u = new URL(request.url);
-    const q = (u.searchParams.get('q') ?? '').trim();
-    const page = Math.max(1, Number(u.searchParams.get('page') ?? 1));
-    const pageSize = Math.min(100, Math.max(1, Number(u.searchParams.get('pageSize') ?? 20)));
-    const offset = (page - 1) * pageSize;
+const json = (d:any, s=200) => NextResponse.json(d,{status:s});
 
-    const like = q ? `%${q}%` : null;
+export async function GET() {
+  if (!(await getAdminFromCookies())) return json({ok:false,error:'forbidden'},401);
 
-    const totalRows = await sql<{ c: number }[]>`
-      select count(*)::int as c
-      from public.groups g
-      ${like ? sql`where g.name ilike ${like} or g.description ilike ${like}` : sql``}
-    `;
-    const total = totalRows[0]?.c ?? 0;
+  const rows = await sql<{
+    id: number;
+    name: string;
+    description: string|null;
+    is_active: boolean;
+    is_private: boolean;
+    join_password_hash: string|null;
+    member_count: number;
+  }[]>`
+    select
+      g.id, g.name, g.description, g.is_active, g.is_private, g.join_password_hash,
+      coalesce(mc.member_count,0)::int as member_count
+    from public.groups g
+    left join (
+      select group_id, count(*) as member_count
+      from public.group_members
+      group by group_id
+    ) mc on mc.group_id = g.id
+    order by g.name asc
+  `;
 
-    const rows = await sql<{
-      id: number | string;
-      name: string;
-      description: string | null;
-      is_active: boolean;
-      member_count: number | string | null;
-    }[]>`
-      select
-        g.id,
-        g.name,
-        g.description,
-        g.is_active,
-        coalesce(count(m.user_id), 0)::int as member_count
-      from public.groups g
-      left join public.group_members m on m.group_id = g.id
-      ${like ? sql`where g.name ilike ${like} or g.description ilike ${like}` : sql``}
-      group by g.id, g.name, g.description, g.is_active
-      order by g.id desc
-      limit ${pageSize} offset ${offset}
-    `;
-
-    const data = rows.map(r => ({
-      id: Number(r.id),
-      name: r.name,
-      description: r.description,
-      is_active: r.is_active,
-      memberCount: Number(r.member_count ?? 0),
-    }));
-
-    return NextResponse.json({ ok: true, data, total, page, pageSize });
-  } catch (e: any) {
-    console.error('GET /admin/groups failed', e);
-    return NextResponse.json({ ok: false, error: e?.message ?? 'server_error' }, { status: 500 });
-  }
+  const data = rows.map(r => ({
+    id: r.id,
+    name: r.name,
+    description: r.description,
+    is_active: r.is_active,
+    is_private: r.is_private,
+    has_password: !!r.join_password_hash,
+    memberCount: r.member_count,
+  }));
+  return json({ok:true, data});
 }
 
-// POST /api/admin/groups  { name, description?, is_active? }
-export async function POST(request: Request) {
-  try {
-    // WICHTIG: client muss Content-Type: application/json senden
-    const body = await request.json().catch(() => ({}));
-    const name = String(body?.name ?? '').trim();
-    const description =
-      body?.description == null ? null : String(body.description);
-    const is_active =
-      body?.is_active == null ? true : Boolean(body.is_active);
+export async function POST(req: NextRequest) {
+  if (!(await getAdminFromCookies())) return json({ok:false,error:'forbidden'},401);
+  const b = await req.json().catch(()=> ({}));
 
-    if (!name) {
-      return NextResponse.json(
-        { ok: false, error: 'name_required' },
-        { status: 400 }
-      );
-    }
+  const name = (b?.name ?? '').toString().trim();
+  if (!name) return json({ok:false,error:'name_required'},400);
 
-    const rows = await sql<{ id: number }[]>`
-      insert into public.groups (name, description, is_active)
-      values (${name}, ${description}, ${is_active})
-      returning id
-    `;
+  const description = (b?.description ?? null) as string|null;
+  const is_private  = !!b?.is_private;
+  const password    = (b?.password ?? '').toString().trim();
 
-    return NextResponse.json(
-      { ok: true, id: rows[0]?.id ?? null },
-      { status: 201 }
-    );
-  } catch (e: any) {
-    const msg = String(e?.message ?? '');
-    const status = /duplicate key|unique/i.test(msg) ? 409 : 500;
-    console.error('POST /admin/groups failed', e);
-    return NextResponse.json({ ok: false, error: msg || 'server_error' }, { status });
-  }
+  const hash = password ? await bcrypt.hash(password, 10) : null;
+
+  const [row] = await sql<{id:number}[]>`
+    insert into public.groups (name, description, is_active, is_private, join_password_hash)
+    values (${name}, ${description}, true, ${is_private}, ${hash})
+    returning id
+  `;
+  return json({ok:true, id: row.id});
 }

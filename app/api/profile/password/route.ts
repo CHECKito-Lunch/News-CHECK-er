@@ -1,39 +1,23 @@
-// app/api/profile/password/route.ts
+// app/api/password/route.ts
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { T } from '@/lib/tables';
-import bcrypt from 'bcryptjs';
+import { requireUser } from '@/lib/auth-server';
 
-type Role = 'admin'|'moderator'|'user';
+export const dynamic = 'force-dynamic';
 
 export async function POST(req: Request) {
-  const c = await cookies();
-  const email = c.get('user_email')?.value || '';
-  const role = c.get('user_role')?.value as Role | undefined;
-  if (!email || !role) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-  const body = await req.json().catch(()=>({}));
-  const current = body.current as string | null;
-  const next = body.next as string | undefined;
-
-  if (!next || next.length < 8) return NextResponse.json({ error: 'Passwort zu kurz.' }, { status: 400 });
-
-  const s = supabaseAdmin();
-  const { data, error } = await s.from(T.appUsers).select('id,password_hash').eq('email', email).single();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  if (!data)  return NextResponse.json({ error: 'Not found' }, { status: 404 });
-
-  const hasHash = Boolean((data as any).password_hash);
-  if (hasHash) {
-    if (!current) return NextResponse.json({ error: 'Aktuelles Passwort erforderlich.' }, { status: 400 });
-    const ok = await bcrypt.compare(current, (data as any).password_hash as string);
-    if (!ok) return NextResponse.json({ error: 'Aktuelles Passwort falsch.' }, { status: 400 });
+  try {
+    const { userId } = await requireUser();
+    const { newPassword } = await req.json().catch(() => ({}));
+    if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 8) {
+      return NextResponse.json({ ok: false, error: 'weak_password' }, { status: 400 });
+    }
+    const s = supabaseAdmin();
+    const { error } = await s.auth.admin.updateUserById(userId, { password: newPassword });
+    if (error) throw error;
+    return NextResponse.json({ ok: true });
+  } catch (e: any) {
+    const status = e?.status || 500;
+    return NextResponse.json({ ok: false, error: e?.message || 'server_error' }, { status });
   }
-
-  const newHash = await bcrypt.hash(next, 10);
-  const { error: upErr } = await s.from(T.appUsers).update({ password_hash: newHash }).eq('id', data.id);
-  if (upErr) return NextResponse.json({ error: upErr.message }, { status: 500 });
-
-  return NextResponse.json({ ok: true });
 }

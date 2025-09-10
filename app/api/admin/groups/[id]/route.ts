@@ -1,87 +1,81 @@
-// app/api/admin/groups/[id]/members/route.ts
+// app/api/admin/groups/[id]/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
+import { getAdminFromCookies } from '@/lib/admin-auth';
+import bcrypt from 'bcryptjs';
 
-function getGroupIdFromUrl(url: string): number | null {
+const json = (d: any, s = 200) => NextResponse.json(d, { status: s });
+
+function getId(url: string): number | null {
   try {
-    const u = new URL(url);
-    const parts = u.pathname.split('/').filter(Boolean);
-    // .../api/admin/groups/{id}/members
-    const idStr = parts[parts.length - 2]; // Segment vor "members"
-    const idNum = Number(idStr);
-    return Number.isFinite(idNum) ? idNum : null;
+    const p = new URL(url).pathname.split('/').filter(Boolean);
+    const id = Number(p[p.length - 1]);
+    return Number.isFinite(id) ? id : null;
   } catch {
     return null;
   }
 }
 
-async function appUserIdToUuid(appUserId: number): Promise<string | null> {
-  const rows = await sql<{ user_id: string | null }[]>`
-    select user_id from public.app_users where id = ${appUserId} limit 1
-  `;
-  return rows[0]?.user_id ?? null;
-}
+export async function PATCH(req: NextRequest) {
+  if (!(await getAdminFromCookies())) return json({ ok: false, error: 'forbidden' }, 401);
+  const id = getId(req.url);
+  if (!id) return json({ ok: false, error: 'invalid_id' }, 400);
 
-// Mitglied hinzufügen
-export async function POST(request: Request) {
-  const gid = getGroupIdFromUrl(request.url);
-  if (!gid) {
-    return NextResponse.json({ ok: false, error: 'invalid_group_id' }, { status: 400 });
-  }
+  const b: any = await req.json().catch(() => ({}));
 
-  try {
-    const body = await request.json().catch(() => ({}));
-    const appUserId = Number(body?.appUserId);
-    if (!Number.isFinite(appUserId)) {
-      return NextResponse.json({ ok: false, error: 'invalid_app_user_id' }, { status: 400 });
-    }
+  // ❗ Wichtig: niemals undefined ins SQL geben → auf null normalisieren
+  const name: string | null =
+    Object.prototype.hasOwnProperty.call(b, 'name') ? (b.name ?? null) : null;
 
-    const uuid = await appUserIdToUuid(appUserId);
-    if (!uuid) {
-      return NextResponse.json({ ok: false, error: 'user_uuid_not_found' }, { status: 404 });
-    }
+  const description: string | null =
+    Object.prototype.hasOwnProperty.call(b, 'description') ? (b.description ?? null) : null;
 
-    await sql`
-      insert into public.group_members (group_id, user_id)
-      values (${gid}, ${uuid})
-      on conflict (group_id, user_id) do nothing
-    `;
+  const is_active: boolean | null =
+    Object.prototype.hasOwnProperty.call(b, 'is_active') ? !!b.is_active : null;
 
-    return NextResponse.json({ ok: true });
-  } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message ?? 'server_error' }, { status: 500 });
-  }
-}
+  const is_private: boolean | null =
+    Object.prototype.hasOwnProperty.call(b, 'is_private') ? !!b.is_private : null;
 
-// Mitglied entfernen
-export async function DELETE(request: Request) {
-  const gid = getGroupIdFromUrl(request.url);
-  if (!gid) {
-    return NextResponse.json({ ok: false, error: 'invalid_group_id' }, { status: 400 });
-  }
+  const clear_pw: boolean = !!b?.clear_password;
+  const new_pw_raw: string = (b?.password ?? '').toString().trim();
+  const hash: string | null = new_pw_raw ? await bcrypt.hash(new_pw_raw, 10) : null;
 
   try {
-    const body = await request.json().catch(() => ({}));
-    const appUserId = Number(body?.appUserId);
-    if (!Number.isFinite(appUserId)) {
-      return NextResponse.json({ ok: false, error: 'invalid_app_user_id' }, { status: 400 });
-    }
-
-    const uuid = await appUserIdToUuid(appUserId);
-    if (!uuid) {
-      return NextResponse.json({ ok: false, error: 'user_uuid_not_found' }, { status: 404 });
-    }
-
     await sql`
-      delete from public.group_members
-      where group_id = ${gid} and user_id = ${uuid}
+      update public.groups set
+        name               = coalesce(${name}::text, name),
+        description        = coalesce(${description}::text, description),
+        is_active          = coalesce(${is_active}::bool, is_active),
+        is_private         = coalesce(${is_private}::bool, is_private),
+        join_password_hash = case
+                               when ${clear_pw} then null
+                               when ${hash}::text is not null then ${hash}
+                               else join_password_hash
+                             end
+      where id = ${id}
     `;
-
-    return NextResponse.json({ ok: true });
+    return json({ ok: true });
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message ?? 'server_error' }, { status: 500 });
+    console.error('[admin/groups PATCH]', e);
+    return json({ ok: false, error: e?.message ?? 'server_error' }, 500);
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  if (!(await getAdminFromCookies())) return json({ ok: false, error: 'forbidden' }, 401);
+  const id = getId(req.url);
+  if (!id) return json({ ok: false, error: 'invalid_id' }, 400);
+
+  try {
+    // Reihenfolge: erst memberships, dann group
+    await sql`delete from public.group_members where group_id = ${id}`;
+    await sql`delete from public.groups where id = ${id}`;
+    return json({ ok: true });
+  } catch (e: any) {
+    console.error('[admin/groups DELETE]', e);
+    return json({ ok: false, error: e?.message ?? 'server_error' }, 500);
   }
 }

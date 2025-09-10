@@ -8,7 +8,15 @@ import { useAdminAuth } from '../shared/auth';
 import { inputClass, cardClass } from '../shared/ui';
 import { slugify, toLocalInput, fromLocalInput } from '../shared/helpers';
 import type { Option, SourceRow, PostRow } from '../shared/types';
-import RichTextEditor from '../../components/RichTextEditor'; // Pfad prüfen: app/components/RichTextEditor
+import RichTextEditor from '../../components/RichTextEditor';
+
+type ImageRow = {
+  url: string;
+  caption?: string | null;
+  // `path` kommt vom Upload-Endpunkt zurück (praktisch für DELETE).
+  path?: string | null;
+  sort_order?: number | null;
+};
 
 const EMOJI_CHOICES = ['📌','📅','🗓️','📣','📊','📝','🧑‍💻','🤝','☕','🎉','🛠️','🧪'];
 
@@ -29,10 +37,20 @@ export default function NewsEditorClient() {
   const [categoryIds, setCategoryIds] = useState<number[]>([]);
   const [badgeIds, setBadgeIds] = useState<number[]>([]);
   const [sources, setSources] = useState<SourceRow[]>([{ url:'', label:'' }]);
+
+  // >>> Bilder / Galerie
+  const [images, setImages] = useState<ImageRow[]>([]);
+  const [uploadBusy, setUploadBusy] = useState(false);
+
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState('');
 
-  useEffect(() => { fetch('/api/meta', { credentials:'same-origin' }).then(r=>r.json()).then(setMeta).catch(()=>setMeta({categories:[],badges:[],vendors:[]})); }, []);
+  useEffect(() => {
+    fetch('/api/meta', { credentials:'same-origin' })
+      .then(r=>r.json())
+      .then(setMeta)
+      .catch(()=>setMeta({categories:[],badges:[],vendors:[]}));
+  }, []);
   useEffect(() => { setSlug(slugify(title)); }, [title]);
 
   // Falls ?id=… vorhanden: Post laden und ins Formular setzen
@@ -42,14 +60,22 @@ export default function NewsEditorClient() {
     (async () => {
       const res = await fetch(`/api/admin/posts/${editIdFromUrl}`, { credentials:'same-origin' });
       const json = await res.json().catch(()=>({}));
-      const p: PostRow | undefined = json?.data;
+      const p: PostRow & { images?: ImageRow[] } | undefined = json?.data;
       if (!p) return;
       setEditingId(p.id);
       setTitle(p.title ?? ''); setSlug(p.slug ?? ''); setSummary(p.summary ?? ''); setContent(p.content ?? '');
-      setVendorId(p.vendor_id); setIsDraft(p.status === 'draft');
+      // @ts-ignore vendor_id steckt in PostRow
+      setVendorId((p as any).vendor_id ?? null);
+      setIsDraft(p.status === 'draft');
       setPinnedUntil(toLocalInput(p.pinned_until)); setEffectiveFrom(toLocalInput(p.effective_from));
-      setCategoryIds(p.categories?.map(c=>c.id) ?? []); setBadgeIds(p.badges?.map(b=>b.id) ?? []);
-      setSources((p.sources ?? []).map(s => ({ url:s.url, label:s.label ?? '' })) || [{ url:'', label:'' }]);
+      // @ts-ignore categories/badges im Admin-Detail
+      setCategoryIds((p as any).categories?.map((c:any)=>c.id) ?? []);
+      // @ts-ignore
+      setBadgeIds((p as any).badges?.map((b:any)=>b.id) ?? []);
+      setSources(((p as any).sources ?? []).map((s:any) => ({ url:s.url, label:s.label ?? '' })) || [{ url:'', label:'' }]);
+      setImages(Array.isArray((p as any).images) ? (p as any).images.map((im:ImageRow, i:number)=>({
+        url: im.url, caption: im.caption ?? '', path: im.path ?? null, sort_order: im.sort_order ?? i
+      })) : []);
       setResult('');
     })();
   }, [editIdFromUrl, sessionOK, isAdmin]);
@@ -72,10 +98,78 @@ export default function NewsEditorClient() {
   function resetForm() {
     setEditingId(null); setTitle(''); setSlug(''); setSummary(''); setContent(''); setVendorId(null);
     setIsDraft(false); setPinnedUntil(''); setEffectiveFrom(''); setCategoryIds([]); setBadgeIds([]);
-    setSources([{ url:'', label:'' }]); setResult('');
+    setSources([{ url:'', label:'' }]); setImages([]); setResult('');
     if (editIdFromUrl) router.replace('/admin/news');
   }
 
+  // ---------- Upload Helfer ----------
+  async function uploadToApi(fd: FormData) {
+    // 1) bevorzugt /api/uploads, 2) Fallback /api/admin/upload
+    let res = await fetch('/api/uploads?bucket=uploads', { method:'POST', body: fd, credentials:'same-origin' });
+    if (!res.ok) {
+      res = await fetch('/api/admin/upload?bucket=uploads', { method:'POST', body: fd, credentials:'same-origin' });
+    }
+    if (!res.ok) throw new Error((await res.json().catch(()=>({}))).error || 'Upload fehlgeschlagen');
+    return res.json() as Promise<{ url:string; path?:string }>;
+  }
+
+  async function deleteFromApi(pathOrUrl: string) {
+    const qs = new URLSearchParams({ bucket:'uploads', path:pathOrUrl }).toString();
+    let res = await fetch(`/api/uploads?${qs}`, { method:'DELETE', credentials:'same-origin' });
+    if (!res.ok) {
+      res = await fetch(`/api/admin/upload?${qs}`, { method:'DELETE', credentials:'same-origin' });
+    }
+    // Best-effort: Fehler hier nicht hochwerfen
+  }
+
+  async function handleFiles(files: FileList | File[]) {
+    if (!files || !files.length) return;
+    setUploadBusy(true);
+    try {
+      const next: ImageRow[] = [];
+      for (const f of Array.from(files)) {
+        const fd = new FormData();
+        fd.append('file', f);
+        // Optional: Unterordner news/YYYY/MM
+        const now = new Date();
+        const folder = `news/${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}`;
+        fd.append('folder', folder);
+        // -> Upload
+        const j = await uploadToApi(fd);
+        next.push({ url: j.url, path: j.path ?? null, caption: '', sort_order: (images.length + next.length - 1) });
+      }
+      setImages(prev => {
+        const merged = [...prev, ...next].map((im, i) => ({ ...im, sort_order: i }));
+        return merged;
+      });
+    } finally {
+      setUploadBusy(false);
+    }
+  }
+
+  function moveImage(index: number, dir: -1 | 1) {
+    setImages(prev => {
+      const arr = [...prev];
+      const ni = index + dir;
+      if (ni < 0 || ni >= arr.length) return prev;
+      const tmp = arr[index];
+      arr[index] = arr[ni];
+      arr[ni] = tmp;
+      return arr.map((im, i) => ({ ...im, sort_order: i }));
+    });
+  }
+
+  async function removeImage(index: number) {
+    setImages(prev => {
+      const target = prev[index];
+      // Best-effort löschen (nicht blockierend)
+      if (target?.path) deleteFromApi(target.path).catch(()=>{});
+      const next = prev.filter((_, i) => i !== index).map((im, i) => ({ ...im, sort_order: i }));
+      return next;
+    });
+  }
+
+  // ---------- SAVE ----------
   async function save() {
     if (!sessionOK || !isAdmin) { setResult('Kein Zugriff. Bitte als Admin anmelden.'); return; }
     setSaving(true); setResult('');
@@ -84,7 +178,7 @@ export default function NewsEditorClient() {
     const effIso = effectiveFrom ? fromLocalInput(effectiveFrom) : null;
     const finalStatus: PostRow['status'] = isDraft ? 'draft' : (effIso && new Date(effIso).getTime() > now.getTime()) ? 'scheduled' : 'published';
 
-    const payload = {
+    const payload: any = {
       post: {
         title, summary, content, slug,
         vendor_id: vendorId ?? null,
@@ -92,8 +186,11 @@ export default function NewsEditorClient() {
         pinned_until: pinnedUntil ? fromLocalInput(pinnedUntil) : null,
         effective_from: effIso,
       },
-      categoryIds, badgeIds,
+      categoryIds,
+      badgeIds,
       sources: sources.map((s,i)=>({ url:s.url.trim(), label:s.label?.trim() || null, sort_order:i })).filter(s=>s.url),
+      // >>> Bilder an API übergeben
+      images: images.map((im, i) => ({ url: im.url, caption: (im.caption ?? '').trim() || null, sort_order: i })),
     };
 
     const url = editingId ? `/api/admin/posts/${editingId}` : '/api/news/admin';
@@ -132,7 +229,7 @@ export default function NewsEditorClient() {
       {sessionOK && !isAdmin && (
         <div className={cardClass + ' space-y-2'}>
           <h2 className="text-lg font-semibold">Kein Zugriff</h2>
-          <p className="text-sm text-gray-600 dark:text-gray-300">Du bist angemeldet, aber dein Konto hat keine <strong>Admin‑Rolle</strong>.</p>
+          <p className="text-sm text-gray-600 dark:text-gray-300">Du bist angemeldet, aber dein Konto hat keine <strong>Admin-Rolle</strong>.</p>
         </div>
       )}
 
@@ -188,6 +285,69 @@ export default function NewsEditorClient() {
             </div>
           </div>
 
+          {/* --------- Bilder / Galerie --------- */}
+          <div className={cardClass + ' space-y-3'}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-semibold">Bilder / Galerie</h3>
+              <label className="inline-flex items-center gap-2 text-sm">
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={(e)=>{ if (e.target.files) handleFiles(e.target.files); e.currentTarget.value=''; }}
+                  disabled={uploadBusy}
+                  className="hidden"
+                  id="news-image-input"
+                />
+                <button
+                  type="button"
+                  onClick={()=>document.getElementById('news-image-input')?.click()}
+                  className="px-3 py-1.5 rounded bg-blue-600 text-white text-sm disabled:opacity-50"
+                  disabled={uploadBusy}
+                >
+                  {uploadBusy ? 'Lade hoch…' : '+ Bilder hochladen'}
+                </button>
+              </label>
+            </div>
+
+            {images.length === 0 && (
+              <p className="text-sm text-gray-500">Noch keine Bilder hinzugefügt.</p>
+            )}
+
+            {images.length > 0 && (
+              <ul className="grid gap-3">
+                {images.map((im, i) => (
+                  <li key={`${im.url}-${i}`} className="grid grid-cols-[96px_1fr_auto] gap-3 items-start rounded-xl border border-gray-200 dark:border-gray-700 p-3">
+                    {/* Preview */}
+                    <div className="w-24 h-20 overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700 bg-white/50 dark:bg-white/10">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={im.url} alt="" className="w-full h-full object-cover" />
+                    </div>
+
+                    {/* Caption */}
+                    <div>
+                      <label className="block text-sm text-gray-600 dark:text-gray-300 mb-1">Bildunterschrift (optional)</label>
+                      <input
+                        value={im.caption ?? ''}
+                        onChange={(e)=>setImages(arr => arr.map((x,idx)=> idx===i ? { ...x, caption: e.target.value } : x))}
+                        className={inputClass}
+                        placeholder="z. B. „Eindrücke vom Event 2025“"
+                      />
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex flex-col gap-2">
+                      <button type="button" onClick={()=>moveImage(i,-1)} className="px-3 py-1.5 rounded border dark:border-gray-700 disabled:opacity-50" disabled={i===0}>↑</button>
+                      <button type="button" onClick={()=>moveImage(i, 1)} className="px-3 py-1.5 rounded border dark:border-gray-700 disabled:opacity-50" disabled={i===images.length-1}>↓</button>
+                      <button type="button" onClick={()=>removeImage(i)} className="px-3 py-1.5 rounded border border-red-300 text-red-700 dark:border-red-700/60 dark:text-red-300">Entfernen</button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* --------- Quellen --------- */}
           <div className={cardClass + ' space-y-3'}>
             <div className="flex items-center justify-between">
               <h3 className="text-base font-semibold">Quellen (am Beitragsende)</h3>

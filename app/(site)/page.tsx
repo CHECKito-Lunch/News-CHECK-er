@@ -18,7 +18,6 @@ type Item = {
   summary: string | null; content: string | null;
   vendor: Vendor | null;
   post_badges: { badge: Badge }[];
-  // optional: Hilfsfelder falls die API sie liefert
   created_at?: string | null;
   published_at?: string | null;
 };
@@ -45,6 +44,18 @@ const card =
 
 const header =
   'flex items-center justify-between gap-3 mb-3 px-2';
+
+/* ---------- Helfer für Feed ---------- */
+const isAgentNews = (it: Item) =>
+  (it.post_badges || []).some(pb => {
+    const n = (pb?.badge?.name || '').toLowerCase();
+    return n.includes('agent') || n.includes('⚡');
+  });
+
+const uniqById = <T extends { id: number }>(arr: T[]) => {
+  const seen = new Set<number>();
+  return arr.filter(x => (seen.has(x.id) ? false : (seen.add(x.id), true)));
+};
 
 export default function HomePage() {
   const [items, setItems] = useState<Item[]>([]);
@@ -90,7 +101,7 @@ export default function HomePage() {
     })();
   }, []);
 
-  // KPIs/Tools/Termine + Start-News + Events
+  // KPIs/Tools/Termine + Events + News (Start + jüngste News)
   useEffect(() => {
     (async () => {
       setLoadingSide(true);
@@ -100,8 +111,8 @@ export default function HomePage() {
           fetch('/api/kpis'),
           fetch('/api/tools'),
           fetch('/api/termine'),
-          fetch('/api/events?calendar=1'),  // Kalender-Ereignisse
-          fetch('/api/events?feed=1'),      // FEED-Ereignisse
+          fetch('/api/events?calendar=1'),
+          fetch('/api/events?feed=1'),
         ]);
         const [kpiJ, toolJ, termJ, evCalJ, evFeedJ] = await Promise.all([
           kpiRes.json().catch(() => ({})),
@@ -120,12 +131,40 @@ export default function HomePage() {
         setLoadingSide(false);
       }
 
-      if (!startBadgeId) { setItems([]); setLoadingFeed(false); return; }
-      const p = new URLSearchParams({ badge: String(startBadgeId), page: '1', pageSize: '50' });
-      const r = await fetch(`/api/news?${p}`);
-      const j = await r.json().catch(() => ({}));
-      setItems(j.data ?? []);
-      setLoadingFeed(false);
+      try {
+        const fetchStartNews = async (): Promise<Item[]> => {
+          if (!startBadgeId) return [];
+          const p = new URLSearchParams({ badge: String(startBadgeId), page: '1', pageSize: '50' });
+          const r = await fetch(`/api/news?${p}`);
+          const j = await r.json().catch(() => ({}));
+          return Array.isArray(j?.data) ? (j.data as Item[]) : [];
+        };
+
+        const fetchRecentNews = async (): Promise<Item[]> => {
+          // bevorzugt spezieller Feed, sonst generisch
+          let r = await fetch('/api/news?feed=1&page=1&pageSize=30');
+          let j = await r.json().catch(() => ({}));
+          if (r.ok && Array.isArray(j?.data)) return j.data as Item[];
+          r = await fetch('/api/news?page=1&pageSize=30');
+          j = await r.json().catch(() => ({}));
+          return Array.isArray(j?.data) ? (j.data as Item[]) : [];
+        };
+
+        const [startNews, recentNews] = await Promise.all([fetchStartNews(), fetchRecentNews()]);
+        const merged = uniqById([...startNews, ...recentNews].filter(n => !isAgentNews(n)));
+
+        merged.sort((a, b) => {
+          const da = new Date(a.published_at || a.created_at || 0).getTime();
+          const db = new Date(b.published_at || b.created_at || 0).getTime();
+          return db - da;
+        });
+
+        setItems(merged);
+      } catch {
+        setItems([]);
+      } finally {
+        setLoadingFeed(false);
+      }
     })();
   }, [startBadgeId]);
 
@@ -355,19 +394,46 @@ function NewsCard({ it }: { it: Item }) {
   return (
     <>
       <div className="flex items-start justify-between gap-3">
-        <div className="text-base font-semibold text-blue-700 dark:text-blue-400 leading-snug">
-          {it.slug ? <Link href={`/news/${it.slug}`} className="hover:underline">{it.title}</Link> : it.title}
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center px-2 py-0.5 text-[11px] rounded-full border border-blue-300 text-blue-700 dark:border-blue-500/40 dark:text-blue-300">
+              News
+            </span>
+            <div className="text-base font-semibold text-blue-700 dark:text-blue-400 leading-snug truncate">
+              {it.slug ? (
+                <Link href={`/news/${it.slug}`} className="hover:underline">
+                  {it.title}
+                </Link>
+              ) : (
+                it.title
+              )}
+            </div>
+          </div>
+          {it.vendor && <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">{it.vendor.name}</div>}
         </div>
-        <div className="flex gap-1.5">
+
+        <div className="flex gap-1.5 shrink-0">
           {it.post_badges?.slice(0, 3).map(({ badge }) => (
-            <span key={badge.id} className="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] leading-4 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200" title={badge.name}>{badge.name}</span>
+            <span
+              key={badge.id}
+              className="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] leading-4 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200"
+              title={badge.name}
+            >
+              {badge.name}
+            </span>
           ))}
         </div>
       </div>
-      {it.vendor && <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">{it.vendor.name}</div>}
+
       {(it.summary || it.content) && (
         <div className="prose dark:prose-invert max-w-none prose-p:my-2 mt-2 text-[13px]">
-          {it.summary ? <p>{it.summary}</p> : <ReactMarkdown remarkPlugins={[remarkGfm]}>{(it.content ?? '').slice(0, 320)}</ReactMarkdown>}
+          {it.summary ? (
+            <p>{it.summary}</p>
+          ) : (
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {(it.content ?? '').slice(0, 320)}
+            </ReactMarkdown>
+          )}
         </div>
       )}
     </>

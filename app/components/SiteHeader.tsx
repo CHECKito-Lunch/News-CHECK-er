@@ -14,7 +14,6 @@ export default function SiteHeader() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [unread, setUnread] = useState<number>(0);
 
-  // Me laden
   useEffect(() => {
     let mounted = true;
     const load = async () => {
@@ -36,7 +35,6 @@ export default function SiteHeader() {
     };
   }, []);
 
-  // Unread laden (nur wenn eingeloggt)
   useEffect(() => {
     if (!me) { setUnread(0); return; }
 
@@ -49,23 +47,16 @@ export default function SiteHeader() {
         const r = await fetch('/api/unread', {
           signal: ctrl.signal,
           cache: 'no-store',
-          credentials: 'include', // <-- Cookies mitgeben!
+          credentials: 'include',
         });
         if (!r.ok) return;
         const j = await r.json().catch(() => null);
-        // unterstützt 'unread' ODER 'total'
-        const cnt =
-          j && typeof j.unread === 'number'
-            ? j.unread
-            : j && typeof j.total === 'number'
-              ? j.total
-              : 0;
+        const cnt = j && typeof j.unread === 'number' ? j.unread : j && typeof j.total === 'number' ? j.total : 0;
         if (!stop) setUnread(cnt);
       } catch {}
     };
 
     loadUnread();
-    // alle 60s aktualisieren
     timer = window.setInterval(loadUnread, 60_000);
 
     const onAuth = () => loadUnread();
@@ -83,6 +74,7 @@ export default function SiteHeader() {
     const arr: { href: string; label: string }[] = [
       { href: '/', label: 'Start' },
       { href: '/news', label: 'News' },
+      { href: '/events', label: 'Events' }, // ← hinzugefügt
     ];
     if (me) arr.push({ href: '/profile', label: 'Profil' });
     if (me && (me.role === 'admin' || me.role === 'moderator')) {
@@ -91,7 +83,6 @@ export default function SiteHeader() {
     return arr;
   }, [me]);
 
-  // Badge
   const Badge = ({ count }: { count: number }) => (
     <span
       aria-label={`${count} ungelesen`}
@@ -101,7 +92,6 @@ export default function SiteHeader() {
     </span>
   );
 
-  // Schließen bei ESC
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false); };
     window.addEventListener('keydown', onKey);
@@ -111,7 +101,6 @@ export default function SiteHeader() {
   return (
     <header className="sticky top-0 z-30 border-b border-gray-200 bg-white/70 dark:bg-gray-900/70 backdrop-blur">
       <div className="container max-w-15xl mx-auto flex items-center justify-between py-3">
-        {/* Linke Spalte: Burger (mit Badge) */}
         <div className="w-10 flex items-center">
           <button
             className="relative inline-flex items-center justify-center w-9 h-9 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-white/10 hover:bg-gray-50 dark:hover:bg-white/20 shadow-sm"
@@ -120,30 +109,20 @@ export default function SiteHeader() {
             aria-controls="global-menu"
             aria-label="Menü"
           >
-            {/* Burger-Icon */}
             <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden>
               <path d="M4 6h16M4 12h16M4 18h16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
             </svg>
-
-            {/* Badge direkt am Burger */}
             {me && unread > 0 && <Badge count={unread} />}
           </button>
         </div>
 
-        {/* Mitte: Logo */}
-        <Link
-          href="/"
-          aria-label="Startseite"
-          className="shrink-0 inline-flex items-center gap-2"
-        >
+        <Link href="/" aria-label="Startseite" className="shrink-0 inline-flex items-center gap-2">
           <img src="/header.svg" alt="NewsCHECKer" className="h-8 w-auto dark:opacity-90" />
         </Link>
 
-        {/* Rechte Spalte: Spacer, damit Logo wirklich mittig bleibt */}
         <div className="w-10" />
       </div>
 
-      {/* Ausklappbares Menü (vollbreit, beherbergt komplette Nav + Auth) */}
       <AnimatePresence initial={false}>
         {menuOpen && (
           <motion.div
@@ -152,7 +131,6 @@ export default function SiteHeader() {
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            // Blur + gleiche Transparenz wie Header; keine Border -> keine Doppel-Linie
             className="overflow-hidden backdrop-blur bg-white/70 dark:bg-gray-900/70"
           >
             <nav className="container max-w-5xl mx-auto px-4 py-4 grid gap-2">
@@ -171,7 +149,6 @@ export default function SiteHeader() {
                       }`}
                   >
                     <span>{n.label}</span>
-                    {/* reservierter Platz rechts für Badge */}
                     <span className="relative inline-block w-6 h-6">
                       {isProfile && me && unread > 0 && <Badge count={unread} />}
                     </span>
@@ -179,7 +156,6 @@ export default function SiteHeader() {
                 );
               })}
 
-              {/* Auth-Aktion im Menü */}
               {me ? (
                 <form action="/api/logout" method="post" onSubmit={() => setMenuOpen(false)} className="mt-2">
                   <button
