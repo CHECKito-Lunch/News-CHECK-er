@@ -2,44 +2,43 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
+import { requireUser } from '@/lib/auth-server';
 import { sql } from '@/lib/db';
-import { getUserFromCookies } from '@/lib/user-auth';
 
-const json = (d: any, status = 200) => NextResponse.json(d, { status });
+const json = (d:any, s=200) => NextResponse.json(d,{status:s});
 
-export async function GET() {
-  const me = await getUserFromCookies();
-  if (!me) return json({ ok: false, error: 'unauthorized' }, 401);
-
-  const rows = await sql<{
-    id: number;
-    group_id: string;
-    group_name: string;
-    message: string | null;
-    created_at: string;
-    invited_by: string;
-    invited_by_name: string | null;
-    invited_by_email: string | null;
-  }[]>`
-    select
-      gi.id,
-      gi.group_id::text,
-      g.name as group_name,
-      gi.message,
-      gi.created_at,
-      gi.invited_by::text as invited_by,
-      au.name  as invited_by_name,
-      au.email as invited_by_email
-    from public.group_invitations gi
-    join public.groups g on g.id = gi.group_id
-    left join public.app_users au on au.user_id = gi.invited_by
-    where gi.invited_user_id = ${me.sub}::uuid
-      and gi.accepted_at is null
-      and gi.declined_at is null
-      and gi.revoked_at is null
-    order by gi.created_at desc
-    limit 200
-  `;
-
-  return json({ ok: true, items: rows });
+export async function GET(req: Request) {
+  try {
+    const me = await requireUser(req);
+    const rows = await sql<any[]>`
+      select
+        i.id,
+        i.group_id,
+        g.name as group_name,
+        i.message,
+        i.created_at,
+        i.invited_by,
+        u.name  as invited_by_name,
+        u.email as invited_by_email
+      from public.group_invitations i
+      join public.groups g on g.id = i.group_id
+      left join public.app_users u on u.user_id = i.invited_by
+      where i.invited_user_id = ${me.userId}
+         or (i.invited_email is not null and lower(i.invited_email) = lower(${me.email ?? ''}))
+      order by i.created_at desc
+    `;
+    const items = rows.map(r => ({
+      id: r.id,
+      group_id: Number(r.group_id),
+      group_name: r.group_name,
+      message: r.message,
+      created_at: r.created_at,
+      invited_by: r.invited_by,
+      invited_by_name: r.invited_by_name,
+      invited_by_email: r.invited_by_email,
+    }));
+    return json({ ok:true, items });
+  } catch {
+    return json({ ok:false, error:'unauthorized' }, 401);
+  }
 }

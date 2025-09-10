@@ -1,42 +1,51 @@
-// app/api/groups/route.ts
-import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { requireUser } from '@/lib/auth-server';
-
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+import { NextResponse } from 'next/server';
+import { requireUser } from '@/lib/auth-server';
+import { sql } from '@/lib/db';
+
+const json = (d:any, s=200) => NextResponse.json(d,{status:s});
 
 export async function GET(req: Request) {
   try {
-    const { userId } = await requireUser(req);
-    const s = supabaseAdmin();
+    const me = await requireUser(req);
 
-    // Offene Gruppen (falls es eine Spalte visibility gibt)
-    const { data: openGroups, error: gErr } = await s
-      .from('groups')
-      .select('id,name,description,visibility,memberCount:is_member_count') // memberCount optional via View
-      .or('visibility.eq.public,visibility.is.null'); // fallback, wenn Spalte fehlt: or entfernen
-    if (gErr) throw gErr;
+    // Meine Gruppen
+    const my = await sql<{group_id:number}[]>`
+      select group_id from public.group_members
+      where user_id = ${me.userId}
+    `;
+    const myIds = new Set(my.map(x => x.group_id));
 
-    // Meine Mitgliedschaften
-    const { data: my, error: mErr } = await s
-      .from('group_members')
-      .select('group_id')
-      .eq('user_id', userId);
-    if (mErr) throw mErr;
+    // Alle aktiven Gruppen + Membercount
+    const rows = await sql<any[]>`
+      select
+        g.id, g.name, g.description, g.is_private, g.is_active,
+        coalesce(mc.member_count,0)::int as member_count
+      from public.groups g
+      left join (
+        select group_id, count(*) as member_count
+        from public.group_members
+        group by group_id
+      ) mc on mc.group_id = g.id
+      where g.is_active = true
+      order by g.name asc
+    `;
 
-    const myIds = new Set((my ?? []).map(x => Number(x.group_id)));
+    const data = rows
+      // private nur, wenn Mitglied
+      .filter(r => !r.is_private || myIds.has(r.id))
+      .map(r => ({
+        id: r.id,
+        name: r.name,
+        description: r.description,
+        memberCount: r.member_count,
+        isMember: myIds.has(r.id),
+      }));
 
-    const out = (openGroups ?? []).map(g => ({
-      id: Number(g.id),
-      name: g.name,
-      description: g.description ?? null,
-      memberCount: (g as any).memberCount ?? null,
-      isMember: myIds.has(Number(g.id)),
-    }));
-
-    return NextResponse.json({ ok: true, data: out });
-  } catch (e: any) {
-    const status = e?.status || 401;
-    return NextResponse.json({ ok: false, error: e?.message || 'unauthorized' }, { status });
+    return json({ ok:true, data });
+  } catch {
+    return json({ ok:false, error:'unauthorized' }, 401);
   }
 }

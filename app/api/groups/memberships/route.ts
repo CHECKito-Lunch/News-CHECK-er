@@ -1,68 +1,77 @@
-// app/api/groups/memberships/route.ts
-import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { requireUser } from '@/lib/auth-server';
-
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+import { NextRequest, NextResponse } from 'next/server';
+import { requireUser } from '@/lib/auth-server';
+import { sql } from '@/lib/db';
+
+const json = (d:any, s=200) => NextResponse.json(d,{status:s});
+
+export async function GET(req: Request) {
   try {
-    const { userId } = await requireUser();
-    const s = supabaseAdmin();
-    const { data, error } = await s.from('group_members').select('group_id').eq('user_id', userId);
-    if (error) throw error;
-    const groupIds = (data ?? []).map(r => Number(r.group_id));
-    return NextResponse.json({ ok: true, groupIds });
-  } catch (e: any) {
-    const status = e?.status || 401;
-    return NextResponse.json({ ok: false, error: e?.message || 'unauthorized' }, { status });
+    const me = await requireUser(req);
+    const rows = await sql<{group_id:number}[]>`
+      select group_id from public.group_members where user_id = ${me.userId}
+    `;
+    return json({ ok:true, groupIds: rows.map(r => r.group_id) });
+  } catch {
+    return json({ ok:false, error:'unauthorized' }, 401);
   }
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const { userId } = await requireUser();
-    const { groupId, action } = await req.json().catch(() => ({}));
-    if (!groupId) return NextResponse.json({ ok: false, error: 'groupId_required' }, { status: 400 });
+    const me = await requireUser(req);
+    const b = await req.json().catch(() => ({}));
+    const groupId = Number(b?.groupId ?? 0);
+    const action = String(b?.action ?? '');
 
-    const s = supabaseAdmin();
+    if (!groupId || !['join','leave'].includes(action)) {
+      return json({ ok:false, error:'bad_request' }, 400);
+    }
+
+    // private Gruppe nur mit Einladung zulassen (einfacher Check)
+    const [g] = await sql<{is_private:boolean}[]>`
+      select is_private from public.groups where id = ${groupId} and is_active = true limit 1
+    `;
+    if (!g) return json({ ok:false, error:'not_found' }, 404);
 
     if (action === 'join') {
-      const { error } = await s.from('group_members').insert({ group_id: groupId, user_id: userId });
-      if (error) throw error;
-    } else if (action === 'leave') {
-      const { error } = await s.from('group_members').delete().match({ group_id: groupId, user_id: userId });
-      if (error) throw error;
+      if (g.is_private) {
+        const [inv] = await sql<{id:number}[]>`
+          select id from public.group_invitations
+          where group_id = ${groupId}
+            and (invited_user_id = ${me.userId}
+              or (invited_email is not null and lower(invited_email) = lower(${me.email ?? ''})))
+          limit 1
+        `;
+        if (!inv) return json({ ok:false, error:'private_group' }, 403);
+      }
+      await sql`insert into public.group_members (group_id, user_id) values (${groupId}, ${me.userId})
+                on conflict (group_id, user_id) do nothing`;
+      return json({ ok:true });
     } else {
-      return NextResponse.json({ ok: false, error: 'invalid_action' }, { status: 400 });
+      await sql`delete from public.group_members where group_id=${groupId} and user_id=${me.userId}`;
+      return json({ ok:true });
     }
-
-    return NextResponse.json({ ok: true });
-  } catch (e: any) {
-    const status = e?.status || 401;
-    return NextResponse.json({ ok: false, error: e?.message || 'unauthorized' }, { status });
+  } catch {
+    return json({ ok:false, error:'unauthorized' }, 401);
   }
 }
 
-export async function PUT(req: Request) {
+export async function PUT(req: NextRequest) {
   try {
-    const { userId } = await requireUser();
-    const { groupIds } = await req.json().catch(() => ({}));
-    if (!Array.isArray(groupIds)) {
-      return NextResponse.json({ ok: false, error: 'groupIds_required' }, { status: 400 });
-    }
+    const me = await requireUser(req);
+    const b = await req.json().catch(() => ({}));
+    const groupIds = Array.isArray(b?.groupIds) ? b.groupIds.map(Number).filter(Boolean) : [];
 
-    const s = supabaseAdmin();
-    // alles entfernen…
-    await s.from('group_members').delete().eq('user_id', userId);
-    // … und neu setzen
+    await sql`delete from public.group_members where user_id=${me.userId}`;
     if (groupIds.length) {
-      const rows = groupIds.map((gid: number) => ({ group_id: gid, user_id: userId }));
-      await s.from('group_members').insert(rows);
+      await sql`insert into public.group_members (group_id, user_id)
+                select * from unnest(${groupIds}::int[], array_fill(${me.userId}, array[${groupIds.length}]))`;
     }
-    return NextResponse.json({ ok: true });
-  } catch (e: any) {
-    const status = e?.status || 401;
-    return NextResponse.json({ ok: false, error: e?.message || 'unauthorized' }, { status });
+    return json({ ok:true });
+  } catch {
+    return json({ ok:false, error:'unauthorized' }, 401);
   }
 }

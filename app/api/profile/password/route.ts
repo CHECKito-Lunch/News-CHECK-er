@@ -1,23 +1,25 @@
-// app/api/password/route.ts
-import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { requireUser } from '@/lib/auth-server';
-
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function POST(req: Request) {
+import { NextRequest, NextResponse } from 'next/server';
+import { requireUser } from '@/lib/auth-server';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
+
+const json = (d:any, s=200) => NextResponse.json(d,{status:s});
+
+export async function POST(req: NextRequest) {
   try {
-    const { userId } = await requireUser();
-    const { newPassword } = await req.json().catch(() => ({}));
-    if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 8) {
-      return NextResponse.json({ ok: false, error: 'weak_password' }, { status: 400 });
-    }
+    const me = await requireUser(req);
+    const b = await req.json().catch(()=> ({}));
+    const newPassword = (b?.newPassword ?? '').toString();
+    if (newPassword.length < 8) return json({ ok:false, error:'weak_password' }, 400);
+
     const s = supabaseAdmin();
-    const { error } = await s.auth.admin.updateUserById(userId, { password: newPassword });
-    if (error) throw error;
-    return NextResponse.json({ ok: true });
-  } catch (e: any) {
-    const status = e?.status || 500;
-    return NextResponse.json({ ok: false, error: e?.message || 'server_error' }, { status });
+    const { error } = await s.auth.admin.updateUserById(me.userId, { password: newPassword });
+    if (error) return json({ ok:false, error: error.message }, 500);
+
+    return json({ ok:true });
+  } catch {
+    return json({ ok:false, error:'unauthorized' }, 401);
   }
 }

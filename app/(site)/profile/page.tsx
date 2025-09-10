@@ -4,7 +4,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { authedFetch } from '@/lib/fetchWithSupabase';
 
-
 /* ===========================
    Types
 =========================== */
@@ -141,7 +140,7 @@ function InvitesCard() {
       setLoading(true);
       setError('');
       try {
-        const r = await authedFetch('/api/me/invitations', { credentials: 'include', cache: 'no-store' });
+        const r = await authedFetch('/api/me/invitations');
         if (r.status === 401) {
           if (alive) { setItems([]); setError('Bitte anmelden, um Einladungen zu sehen.'); }
           return;
@@ -166,7 +165,7 @@ function InvitesCard() {
     const prev = items ?? [];
     setItems(prev.filter(i => i.id !== id)); // optimistic
     try {
-      const r = await fetch(`/api/invitations/${id}/accept`, { method: 'POST', credentials: 'include' });
+      const r = await authedFetch(`/api/invitations/${id}/accept`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
       if (!r.ok) throw new Error('Fehler beim Annehmen');
       window.dispatchEvent(new Event('groups-changed'));
       setOpenId(null);
@@ -180,7 +179,7 @@ function InvitesCard() {
     const prev = items ?? [];
     setItems(prev.filter(i => i.id !== id));
     try {
-      const r = await fetch(`/api/invitations/${id}/decline`, { method: 'POST', credentials: 'include' });
+      const r = await authedFetch(`/api/invitations/${id}/decline`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
       if (!r.ok) throw new Error('Fehler beim Ablehnen');
       setOpenId(null);
     } catch {
@@ -329,26 +328,23 @@ function TeamsAndGroups() {
 
     async function fetchClosedGroupsByIds(ids: number[]): Promise<Group[]> {
       if (!ids.length) return [];
-      // 1) bevorzugt: /api/groups/byIds?ids=1,2,3
       try {
-        const r = await fetch(`/api/groups/byIds?ids=${ids.join(',')}`, { credentials: 'include', cache: 'no-store' });
+        const r = await authedFetch(`/api/groups/byIds?ids=${ids.join(',')}`);
         if (r.ok) {
           const j = await r.json().catch(() => ({}));
           if (Array.isArray(j?.data)) return j.data as Group[];
         }
       } catch {}
-      // 2) Fallback: /api/groups?ids=1,2,3
       try {
-        const r = await fetch(`/api/groups?ids=${ids.join(',')}`, { credentials: 'include', cache: 'no-store' });
+        const r = await authedFetch(`/api/groups?ids=${ids.join(',')}`);
         if (r.ok) {
           const j = await r.json().catch(() => ({}));
           const data = Array.isArray(j?.data) ? j.data : Array.isArray(j) ? j : [];
           if (Array.isArray(data)) return data as Group[];
         }
       } catch {}
-      // 3) Fallback: /api/groups/mine (alle Gruppen des Users)
       try {
-        const r = await fetch(`/api/groups/mine`, { credentials: 'include', cache: 'no-store' });
+        const r = await authedFetch(`/api/groups/mine`);
         if (r.ok) {
           const j = await r.json().catch(() => ({}));
           const data = Array.isArray(j?.data) ? j.data : Array.isArray(j) ? j : [];
@@ -357,7 +353,6 @@ function TeamsAndGroups() {
           return ids.map((id) => map.get(id)).filter(Boolean) as Group[];
         }
       } catch {}
-      // 4) finaler Fallback: Platzhalter
       return ids.map(id => ({
         id,
         name: `Private Gruppe #${id}`,
@@ -380,7 +375,7 @@ function TeamsAndGroups() {
       }
 
       try {
-        const meRes = await fetch('/api/me', { credentials: 'include', cache: 'no-store' });
+        const meRes = await authedFetch('/api/me');
         const meJson: Me = await meRes.json().catch(() => ({ user: null as any }));
         if (!alive) return;
 
@@ -392,8 +387,8 @@ function TeamsAndGroups() {
         }
 
         const [gRes, mRes] = await Promise.all([
-          fetch('/api/groups', { credentials: 'include', cache: 'no-store' }),
-          fetch('/api/groups/memberships', { credentials: 'include', cache: 'no-store' }),
+          authedFetch('/api/groups'),
+          authedFetch('/api/groups/memberships'),
         ]);
 
         if ((!gRes.ok && gRes.status === 401) || (!mRes.ok && mRes.status === 401)) {
@@ -413,11 +408,9 @@ function TeamsAndGroups() {
         else if (Array.isArray(mJ?.groupIds)) memberIds = mJ.groupIds as number[];
         else memberIds = openGroups.filter(g => !!g.isMember).map(g => g.id);
 
-        // fehlende (geschlossene) Gruppen nachladen
         const missingIds = memberIds.filter(id => !openGroups.some(g => g.id === id));
         const closedGroups = await fetchClosedGroupsByIds(missingIds);
 
-        // zusammenführen (unique nach id)
         const mergedMap = new Map<number, Group>();
         [...openGroups, ...closedGroups].forEach(g => {
           mergedMap.set(g.id, {
@@ -461,7 +454,6 @@ function TeamsAndGroups() {
   const isMember = (id: number) => myGroupIds.includes(id);
 
   async function toggleMembership(groupId: number, join: boolean) {
-    // Optimistic UI
     setMyGroupIds(prev => {
       const has = prev.includes(groupId);
       if (join && !has) return [...prev, groupId];
@@ -469,9 +461,8 @@ function TeamsAndGroups() {
       return prev;
     });
 
-    const attempt1 = await fetch('/api/groups/memberships', {
+    const attempt1 = await authedFetch('/api/groups/memberships', {
       method: 'POST',
-      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ groupId, action: join ? 'join' : 'leave' }),
     });
@@ -481,9 +472,8 @@ function TeamsAndGroups() {
       ? Array.from(new Set([...myGroupIds, groupId]))
       : myGroupIds.filter(id => id !== groupId);
 
-    await fetch('/api/groups/memberships', {
+    await authedFetch('/api/groups/memberships', {
       method: 'PUT',
-      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ groupIds: nextIds }),
     });
@@ -563,7 +553,7 @@ function ProfileSecurityCard({ onOpen }: { onOpen: () => void }) {
     let alive = true;
     (async () => {
       try {
-        const r = await fetch('/api/me', { credentials: 'include', cache: 'no-store' });
+        const r = await authedFetch('/api/me');
         const j: Me = await r.json();
         if (!alive) return;
         setMe(j.user);
@@ -616,7 +606,7 @@ function ProfileSecurityModal({ open, onClose }: { open: boolean; onClose: () =>
     let alive = true;
     (async () => {
       try {
-        const r = await fetch('/api/me', { credentials: 'include', cache: 'no-store' });
+        const r = await authedFetch('/api/me');
         const j: Me = await r.json();
         if (!alive) return;
         setMe(j.user);
@@ -632,9 +622,8 @@ function ProfileSecurityModal({ open, onClose }: { open: boolean; onClose: () =>
     e.preventDefault();
     setSavingProfile(true); setMsgProfile('');
     try {
-      const r = await fetch('/api/profile', {
+      const r = await authedFetch('/api/profile', {
         method: 'PUT',
-        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name }),
       });
@@ -659,9 +648,8 @@ function ProfileSecurityModal({ open, onClose }: { open: boolean; onClose: () =>
     }
     setSavingPw(true);
     try {
-      const r = await fetch('/api/password', {
+      const r = await authedFetch('/api/password', {
         method: 'POST',
-        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ currentPassword, newPassword }),
       });
@@ -774,7 +762,7 @@ function MyEventsCard() {
     let alive = true;
     (async () => {
       try {
-        const r = await fetch('/api/me/events', { credentials: 'include', cache: 'no-store' });
+        const r = await authedFetch('/api/me/events');
         const j = await r.json().catch(() => ({}));
         if (!alive) return;
         setItems(Array.isArray(j?.items) ? j.items : []);
@@ -904,7 +892,7 @@ function UnreadCard() {
     let alive = true;
     (async () => {
       try {
-        const r = await fetch('/api/unread', { credentials: 'include', cache: 'no-store' });
+        const r = await authedFetch('/api/unread');
         const j = await r.json();
         if (alive) setData(j.ok ? j : null);
       } catch {
@@ -927,8 +915,8 @@ function UnreadCard() {
         <h2 className="text-lg font-semibold">Verpasst seit letztem Besuch</h2>
         <form onSubmit={async (e) => {
           e.preventDefault();
-          await fetch('/api/unread/seen', { method: 'POST', credentials: 'include' });
-          const r = await fetch('/api/unread', { credentials: 'include', cache: 'no-store' });
+          await authedFetch('/api/unread/seen', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+          const r = await authedFetch('/api/unread');
           const j = await r.json();
           setData(j.ok ? j : null);
           window.dispatchEvent(new Event('auth-changed'));
