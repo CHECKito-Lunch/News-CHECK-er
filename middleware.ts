@@ -12,6 +12,7 @@ function isPublic(pathname: string) {
    if (pathname.startsWith('/api/profile')) return true;
    if (pathname.startsWith('/api/upload')) return true;
     if (pathname.startsWith('/api/events')) return true;
+    if (pathname.startsWith('/api')) return true;
 
   // Diagnose offen lassen
   if (pathname.startsWith('/api/diag')) return true;
