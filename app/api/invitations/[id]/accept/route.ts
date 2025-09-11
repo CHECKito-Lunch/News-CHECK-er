@@ -1,42 +1,36 @@
-// app/api/invitations/[id]/accept/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-import type { NextRequest } from 'next/server';
-import { NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { sql } from '@/lib/db';
-import { requireUser } from '@/lib/auth-server';
+import { json, requireUser } from '@/lib/auth-server';
 
-const json = (d: any, s = 200) => NextResponse.json(d, { status: s });
+export async function POST(
+  req: NextRequest,
+  ctx: { params: { id: string } }
+) {
+  const me = await requireUser(req);
+  if (!me) return json({ ok: false, error: 'unauthorized' }, 401);
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
-  try {
-    const me = await requireUser(req);                // <-- HIER: req übergeben
-    const id = Number(params.id);
-    if (!Number.isFinite(id)) return json({ ok: false, error: 'bad_id' }, 400);
+  const invId = Number(ctx.params.id || 0);
+  if (!invId) return json({ ok: false, error: 'bad_id' }, 400);
 
-    const rows = await sql<{ group_id: number }[]>`
-      update public.group_invitations
-         set status = 'accepted'
-       where id = ${id}
-         and invited_user = ${me.sub}::uuid
-         and coalesce(status,'pending') = 'pending'
-      returning group_id
-    `;
-    if (rows.length === 0) return json({ ok: false, error: 'not_found' }, 404);
+  // Einladung löschen und group_id holen
+  const del = await sql<{ group_id: number }[]>`
+    delete from public.group_invitations
+    where id = ${invId} and invited_user_id::text = ${me.sub}
+    returning group_id
+  `;
+  if (del.length === 0) return json({ ok: false, error: 'not_found' }, 404);
 
-    const groupId = rows[0].group_id;
+  const groupId = del[0].group_id;
 
-    await sql`
-      insert into public.group_members (group_id, user_id)
-      values (${groupId}, ${me.sub}::uuid)
-      on conflict (group_id, user_id) do nothing
-    `;
+  // Mitglied hinzufügen (idempotent)
+  await sql`
+    insert into public.group_members (group_id, user_id)
+    values (${groupId}, ${me.sub}::uuid)
+    on conflict (group_id, user_id) do nothing
+  `;
 
-    return json({ ok: true, groupId });
-  } catch (e: any) {
-    if (e?.message === 'unauthorized') return json({ ok: false, error: 'unauthorized' }, 401);
-    console.error('[invitations accept]', e);
-    return json({ ok: false, error: e?.message ?? 'server_error' }, 500);
-  }
+  return json({ ok: true, groupId });
 }

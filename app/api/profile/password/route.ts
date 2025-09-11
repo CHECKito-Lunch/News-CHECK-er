@@ -1,31 +1,27 @@
-// app/api/password/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-import { NextRequest, NextResponse } from 'next/server';
-import { requireUser } from '@/lib/auth-server';
-import { createClient } from '@supabase/supabase-js';
-
-const json = (d:any, s=200) => NextResponse.json(d,{status:s});
+import { NextRequest } from 'next/server';
+import { sql } from '@/lib/db';
+import { json, requireUser } from '@/lib/auth-server';
+import bcrypt from 'bcryptjs';
 
 export async function POST(req: NextRequest) {
-  try {
-    const u = await requireUser(req);
-    const body = await req.json().catch(()=> ({}));
-    const newPassword = (body?.newPassword ?? '').toString();
+  const me = await requireUser(req);
+  if (!me) return json({ ok: false, error: 'unauthorized' }, 401);
+  const b = await req.json().catch(() => ({}));
+  const current = (b?.currentPassword ?? '').toString();
+  const next = (b?.newPassword ?? '').toString();
+  if (next.length < 8) return json({ ok: false, error: 'weak_password' }, 400);
 
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const rows = await sql<{ password_hash: string | null }[]>`
+    select password_hash from public.users where id::text = ${me.sub} limit 1
+  `;
+  const hash = rows[0]?.password_hash || '';
+  const ok = hash ? await bcrypt.compare(current, hash) : false;
+  if (!ok) return json({ ok: false, error: 'invalid_password' }, 400);
 
-    if (!url || !key) return json({ ok:false, error:'not_configured' }, 501);
-
-    const sb = createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false }});
-    const { error } = await sb.auth.admin.updateUserById(u.sub, { password: newPassword });
-    if (error) return json({ ok:false, error: error.message }, 400);
-
-    return json({ ok:true });
-  } catch (e:any) {
-    if (e?.message === 'unauthorized') return json({ ok:false, error:'unauthorized' }, 401);
-    return json({ ok:false, error: e?.message ?? 'server_error' }, 500);
-  }
+  const newHash = await bcrypt.hash(next, 10);
+  await sql`update public.users set password_hash = ${newHash} where id::text = ${me.sub}`;
+  return json({ ok: true });
 }

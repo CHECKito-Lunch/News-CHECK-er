@@ -2,35 +2,28 @@
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-import { NextRequest, NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
+import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { requireUser } from '@/lib/auth-server';
 
-const json = (d:any, s=200) => NextResponse.json(d, { status:s });
+const json = (d:any, s=200) => NextResponse.json(d, { status: s });
 
 export async function GET(req: NextRequest) {
   try {
-    const u = await requireUser(req);
+    const me = await requireUser(req);
     const rows = await sql<any[]>`
-      select
-        i.id,
-        i.group_id,
-        g.name as group_name,
-        i.message,
-        i.created_at,
-        i.invited_by,
-        p.name  as invited_by_name,
-        p.email as invited_by_email
-      from public.group_invitations i
-      join public.groups g on g.id = i.group_id
-      left join public.user_profiles p on p.user_id = i.invited_by
-      where i.invited_user = ${u.sub}::uuid
-        and coalesce(i.status,'pending') = 'pending'
-      order by i.created_at desc
+      select i.id, i.group_id, g.name as group_name, i.created_at, i.status
+        from public.invitations i
+   left join public.groups g on g.id = i.group_id
+       where i.invited_user_id = ${me.sub}::uuid
+         and i.status = 'pending'
+       order by i.created_at desc
     `;
-    return json({ ok:true, items: rows });
+    return json({ ok: true, items: rows });
   } catch (e:any) {
-    if (e?.message === 'unauthorized') return json({ ok:false, error:'unauthorized' }, 401);
-    return json({ ok:false, error: e?.message ?? 'server_error' }, 500);
+    if (e?.message === 'unauthorized') return json({ ok:false, error:'unauthorized', items: [] }, 200);
+    console.error('[me/invitations GET]', e);
+    return json({ ok:true, items: [] }, 200); // nie 500
   }
 }

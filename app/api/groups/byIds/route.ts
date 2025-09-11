@@ -1,47 +1,32 @@
-// app/api/groups/byIds/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { sql } from '@/lib/db';
-import { requireUser } from '@/lib/auth-server';
-
-const json = (d:any, s=200) => NextResponse.json(d,{status:s});
+import { json, requireUser } from '@/lib/auth-server';
 
 export async function GET(req: NextRequest) {
-  try {
-    const u = await requireUser(req);
-    const { searchParams } = new URL(req.url);
-    const ids = (searchParams.get('ids') ?? '')
-      .split(',')
-      .map(s => Number(s))
-      .filter(n => Number.isFinite(n));
-    if (!ids.length) return json({ ok:true, data: [] });
+  const me = await requireUser(req); // optional
+  const ids = (req.nextUrl.searchParams.get('ids') || '')
+    .split(',')
+    .map(s => Number(s))
+    .filter(n => Number.isFinite(n) && n > 0);
 
-    // nur Gruppen zurückgeben, in denen der User Mitglied ist (können privat sein)
-    const rows = await sql<any[]>`
-      select
-        g.id, g.name, g.description,
-        coalesce(mc.member_count,0)::int as member_count
-      from public.groups g
-      join public.group_members m on m.group_id = g.id and m.user_id = ${u.sub}::uuid
-      left join (
-        select group_id, count(*) as member_count
-        from public.group_members
-        group by group_id
-      ) mc on mc.group_id = g.id
-      where g.id = any(${ids}::int[])
-    `;
+  if (ids.length === 0) return json({ ok: true, data: [] });
 
-    return json({ ok:true, data: rows.map(r => ({
-      id: r.id,
-      name: r.name,
-      description: r.description,
-      memberCount: r.member_count,
-      isMember: true,
-    })) });
-  } catch (e:any) {
-    if (e?.message === 'unauthorized') return json({ ok:false, error:'unauthorized' }, 401);
-    return json({ ok:false, error: e?.message ?? 'server_error' }, 500);
-  }
+  const rows = await sql<any[]>`
+    select id, name, description, is_private
+    from public.groups
+    where id = any(${ids})
+  `;
+
+  const data = rows.map(r => ({
+    id: r.id,
+    name: r.name,
+    description: r.description,
+    is_private: r.is_private,
+    memberCount: null,
+    isMember: false,
+  }));
+  return json({ ok: true, data });
 }

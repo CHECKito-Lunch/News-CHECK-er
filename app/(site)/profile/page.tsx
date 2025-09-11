@@ -882,24 +882,40 @@ function timeUntil(iso: string) {
 }
 
 /* ===========================
-   Unread-Panel
+   Unread-Panel (robust)
 =========================== */
 function UnreadCard() {
   const [data, setData] = useState<UnreadRes | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Antwort in ein sicheres Shape bringen
+  function toUnreadRes(j: any): UnreadRes | null {
+    if (!j || j.ok !== true) return null;
+    return {
+      ok: true,
+      last_seen_at: j.last_seen_at ?? null,
+      total: typeof j.total === 'number' ? j.total : 0,
+      unread: typeof j.unread === 'number' ? j.unread : undefined,
+      preview: Array.isArray(j.preview) ? j.preview : [], // <- wichtig
+    };
+  }
+
+  async function load() {
+    try {
+      const r = await authedFetch('/api/unread');
+      const j = await r.json().catch(() => ({}));
+      setData(toUnreadRes(j));
+    } catch {
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
     let alive = true;
     (async () => {
-      try {
-        const r = await authedFetch('/api/unread');
-        const j = await r.json();
-        if (alive) setData(j.ok ? j : null);
-      } catch {
-        if (alive) setData(null);
-      } finally {
-        if (alive) setLoading(false);
-      }
+      await load();
     })();
     return () => { alive = false; };
   }, []);
@@ -909,6 +925,9 @@ function UnreadCard() {
     ? new Date(data.last_seen_at).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })
     : '–';
 
+  // ✅ niemals undefined
+  const preview = Array.isArray(data?.preview) ? data!.preview : [];
+
   return (
     <section className={card}>
       <div className="flex items-center justify-between mb-2">
@@ -916,9 +935,7 @@ function UnreadCard() {
         <form onSubmit={async (e) => {
           e.preventDefault();
           await authedFetch('/api/unread/seen', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
-          const r = await authedFetch('/api/unread');
-          const j = await r.json();
-          setData(j.ok ? j : null);
+          await load(); // lädt erneut und normalisiert wieder
           window.dispatchEvent(new Event('auth-changed'));
         }}>
           <button className="px-3 py-2 rounded-lg text-sm border bg-white hover:bg-gray-50 dark:bg-white/10 dark:hover:bg-white/20 dark:border-gray-700">
@@ -935,9 +952,9 @@ function UnreadCard() {
             {count} neue Beiträge seit {lastSeenStr}
           </div>
 
-          {data.preview.length > 0 ? (
+          {preview.length > 0 ? (
             <ul className="space-y-2">
-              {data.preview.map(p => (
+              {preview.map(p => (
                 <li key={p.id} className="text-sm">
                   <Link
                     href={p.slug ? `/news/${p.slug}` : `/news?open=${p.id}`}
