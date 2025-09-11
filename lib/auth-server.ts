@@ -1,87 +1,61 @@
 // lib/auth-server.ts
-import { headers as nextHeaders, cookies as nextCookies } from 'next/headers';
+import type { NextRequest } from 'next/server';
+import { cookies, headers } from 'next/headers';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { AUTH_COOKIE } from '@/lib/auth';
 
-export type Authed = { userId: string; email: string | null; token?: string | null };
+export type AuthedUser = {
+  sub: string;
+  email?: string | null;
+  name?: string | null;
+  role: 'admin' | 'moderator' | 'user';
+};
 
-class UnauthorizedError extends Error {
-  status = 401 as const;
-  constructor(msg = 'unauthorized') { super(msg); }
+const AUTH_COOKIE = 'auth'; // oder dein Name
+
+function bearerFrom(h: string | null) {
+  const m = h ? /^Bearer\s+(.+)$/i.exec(h) : null;
+  return m ? m[1] : null;
 }
 
-/** Cookie-Header manuell parsen (Fallback, wenn req übergeben wurde) */
-function readCookieFromHeader(headerValue: string | null, name: string): string | null {
-  if (!headerValue) return null;
-  const parts = headerValue.split(';');
-  for (const p of parts) {
-    const [k, ...rest] = p.trim().split('=');
-    if (k === name) return decodeURIComponent(rest.join('=') || '');
-  }
-  return null;
-}
-
-async function readCookie(name: string, req?: Request): Promise<string | null> {
-  // 1) Falls Request übergeben: zuerst daraus lesen (funktioniert auch in Edge/Route-Handlern zuverlässig)
+export async function getAccessTokenFromServer(req?: NextRequest) {
   if (req) {
-    const fromReq = readCookieFromHeader(req.headers.get('cookie'), name);
-    if (fromReq) return fromReq;
+    return (
+      req.cookies.get(AUTH_COOKIE)?.value ??
+      bearerFrom(req.headers.get('authorization')) ??
+      null
+    );
   }
-  // 2) Fallback: Next.js cookies() (asynchron in deiner Version)
-  try {
-    const ck = await nextCookies();
-    return ck.get(name)?.value ?? null;
-  } catch {
-    return null;
-  }
+  const ck = await cookies();           // in Next 14 typisiert als Promise
+  const hd = await headers();
+  return (
+    ck.get(AUTH_COOKIE)?.value ??
+    bearerFrom(hd.get('authorization')) ??
+    null
+  );
 }
 
-async function readAuthz(req?: Request): Promise<string> {
-  if (req) return req.headers.get('authorization') || '';
-  try {
-    const hdr = await nextHeaders();
-    return hdr.get('authorization') || '';
-  } catch {
-    return '';
-  }
-}
+export async function requireUser(req?: NextRequest): Promise<AuthedUser> {
+  const token = await getAccessTokenFromServer(req);
+  if (!token) throw new Error('unauthorized');
 
-export async function requireUser(req?: Request): Promise<Authed> {
   const s = supabaseAdmin();
+  const { data, error } = await s.auth.getUser(token);
+  if (error || !data?.user) throw new Error('unauthorized');
 
-  // 1) Authorization: Bearer ...
-  const authz = await readAuthz(req);
-  const m = /^Bearer\s+(.+)$/i.exec(authz);
-  const headerToken = m?.[1] ?? null;
+  const u = data.user;
 
-  // 2) Kandidaten aus Cookies (mehrere Namen zulassen)
-  const candidates = [
-    headerToken,
-    await readCookie(AUTH_COOKIE, req),
-    await readCookie('AUTH_COOKIE', req),
-    await readCookie('auth', req),
-    await readCookie('sb-access-token', req),
-  ].filter(Boolean) as string[];
+  // (optional) Rolle aus eigener Tabelle lesen
+  let role: AuthedUser['role'] = 'user';
+  try {
+    const { data: row } = await s.from('app_users')
+      .select('role').eq('user_id', u.id).maybeSingle();
+    if (row?.role) role = row.role as any;
+  } catch {}
 
-  for (const token of candidates) {
-    const { data, error } = await s.auth.getUser(token);
-    if (!error && data?.user) {
-      return { userId: data.user.id, email: data.user.email ?? null, token };
-    }
-  }
+  const name =
+    (u.user_metadata?.full_name as string | undefined) ||
+    (u.user_metadata?.name as string | undefined) ||
+    undefined;
 
-  // 3) Dev-Fallback: user_id-Cookie prüfen (nur wenn aktiv in app_users)
-  const uid = await readCookie('user_id', req);
-  if (uid) {
-    const { data, error } = await s
-      .from('app_users')
-      .select('id, active, email')
-      .eq('user_id', uid)
-      .maybeSingle();
-    if (!error && data && data.active) {
-      return { userId: uid, email: data.email ?? null, token: null };
-    }
-  }
-
-  throw new UnauthorizedError();
+  return { sub: u.id, email: u.email ?? null, name, role };
 }

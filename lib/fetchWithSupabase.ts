@@ -1,20 +1,18 @@
 // lib/fetchWithSupabase.ts
 'use client';
+import { createClient } from '@supabase/supabase-js';
 
-import { createBrowserClient } from '@supabase/ssr';
+const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const supabase = createClient(url, key, { auth: { persistSession: true, autoRefreshToken: true }});
 
-const supabase = createBrowserClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+export async function authedFetch(input: RequestInfo | URL, init: RequestInit = {}) {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
 
-/** Holt das aktuelle Access Token und hängt es als Bearer an. */
-export async function authedFetch(input: RequestInfo, init: RequestInit = {}) {
-  const { data: { session } } = await supabase.auth.getSession();
-  const headers = new Headers(init.headers as any);
-  if (session?.access_token) {
-    headers.set('authorization', `Bearer ${session.access_token}`);
-  }
-  // Cookies mitschicken (falls du zusätzlich welche nutzt)
-  return fetch(input as any, { ...init, headers, credentials: 'include', cache: 'no-store' });
+  const headers = new Headers(init.headers || {});
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  headers.set('Accept', 'application/json');
+
+  return fetch(input, { ...init, headers, cache: 'no-store' });
 }

@@ -20,6 +20,7 @@ type Item = {
   post_badges: { badge: Badge }[];
   created_at?: string | null;
   published_at?: string | null;
+  images?: { url: string; caption?: string | null; sort_order?: number | null }[]; 
 };
 
 type KPI = {
@@ -391,52 +392,55 @@ export default function HomePage() {
 /* ---- Kartenrenderer ------------------------------------------------- */
 
 function NewsCard({ it }: { it: Item }) {
+  const imgs = Array.isArray(it.images) ? [...it.images].sort((a,b)=> (a.sort_order ?? 0) - (b.sort_order ?? 0)) : [];
+  const thumb = imgs[0]?.url ?? null;
+  const date = new Date((it as any).published_at || (it as any).created_at || 0);
+  const dateStr = isNaN(date.getTime()) ? null : date.toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' });
+
   return (
-    <>
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="inline-flex items-center px-2 py-0.5 text-[11px] rounded-full border border-blue-300 text-blue-700 dark:border-blue-500/40 dark:text-blue-300">
-              News
-            </span>
-            <div className="text-base font-semibold text-blue-700 dark:text-blue-400 leading-snug truncate">
-              {it.slug ? (
-                <Link href={`/news/${it.slug}`} className="hover:underline">
-                  {it.title}
-                </Link>
-              ) : (
-                it.title
-              )}
-            </div>
-          </div>
-          {it.vendor && <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">{it.vendor.name}</div>}
+    <div className="flex gap-3">
+      {thumb && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={thumb} alt="" className="h-16 w-24 object-cover rounded-lg border border-gray-200 dark:border-gray-700" />
+      )}
+
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="inline-flex items-center px-2 py-0.5 text-[11px] rounded-full border border-blue-300 text-blue-700 dark:border-blue-600/50 dark:text-blue-300">News</span>
+          {dateStr && <span className="text-xs text-gray-500">{dateStr}</span>}
         </div>
 
-        <div className="flex gap-1.5 shrink-0">
-          {it.post_badges?.slice(0, 3).map(({ badge }) => (
-            <span
-              key={badge.id}
-              className="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] leading-4 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200"
-              title={badge.name}
-            >
-              {badge.name}
-            </span>
-          ))}
-        </div>
-      </div>
-
-      {(it.summary || it.content) && (
-        <div className="prose dark:prose-invert max-w-none prose-p:my-2 mt-2 text-[13px]">
-          {it.summary ? (
-            <p>{it.summary}</p>
+        <div className="text-base font-semibold leading-snug mt-0.5">
+          {it.slug ? (
+            <Link href={`/news/${it.slug}`} className="text-blue-700 dark:text-blue-300 hover:underline">
+              {it.title}
+            </Link>
           ) : (
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {(it.content ?? '').slice(0, 320)}
-            </ReactMarkdown>
+            <span className="text-blue-700 dark:text-blue-300">{it.title}</span>
           )}
         </div>
-      )}
-    </>
+
+        {it.vendor && <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{it.vendor.name}</div>}
+
+        {(it.summary || it.content) && (
+          <p className="text-sm text-gray-700 dark:text-gray-300 mt-1 line-clamp-3">
+            {it.summary || (it.content ? it.content.replace(/\s+/g,' ').slice(0, 220) : '')}
+          </p>
+        )}
+
+        {/* vorhandene Badges (max. 3) rechts vom Titel waren vorher separat;
+            hier optional am Ende */}
+        {it.post_badges?.length ? (
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {it.post_badges.slice(0,3).map(({ badge }) => (
+              <span key={badge.id} className="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] leading-4 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200">
+                {badge.name}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </div>
   );
 }
 

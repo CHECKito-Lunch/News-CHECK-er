@@ -6,6 +6,13 @@ export type Session = { sub: string; role: Role; name?: string };
 
 export const AUTH_COOKIE = 'auth';
 
+export type AuthUser = {
+  sub: string;
+  email?: string;
+  name?: string;
+  role?: 'admin' | 'moderator' | 'user';
+};
+
 const secret = new TextEncoder().encode(process.env.AUTH_SECRET || 'dev-secret');
 
 export async function signSession(session: Session) {
