@@ -1,29 +1,39 @@
-// app/api/me/invitations/route.ts
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
-
-import type { NextRequest } from 'next/server';
-import { NextResponse } from 'next/server';
+import { withAuth } from '@/lib/with-auth';
 import { sql } from '@/lib/db';
-import { requireUser } from '@/lib/auth-server';
+import { json } from '@/lib/auth-server';
 
-const json = (d:any, s=200) => NextResponse.json(d, { status: s });
+type Row = {
+  id: number;
+  group_id: number;
+  group_name: string;
+  message: string | null;
+  created_at: string;
+  invited_by: string | null;        // UUID (als Text)
+  invited_by_name: string | null;
+  invited_by_email: string | null;
+};
 
-export async function GET(req: NextRequest) {
-  try {
-    const me = await requireUser(req);
-    const rows = await sql<any[]>`
-      select i.id, i.group_id, g.name as group_name, i.created_at, i.status
-        from public.invitations i
-   left join public.groups g on g.id = i.group_id
-       where i.invited_user_id = ${me.sub}::uuid
-         and i.status = 'pending'
-       order by i.created_at desc
-    `;
-    return json({ ok: true, items: rows });
-  } catch (e:any) {
-    if (e?.message === 'unauthorized') return json({ ok:false, error:'unauthorized', items: [] }, 200);
-    console.error('[me/invitations GET]', e);
-    return json({ ok:true, items: [] }, 200); // nie 500
-  }
-}
+export const GET = withAuth(async (_req, _ctx, me) => {
+  // me.sub = Supabase-UUID des eingeloggten Users
+  const rows = await sql<Row[]>`
+    select
+      i.id,
+      i.group_id,
+      g.name as group_name,
+      i.message,
+      i.created_at,
+      i.invited_by::text as invited_by,
+      u.name  as invited_by_name,
+      u.email as invited_by_email
+    from group_invitations i
+      join groups g on g.id = i.group_id
+      left join app_users u on u.user_id::text = i.invited_by::text
+    where i.invited_user_id::text = ${me.sub}
+      and i.revoked_at  is null
+      and i.accepted_at is null
+      and i.declined_at is null
+    order by i.created_at desc
+  `;
+
+  return json({ items: rows });
+});

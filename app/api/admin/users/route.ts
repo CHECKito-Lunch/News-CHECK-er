@@ -13,6 +13,7 @@ type AppUser = {
   active: boolean;
   created_at: string | null;
   updated_at: string | null;
+  user_id: string | null; 
 };
 
 // GET /api/admin/users?q=&page=&pageSize=
@@ -27,7 +28,7 @@ export async function GET(req: Request) {
 
   let query = s
     .from(T.appUsers)
-    .select('id,email,name,role,active,created_at,updated_at', { count: 'exact' })
+    .select('id,user_id,email,name,role,active,created_at,updated_at', { count: 'exact' })
     .order('created_at', { ascending: false })
     .range(from, to);
 
@@ -69,7 +70,7 @@ export async function POST(req: Request) {
     insert.password_hash = await bcrypt.hash(password, 12);
   }
 
-  const { data, error } = await s.from(T.appUsers).insert(insert).select('id').single();
+  const { data, error } = await s.from(T.appUsers).insert(insert).select('id,user_id').single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ id: data.id });
 }

@@ -1,23 +1,27 @@
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
-
-import { NextRequest } from 'next/server';
+import { withAuth } from '@/lib/with-auth';
 import { sql } from '@/lib/db';
-import { json, requireUser } from '@/lib/auth-server';
+import { json } from '@/lib/auth-server';
+import type { NextRequest } from 'next/server';
 
-export async function POST(
-  req: NextRequest,
-  ctx: { params: { id: string } }
-) {
-  const me = await requireUser(req);
-  if (!me) return json({ ok: false, error: 'unauthorized' }, 401);
+export const POST = withAuth(async (_req: NextRequest, ctx, me) => {
+  const p: any = (ctx as any)?.params;
+  const params = p && typeof p.then === 'function' ? await p : p;
+  const id = Number(Array.isArray(params?.id) ? params.id[0] : params?.id);
+  if (!Number.isFinite(id)) return json({ error: 'Bad id' }, 400);
 
-  const invId = Number(ctx.params.id || 0);
-  if (!invId) return json({ ok: false, error: 'bad_id' }, 400);
-
-  const del = await sql`delete from public.group_invitations
-                         where id = ${invId} and invited_user_id::text = ${me.sub}
-                         returning 1`;
-  if (del.length === 0) return json({ ok: false, error: 'not_found' }, 404);
+  const res = await sql`
+    update group_invitations
+       set declined_at = now()
+     where id = ${id}
+       and invited_user_id::text = ${me.sub}
+       and accepted_at is null
+       and declined_at is null
+       and revoked_at is null
+  `;
+  // res muss hier nicht ausgewertet werden – ist idempotent
   return json({ ok: true });
+});
+
+export function GET() {
+  return new Response('Method Not Allowed', { status: 405, headers: { Allow: 'POST' } });
 }

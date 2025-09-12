@@ -2,11 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import AdminTabs from '../shared/AdminTabs';
+import { authedFetch } from '@/lib/fetchWithSupabase';
+
 
 type Role = 'admin' | 'moderator' | 'user';
 
 type AppUser = {
   id: number;
+  user_id: string | null; 
   email: string;
   name: string | null;
   role: Role;
@@ -37,7 +40,7 @@ const cardClass =
 const btnBase =
   'px-3 py-2 rounded-lg text-sm font-medium transition border ' +
   'bg-white text-gray-700 hover:bg-gray-50 border-gray-200 ' +
-  'dark:bg:white/10 dark:text-white dark:hover:bg-white/20 dark:border-gray-700';
+  'dark:bg-white/10 dark:text-white dark:hover:bg-white/20 dark:border-gray-700';
 
 const btnPrimary =
   'px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium shadow disabled:opacity-50';
@@ -94,7 +97,7 @@ export default function UsersAdminPage() {
     params.set('page', String(page));
     params.set('pageSize', String(pageSize));
 
-    const res = await fetch(`/api/admin/users?${params.toString()}`);
+    const res = await authedFetch(`/api/admin/users?${params.toString()}`);
     const json = await res.json();
     setUsers(json.data ?? []);
     setTotal(json.total ?? 0);
@@ -126,7 +129,7 @@ export default function UsersAdminPage() {
     try {
       const url = creating ? '/api/admin/users' : `/api/admin/users/${editingId}`;
       const method = creating ? 'POST' : 'PATCH';
-      const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const res = await authedFetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.error || 'Fehler beim Speichern');
       setMsg(creating ? 'Benutzer angelegt.' : 'Aktualisiert.');
@@ -154,7 +157,7 @@ export default function UsersAdminPage() {
 
   async function deleteUser(id: number) {
     if (!confirm('Diesen Benutzer löschen?')) return;
-    const res = await fetch(`/api/admin/users/${id}`, { method: 'DELETE' });
+    const res = await authedFetch(`/api/admin/users/${id}`, { method: 'DELETE' });
     if (res.ok) {
       await load();
       if (editingId === id) resetForm();
@@ -168,7 +171,7 @@ export default function UsersAdminPage() {
     const pwd = prompt(`Neues Passwort für ${user.email} (mind. 8 Zeichen):`);
     if (!pwd) return;
     if (pwd.length < 8) { alert('Mindestens 8 Zeichen.'); return; }
-    const res = await fetch(`/api/admin/users/${user.id}/password`, {
+    const res = await authedFetch(`/api/admin/users/${user.id}/password`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pwd })
     });
     if (!res.ok) { const j = await res.json().catch(() => ({})); alert(j.error ?? 'Passwort setzen fehlgeschlagen'); return; }
@@ -178,7 +181,7 @@ export default function UsersAdminPage() {
   // ---------- Gruppen-Calls ----------
   const loadGroups = useCallback(async () => {
     setGLoading(true);
-    const r = await fetch('/api/admin/groups');
+    const r = await authedFetch('/api/admin/groups');
     const j = await r.json().catch(() => ({}));
     setGroups(Array.isArray(j.data) ? j.data : []);
     setGLoading(false);
@@ -208,7 +211,7 @@ export default function UsersAdminPage() {
       };
       if (gPassword.trim()) body.password = gPassword.trim();
 
-      const res = await fetch(url, {
+      const res = await authedFetch(url, {
         method, headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
       });
@@ -227,7 +230,7 @@ export default function UsersAdminPage() {
 
   async function deleteGroup(id: number) {
     if (!confirm('Diese Gruppe löschen? (Mitgliedschaften werden entfernt)')) return;
-    const r = await fetch(`/api/admin/groups/${id}`, { method: 'DELETE' });
+    const r = await authedFetch(`/api/admin/groups/${id}`, { method: 'DELETE' });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) { alert(j.error ?? 'Löschen fehlgeschlagen'); return; }
     await loadGroups();
@@ -235,7 +238,7 @@ export default function UsersAdminPage() {
 
   // Dialog öffnen: Gruppen eines Users laden
   async function openAssign(u: AppUser) {
-    const r = await fetch(`/api/admin/users/${u.id}/groups`);
+    const r = await authedFetch(`/api/admin/users/${u.id}/groups`);
     const j = await r.json().catch(() => ({}));
     const ids: number[] = Array.isArray(j.groupIds) ? j.groupIds : [];
     setAssignOpen({ user: u, groupIds: ids });
@@ -244,7 +247,7 @@ export default function UsersAdminPage() {
   async function saveAssign() {
     if (!assignOpen) return;
     const ids = assignOpen.groupIds;
-    const r = await fetch(`/api/admin/users/${assignOpen.user.id}/groups`, {
+    const r = await authedFetch(`/api/admin/users/${assignOpen.user.id}/groups`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ groupIds: ids })
     });
     const j = await r.json().catch(() => ({}));
@@ -284,27 +287,39 @@ export default function UsersAdminPage() {
     setInviteOpen(prev => prev ? { ...prev, selectedIds: prev.selectedIds.filter(x => x !== id) } : prev);
   }
 
-  async function sendInvites() {
-    if (!inviteOpen) return;
-    const groupId = inviteOpen.groupId;
-    if (!groupId) { alert('Bitte eine Zielgruppe auswählen.'); return; }
-    if (inviteOpen.selectedIds.length === 0) { alert('Bitte mindestens einen Empfänger auswählen.'); return; }
-    const r = await fetch(`/api/admin/groups/${groupId}/invite`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userIds: inviteOpen.selectedIds, message: inviteOpen.message || null })
-    });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) { alert(j.error || 'Einladungen konnten nicht gesendet werden.'); return; }
-    setInviteOpen(null);
-    alert('Einladungen verschickt.');
+async function sendInvites() {
+  if (!inviteOpen) return;
+  const groupId = inviteOpen.groupId;
+  if (!groupId) { alert('Bitte eine Zielgruppe auswählen.'); return; }
+  if (inviteOpen.selectedIds.length === 0) { alert('Bitte mindestens einen Empfänger auswählen.'); return; }
+
+  // mappe numerische UI-IDs -> Supabase UUIDs
+  const selectedUuids = inviteOpen.selectedIds
+    .map(id => allUsersById.get(id)?.user_id || null)
+    .filter((x): x is string => !!x);
+
+  if (selectedUuids.length === 0) {
+    alert('Ausgewählte Benutzer haben keine verknüpfte Auth-ID (user_id).');
+    return;
   }
+
+  const r = await authedFetch(`/api/admin/groups/${groupId}/invite`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userIds: selectedUuids, message: inviteOpen.message || null }) // ⬅️ UUIDs
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { alert(j.error || 'Einladungen konnten nicht gesendet werden.'); return; }
+  setInviteOpen(null);
+  alert('Einladungen verschickt.');
+}
 
   // Listen fürs Modal
   const modalAvailableUsers = useMemo(() => {
     if (!inviteOpen) return [];
     const f = inviteOpen.filter.trim().toLowerCase();
     return users
+    .filter(u => !!u.user_id) 
       .filter(u => !inviteOpen.selectedIds.includes(u.id))
       .filter(u => {
         if (!f) return true;
@@ -430,7 +445,7 @@ export default function UsersAdminPage() {
                           checked={u.active}
                           onChange={async (e) => {
                             const newActive = e.target.checked;
-                            const res = await fetch(`/api/admin/users/${u.id}`, {
+                            const res = await authedFetch(`/api/admin/users/${u.id}`, {
                               method: 'PATCH', headers: { 'Content-Type': 'application/json' },
                               body: JSON.stringify({ active: newActive }),
                             });
@@ -540,7 +555,7 @@ export default function UsersAdminPage() {
                         checked={g.is_active !== false}
                         onChange={async (e) => {
                           const is_active = e.target.checked;
-                          const r = await fetch(`/api/admin/groups/${g.id}`, {
+                          const r = await authedFetch(`/api/admin/groups/${g.id}`, {
                             method: 'PATCH', headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ is_active })
                           });
@@ -559,7 +574,7 @@ export default function UsersAdminPage() {
                         checked={!!g.is_private}
                         onChange={async (e) => {
                           const is_private = e.target.checked;
-                          const r = await fetch(`/api/admin/groups/${g.id}`, {
+                          const r = await authedFetch(`/api/admin/groups/${g.id}`, {
                             method: 'PATCH', headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ is_private })
                           });

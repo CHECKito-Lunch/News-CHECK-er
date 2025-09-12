@@ -1,71 +1,89 @@
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
-
-import { NextRequest, NextResponse } from 'next/server';
+// app/api/admin/groups/[id]/invite/route.ts
+import { NextRequest } from 'next/server';
 import { sql } from '@/lib/db';
-import { getUserFromCookies } from '@/lib/user-auth';
+import { json } from '@/lib/auth-server';
+import { withModerator } from '@/lib/with-auth';
 
-const json = (d: any, status = 200) => NextResponse.json(d, { status });
+type RowUid = { user_id: string };
 
-function extractId(url: string): number | null {
-  try {
-    const parts = new URL(url).pathname.split('/').filter(Boolean);
-    // .../admin/groups/:id/invite
-    const idStr = parts[parts.length - 2];
-    const id = Number(idStr);
-    return Number.isFinite(id) ? id : null;
-  } catch { return null; }
-}
+export const POST = withModerator(async (req: NextRequest, ctx, me) => {
+  // params robust (Next 15 kann Promise liefern)
+  const rawParams: any = (ctx as any)?.params;
+  const params = rawParams && typeof rawParams?.then === 'function' ? await rawParams : rawParams ?? {};
+  const groupId = Number(params?.id);
+  if (!Number.isFinite(groupId) || groupId <= 0) return json({ error: 'Ungültige groupId' }, 400);
 
-export async function POST(req: NextRequest) {
-  const me = await getUserFromCookies();
-  if (!me || (me.role !== 'admin' && me.role !== 'moderator')) {
-    return json({ ok: false, error: 'unauthorized' }, 401);
+  const body = await req.json().catch(() => ({} as any));
+  const message: string | null =
+    typeof body?.message === 'string' && body.message.trim() ? body.message.trim() : null;
+
+  const rawIds: any[] = Array.isArray(body?.userIds) ? body.userIds : [];
+  if (rawIds.length === 0) return json({ error: 'userIds erforderlich' }, 400);
+
+  // in UUIDs und numerische IDs aufteilen
+  const asText = rawIds.map((x) => String(x ?? '').trim()).filter(Boolean);
+  const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[089ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  const uuids = Array.from(new Set(asText.filter((x) => uuidRe.test(x))));
+  const nums  = Array.from(new Set(asText.map((x) => Number(x)).filter(Number.isFinite)));
+
+  if (uuids.length === 0 && nums.length === 0) {
+    return json({ error: 'Keine gültigen Nutzer' }, 400);
   }
 
-  const gid = extractId(req.url);
-  if (gid == null) return json({ ok: false, error: 'invalid_group_id' }, 400);
+  // aktive Nutzer holen – einmal über user_id (UUID), einmal über id (int)
+  let rows: RowUid[] = [];
+  if (uuids.length) {
+    rows = rows.concat(await sql<RowUid[]>`
+      select user_id::text as user_id
+      from public.app_users
+      where active = true and user_id::text in ${sql(uuids)}
+    `);
+  }
+  if (nums.length) {
+    rows = rows.concat(await sql<RowUid[]>`
+      select user_id::text as user_id
+      from public.app_users
+      where active = true and id in ${sql(nums)}
+    `);
+  }
 
-  // Gruppe prüfen (optional: nur aktive)
-  const [g] = await sql<{ id: string; is_active: boolean | null; is_private: boolean | null }[]>`
-    select id, is_active, is_private from public.groups where id = ${gid}::bigint limit 1
+  const validUids = Array.from(new Set(rows.map((r) => r.user_id)));
+  if (validUids.length === 0) {
+    return json({ error: 'Keine gültigen Nutzer' }, 400);
+  }
+
+  // bereits offene Einladungen ausfiltern
+  const existing = await sql<{ user_id: string }[]>`
+    select invited_user_id::text as user_id
+    from public.group_invitations
+    where group_id = ${groupId}
+      and invited_user_id::text in ${sql(validUids)}
+      and accepted_at is null and declined_at is null and revoked_at is null
   `;
-  if (!g) return json({ ok: false, error: 'group_not_found' }, 404);
+  const existingSet = new Set(existing.map((r) => r.user_id));
+  const toInvite = validUids.filter((u) => !existingSet.has(u));
 
-  let body: any = {};
-  try { body = await req.json(); } catch {}
-  const userIds: number[] = Array.isArray(body?.userIds) ? body.userIds.map((x: any) => Number(x)).filter(Number.isFinite) : [];
-  const message: string | null = (body?.message ?? '').toString().trim() || null;
+  if (toInvite.length === 0) {
+    return json({ ok: true, invited: 0, skipped: { alreadyPending: existing.length } });
+  }
 
-  if (userIds.length === 0) return json({ ok: false, error: 'empty_user_ids' }, 400);
-
-  // Admin-User-Liste -> UUIDs ermitteln
-  const rows = await sql<{ id: string; user_id: string }[]>`
-    select id, user_id
-    from public.app_users
-    where id = any(${userIds}::bigint[])
-  `;
-  const uuids = rows.map(r => r.user_id).filter(Boolean);
-  if (uuids.length === 0) return json({ ok: false, error: 'no_users_found' }, 400);
-
-  // Einladungen upserten (erneut einladen = Eintrag reaktivieren & Nachricht aktualisieren)
-  const inserted = await sql<{ invited_user_id: string }[]>`
-    insert into public.group_invitations (group_id, invited_user_id, invited_by, message)
-    select ${gid}::bigint, u.user_id::uuid, ${me.sub}::uuid, ${message}
-    from public.app_users u
-    where u.id = any(${userIds}::bigint[])
-    on conflict (group_id, invited_user_id) do update
-      set message = excluded.message,
-          revoked_at = null,
-          declined_at = null,
-          accepted_at = null,
-          created_at = now()
-    returning invited_user_id
-  `;
+  // Inserts (kurze TX, keine sql.join-Nutzung nötig)
+  await sql.begin(async (trx: any) => {
+    for (const uid of toInvite) {
+      await trx`
+        insert into public.group_invitations (group_id, invited_user_id, invited_by, message)
+        values (${groupId}, ${uid}::uuid, ${me.sub}::uuid, ${message})
+      `;
+    }
+  });
 
   return json({
     ok: true,
-    group_id: gid,
-    invited_count: inserted.length,
+    invited: toInvite.length,
+    skipped: { alreadyPending: existing.length }
   });
+});
+
+export function GET() {
+  return new Response('Method Not Allowed', { status: 405, headers: { Allow: 'POST' } });
 }
