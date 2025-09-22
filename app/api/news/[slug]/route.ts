@@ -5,6 +5,7 @@ export const revalidate = 0;
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase-server";
 
+// params kann Promise oder Objekt sein
 function prettyParams(p: unknown): Promise<{ slug: string }> {
   const maybe = p as any;
   return maybe && typeof maybe.then === "function" ? maybe : Promise.resolve(maybe);
@@ -14,10 +15,12 @@ type ImageRow = { path?: string | null };
 
 export async function GET(req: NextRequest, ctx: any) {
   const { slug } = await prettyParams((ctx as any)?.params);
+
   const s = await supabaseServer();
   const nowIso = new Date().toISOString();
   const isPreview = req.nextUrl.searchParams.get("preview") === "1";
 
+  // Basis-Query: schema-agnostisch (images nur path)
   let query = s
     .from("posts")
     .select(`
@@ -29,29 +32,38 @@ export async function GET(req: NextRequest, ctx: any) {
       images:post_images ( path )
     `)
     .eq("slug", slug)
-    // ⬇️ hier die Änderung: sowohl 'published' als auch 'scheduled' akzeptieren
+    // ⬇️ 1) 'published' **und** 'scheduled' zulassen
     .in("status", ["published", "scheduled"]);
 
+  // ⬇️ 2) Zeitfenster: im Live-Modus entweder <= now() **oder** NULL akzeptieren
   if (!isPreview) {
-    query = query.lte("effective_from", nowIso);
+    query = query.or(`effective_from.lte.${nowIso},effective_from.is.null`);
   }
 
   const { data, error } = await query.maybeSingle();
+
   if (error || !data) {
     console.error("[/api/news/[slug]] not found", { slug, error: error?.message, isPreview, nowIso });
-    return NextResponse.json({ data: null, error: error?.message ?? "not_found" }, { status: 404, headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json(
+      { data: null, error: error?.message ?? "not_found" },
+      { status: 404, headers: { "Cache-Control": "no-store" } }
+    );
   }
 
-  // Autorname optional
+  // Autorname optional nachladen
   let author_name: string | null = null;
   if ((data as any).author_id) {
-    const { data: u } = await s.from("app_users").select("name").eq("user_id", (data as any).author_id).maybeSingle();
+    const { data: u } = await s
+      .from("app_users")
+      .select("name")
+      .eq("user_id", (data as any).author_id)
+      .maybeSingle();
     author_name = u?.name ?? null;
   }
 
-  // Bilder-URLs aus Storage-Pfaden
+  // Bild-URLs aus Storage-Pfaden
   const imgs: ImageRow[] = Array.isArray((data as any).images) ? (data as any).images : [];
-  const storage = s.storage.from("uploads");
+  const storage = s.storage.from("uploads"); // ggf. Bucket-Name prüfen
   const images = imgs
     .map((im) => {
       const url = im?.path ? storage.getPublicUrl(im.path).data.publicUrl : null;
@@ -59,5 +71,10 @@ export async function GET(req: NextRequest, ctx: any) {
     })
     .filter((x): x is { url: string; caption: string | null; sort_order: number | null } => x !== null);
 
-  return NextResponse.json({ data: { ...data, author_name, images } }, { headers: { "Cache-Control": "no-store" } });
+  const payload = { ...data, author_name, images };
+
+  return NextResponse.json(
+    { data: payload },
+    { headers: { "Cache-Control": "no-store" } }
+  );
 }
