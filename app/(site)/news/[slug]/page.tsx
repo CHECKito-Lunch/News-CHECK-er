@@ -1,4 +1,4 @@
-// app/news/[slug]/page.tsx
+// app/(site)/news/[slug]/page.tsx
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
@@ -6,8 +6,6 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-
-type PageProps = { params: { slug: string } | Promise<{ slug: string }> };
 
 type PostImage = {
   url: string;
@@ -29,11 +27,17 @@ type ApiData = {
   images?: PostImage[];
 };
 
-export default async function Page({ params }: PageProps) {
-  // Next 14/15: params kann Objekt ODER Promise sein
-  const { slug } = await (params as any);
+// Helper: params kann Promise oder Objekt sein
+async function getParams(p: unknown): Promise<Record<string, any>> {
+  const anyp = p as any;
+  return anyp && typeof anyp.then === 'function' ? await anyp : (anyp ?? {});
+}
 
-  // RELATIVE URL verwenden -> gleiche Origin (Vercel, Codespaces, lokal)
+export default async function Page({ params }: { params?: Promise<any> }) {
+  const { slug } = await getParams(params);
+  if (!slug || typeof slug !== 'string') notFound();
+
+  // RELATIVE URL -> gleiche Origin (Vercel/Codespaces/Dev)
   const res = await fetch(`/api/news/${encodeURIComponent(slug)}`, {
     cache: 'no-store',
   });
@@ -93,14 +97,14 @@ export default async function Page({ params }: PageProps) {
 
       {!!data.images?.length && <Gallery images={data.images} />}
 
-      {/* Inhalt: Du lieferst HTML; wenn du Markdown liefern willst, lass ReactMarkdown. */}
+      {/* Inhalt: Du lieferst aktuell HTML. Wenn du Markdown liefern willst, nutze unten ReactMarkdown. */}
       {data.content && (
-        // Variante A (HTML, wie in deiner API):
+        // Variante A (HTML – passend zu deiner API):
         <article
           className="prose dark:prose-invert max-w-none prose-p:my-3 prose-li:my-1"
           dangerouslySetInnerHTML={{ __html: data.content }}
         />
-        // Variante B (Markdown): 
+        // Variante B (Markdown):
         // <article className="prose dark:prose-invert max-w-none prose-p:my-3 prose-li:my-1">
         //   <ReactMarkdown remarkPlugins={[remarkGfm]}>{data.content}</ReactMarkdown>
         // </article>
