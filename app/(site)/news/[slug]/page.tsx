@@ -4,21 +4,15 @@ export const revalidate = 0;
 
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { headers } from 'next/headers';
 
-type PostImage = {
-  url: string;
-  caption?: string | null;
-  sort_order?: number | null;
-};
-
+type PostImage = { url: string; caption?: string | null; sort_order?: number | null };
 type ApiData = {
   id: number;
   slug: string;
   title: string;
   summary: string | null;
-  content: string | null; // Achtung: bei dir aktuell HTML
+  content: string | null; // HTML
   author_name?: string | null;
   vendor?: { id: number; name: string } | null;
   post_categories?: { category: { id: number; name: string; color: string | null } }[];
@@ -27,36 +21,40 @@ type ApiData = {
   images?: PostImage[];
 };
 
-// Helper: params kann Promise oder Objekt sein
-async function getParams(p: unknown): Promise<Record<string, any>> {
-  const anyp = p as any;
-  return anyp && typeof anyp.then === 'function' ? await anyp : (anyp ?? {});
+// params kann bei Next 15 ein Promise sein
+async function getParams(p?: Promise<any>) {
+  if (!p) return {};
+  const v = await p;
+  return v ?? {};
+}
+
+// ⬇️ WICHTIG: headers() awaiten (liefert bei dir Promise<ReadonlyHeaders>)
+async function getAbsoluteBaseUrl() {
+  const h = await headers();
+  const host = h.get('x-forwarded-host') ?? h.get('host');
+  const proto = h.get('x-forwarded-proto') ?? 'https';
+  if (!host) return process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000';
+  return `${proto}://${host}`;
 }
 
 export default async function Page({ params }: { params?: Promise<any> }) {
   const { slug } = await getParams(params);
-  if (!slug || typeof slug !== 'string') notFound();
+  if (!slug || typeof slug !== 'string') return notFound();
 
-  // RELATIVE URL -> gleiche Origin (Vercel/Codespaces/Dev)
-  const res = await fetch(`/api/news/${encodeURIComponent(slug)}`, {
+  // ✅ absolute URL aus Request-Headern bauen
+  const base = await getAbsoluteBaseUrl();
+  const res = await fetch(`${base}/api/news/${encodeURIComponent(slug)}`, {
     cache: 'no-store',
   });
 
-  if (!res.ok) {
-    console.error('API /api/news/[slug] status', res.status);
-    notFound();
-  }
+  if (!res.ok) return notFound();
 
   const { data } = (await res.json()) as { data: ApiData | null };
-  if (!data) notFound();
+  if (!data) return notFound();
 
-  const sources = (data.sources ?? [])
-    .slice()
-    .sort(
-      (a, b) =>
-        (a.sort_order ?? Number.MAX_SAFE_INTEGER) -
-        (b.sort_order ?? Number.MAX_SAFE_INTEGER)
-    );
+  const sources = (data.sources ?? []).slice().sort(
+    (a, b) => (a.sort_order ?? Number.MAX_SAFE_INTEGER) - (b.sort_order ?? Number.MAX_SAFE_INTEGER)
+  );
 
   return (
     <div className="container max-w-3xl mx-auto py-8 space-y-6">
@@ -97,17 +95,12 @@ export default async function Page({ params }: { params?: Promise<any> }) {
 
       {!!data.images?.length && <Gallery images={data.images} />}
 
-      {/* Inhalt: Du lieferst aktuell HTML. Wenn du Markdown liefern willst, nutze unten ReactMarkdown. */}
+      {/* API liefert HTML → direkt rendern */}
       {data.content && (
-        // Variante A (HTML – passend zu deiner API):
         <article
           className="prose dark:prose-invert max-w-none prose-p:my-3 prose-li:my-1"
           dangerouslySetInnerHTML={{ __html: data.content }}
         />
-        // Variante B (Markdown):
-        // <article className="prose dark:prose-invert max-w-none prose-p:my-3 prose-li:my-1">
-        //   <ReactMarkdown remarkPlugins={[remarkGfm]}>{data.content}</ReactMarkdown>
-        // </article>
       )}
 
       {!!data.post_categories?.length && (
@@ -163,20 +156,15 @@ function prettySourceLabel(url: string, fallback?: string) {
 }
 
 function Gallery({ images }: { images: PostImage[] }) {
-  const sorted = images
-    .slice()
-    .sort(
-      (a, b) =>
-        (a.sort_order ?? Number.MAX_SAFE_INTEGER) -
-        (b.sort_order ?? Number.MAX_SAFE_INTEGER)
-    );
+  const sorted = images.slice().sort(
+    (a, b) => (a.sort_order ?? Number.MAX_SAFE_INTEGER) - (b.sort_order ?? Number.MAX_SAFE_INTEGER)
+  );
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
       {sorted.map((im, idx) => (
         <figure
           key={`${im.url}-${idx}`}
-          className="rounded-xl overflow-hidden border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900"
-        >
+          className="rounded-xl overflow-hidden border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900">
           <img src={im.url} alt={im.caption ?? ''} className="w-full h-40 object-cover" />
           {im.caption && (
             <figcaption className="px-2 py-1 text-[11px] text-gray-600 dark:text-gray-400">
