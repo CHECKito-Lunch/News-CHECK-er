@@ -32,7 +32,7 @@ export default async function Page({ params }: PageProps) {
   const { slug } = await params;
 
   const res = await fetch(
-    `${getServerBaseUrl()}/api/news/slug/${encodeURIComponent(slug)}`,
+    `${getServerBaseUrl()}/api/news/${encodeURIComponent(slug)}`,
     { cache: 'no-store' }
   );
 
