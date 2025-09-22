@@ -1,11 +1,13 @@
-// /app/news/[slug]/page.tsx
+// app/news/[slug]/page.tsx
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { getServerBaseUrl } from '@/lib/absoluteUrl';
 
-type PageProps = { params: Promise<{ slug: string }> };
+type PageProps = { params: { slug: string } | Promise<{ slug: string }> };
 
 type PostImage = {
   url: string;
@@ -18,7 +20,7 @@ type ApiData = {
   slug: string;
   title: string;
   summary: string | null;
-  content: string | null;
+  content: string | null; // Achtung: bei dir aktuell HTML
   author_name?: string | null;
   vendor?: { id: number; name: string } | null;
   post_categories?: { category: { id: number; name: string; color: string | null } }[];
@@ -28,15 +30,18 @@ type ApiData = {
 };
 
 export default async function Page({ params }: PageProps) {
-  // ✅ Next 15: params ist ein Promise
-  const { slug } = await params;
+  // Next 14/15: params kann Objekt ODER Promise sein
+  const { slug } = await (params as any);
 
-  const res = await fetch(
-    `${getServerBaseUrl()}/api/news/${encodeURIComponent(slug)}`,
-    { cache: 'no-store' }
-  );
+  // RELATIVE URL verwenden -> gleiche Origin (Vercel, Codespaces, lokal)
+  const res = await fetch(`/api/news/${encodeURIComponent(slug)}`, {
+    cache: 'no-store',
+  });
 
-  if (!res.ok) notFound();
+  if (!res.ok) {
+    console.error('API /api/news/[slug] status', res.status);
+    notFound();
+  }
 
   const { data } = (await res.json()) as { data: ApiData | null };
   if (!data) notFound();
@@ -66,7 +71,7 @@ export default async function Page({ params }: PageProps) {
           </div>
         )}
 
-        {(data.post_badges?.length ?? 0) > 0 && (
+        {!!(data.post_badges?.length ?? 0) && (
           <div className="flex flex-wrap gap-1.5">
             {data.post_badges!.map(({ badge }) => (
               <span
@@ -86,17 +91,21 @@ export default async function Page({ params }: PageProps) {
         <p className="text-lg text-gray-700 dark:text-gray-300">{data.summary}</p>
       )}
 
-      {/* Galerie (falls vorhanden) */}
       {!!data.images?.length && <Gallery images={data.images} />}
 
-      {/* Inhalt */}
+      {/* Inhalt: Du lieferst HTML; wenn du Markdown liefern willst, lass ReactMarkdown. */}
       {data.content && (
-        <article className="prose dark:prose-invert max-w-none prose-p:my-3 prose-li:my-1">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{data.content}</ReactMarkdown>
-        </article>
+        // Variante A (HTML, wie in deiner API):
+        <article
+          className="prose dark:prose-invert max-w-none prose-p:my-3 prose-li:my-1"
+          dangerouslySetInnerHTML={{ __html: data.content }}
+        />
+        // Variante B (Markdown): 
+        // <article className="prose dark:prose-invert max-w-none prose-p:my-3 prose-li:my-1">
+        //   <ReactMarkdown remarkPlugins={[remarkGfm]}>{data.content}</ReactMarkdown>
+        // </article>
       )}
 
-      {/* Kategorien */}
       {!!data.post_categories?.length && (
         <div className="flex flex-wrap gap-2">
           {data.post_categories!.map(({ category }) => (
@@ -116,7 +125,6 @@ export default async function Page({ params }: PageProps) {
         </div>
       )}
 
-      {/* Quellen */}
       {!!sources.length && (
         <section className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
           <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-2">Quellen</h2>
