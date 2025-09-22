@@ -116,10 +116,18 @@ export async function POST(req: NextRequest) {
     const base = slugify(title);
     let final = base;
 
-    const existing = await sql<{slug:string}[]>`
+    // ⬇️ Typalias für vorhandene Slugs
+    type Existing = { slug: string };
+
+    const existing = await sql<Existing[]>`
       select slug from public.events where slug like ${base + '%'}
     `;
-    const taken = new Set(existing.map(r => r.slug));
+
+    // ⬇️ map-Parameter explizit typisieren (fix für TS7006)
+    const taken = new Set(existing.map((r: Existing) => r.slug));
+    // alternativ ohne Callback-Typ:
+    // const taken = new Set(existing.map(({ slug }: Existing) => slug));
+
     if (taken.has(final)) { let i = 2; while (taken.has(`${base}-${i}`)) i++; final = `${base}-${i}`; }
 
     const [row] = await sql<any[]>`

@@ -61,6 +61,6 @@ const tag: Tag = (strings, ...values) => (ensure() as any)(strings, ...values);
 (tag as any).end    = () => (ensure() as any).end();
 
 // Exporte
-export const sql = tag as unknown as Sql<{}>;
+export const sql: any = ((...a:any[]) => (ensure() as any)(...a));
 // Nur json brauchen wir aktuell – array/file bitte weglassen (nicht alle Versionen haben das)
 export const sqlJson = (v: any) => (ensure() as any).json(v);

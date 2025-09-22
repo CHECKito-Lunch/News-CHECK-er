@@ -4,12 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import AdminTabs from '../shared/AdminTabs';
 import { authedFetch } from '@/lib/fetchWithSupabase';
 
-
 type Role = 'admin' | 'moderator' | 'user';
 
 type AppUser = {
   id: number;
-  user_id: string | null; 
+  user_id: string | null; // Supabase Auth UUID
   email: string;
   name: string | null;
   role: Role;
@@ -45,6 +44,276 @@ const btnBase =
 const btnPrimary =
   'px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium shadow disabled:opacity-50';
 
+/* ========= Pretty Switch ========= */
+function Switch({
+  checked,
+  onChange,
+  label,
+  className = '',
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  label?: string;
+  className?: string;
+}) {
+  return (
+    <label className={`inline-flex items-center gap-2 cursor-pointer ${className}`}>
+      {label && <span className="text-sm">{label}</span>}
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={() => onChange(!checked)}
+        className={`relative inline-flex h-6 w-11 items-center rounded-full transition
+          ${checked ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-700'}`}
+      >
+        <span
+          className={`h-5 w-5 transform rounded-full bg-white shadow transition
+            ${checked ? 'translate-x-5' : 'translate-x-1'}`}
+        />
+      </button>
+    </label>
+  );
+}
+
+/* ========= Group Modal (create & edit with members) ========= */
+function GroupModal({
+  open,
+  onClose,
+  group,
+  allUsers,
+  onSaved,
+}: {
+  open: boolean;
+  onClose: () => void;
+  group: Group | null;    // null = neu
+  allUsers: AppUser[];
+  onSaved: () => void;    // reload callback
+}) {
+  const creating = !group;
+
+  const [name, setName] = useState(group?.name ?? '');
+  const [desc, setDesc] = useState(group?.description ?? '');
+  const [isPrivate, setIsPrivate] = useState(!!group?.is_private);
+  const [password, setPassword] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  // Mitglieder (UUIDs)
+  const usersByUuid = useMemo(() => {
+    const m = new Map<string, AppUser>();
+    for (const u of allUsers) if (u.user_id) m.set(u.user_id, u);
+    return m;
+  }, [allUsers]);
+
+  const [memberUuids, setMemberUuids] = useState<string[]>([]);
+  const [filter, setFilter] = useState('');
+  const [loadingMembers, setLoadingMembers] = useState(false);
+
+  // Beim Öffnen/reset
+  useEffect(() => {
+    if (!open) return;
+    setName(group?.name ?? '');
+    setDesc(group?.description ?? '');
+    setIsPrivate(!!group?.is_private);
+    setPassword('');
+    setMemberUuids([]);
+    setFilter('');
+
+    if (group?.id) {
+      (async () => {
+        try {
+          setLoadingMembers(true);
+          const r = await authedFetch(`/api/admin/groups/${group.id}/members`);
+          const j = await r.json().catch(() => ({}));
+          const uuids: string[] = Array.isArray(j?.members)
+            ? j.members.map((m: any) => String(m.user_id)).filter(Boolean)
+            : [];
+          setMemberUuids(uuids);
+        } catch {
+          // still open modal with empty list
+        } finally {
+          setLoadingMembers(false);
+        }
+      })();
+    }
+  }, [open, group]);
+
+  const available = useMemo(() => {
+    const f = filter.trim().toLowerCase();
+    return allUsers
+      .filter((u) => u.user_id && !memberUuids.includes(u.user_id))
+      .filter((u) => {
+        if (!f) return true;
+        const hay = `${u.email} ${u.name ?? ''}`.toLowerCase();
+        return hay.includes(f);
+      });
+  }, [allUsers, memberUuids, filter]);
+
+  const selected = useMemo(
+    () => memberUuids.map((uuid) => usersByUuid.get(uuid)).filter((x): x is AppUser => !!x),
+    [memberUuids, usersByUuid]
+  );
+
+  function add(uuid: string) {
+    setMemberUuids((prev) => (prev.includes(uuid) ? prev : [...prev, uuid]));
+  }
+  function remove(uuid: string) {
+    setMemberUuids((prev) => prev.filter((x) => x !== uuid));
+  }
+
+  async function save() {
+    if (!name.trim()) {
+      alert('Name ist erforderlich.');
+      return;
+    }
+    setSaving(true);
+    try {
+      let groupId = group?.id ?? null;
+
+      // 1) Gruppe speichern/erstellen
+      {
+        const url = creating ? '/api/admin/groups' : `/api/admin/groups/${groupId}`;
+        const method = creating ? 'POST' : 'PATCH';
+        const body: any = {
+          name: name.trim(),
+          description: desc.trim() || null,
+          is_private: isPrivate,
+        };
+        if (password.trim()) body.password = password.trim();
+
+        const r = await authedFetch(url, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j?.error || 'Speichern fehlgeschlagen.');
+        if (creating) groupId = j?.id ?? j?.data?.id;
+      }
+
+      // 2) Mitglieder aktualisieren
+      if (groupId) {
+        const r2 = await authedFetch(`/api/admin/groups/${groupId}/members`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userIds: memberUuids }),
+        });
+        const j2 = await r2.json().catch(() => ({}));
+        if (!r2.ok) throw new Error(j2?.error || 'Mitglieder konnten nicht gespeichert werden.');
+      }
+
+      onSaved();
+      onClose();
+    } catch (e: any) {
+      alert(e?.message ?? 'Fehler beim Speichern');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="absolute inset-x-0 top-8 mx-auto max-w-5xl rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-xl">
+        <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+          <div className="text-lg font-semibold">
+            {creating ? 'Neue Gruppe' : `Gruppe bearbeiten: ${group?.name}`}
+          </div>
+          <div className="flex gap-2">
+            <button className={btnBase} onClick={onClose}>Schließen</button>
+            <button className={btnPrimary} onClick={save} disabled={saving}>
+              {saving ? 'Speichern…' : 'Speichern'}
+            </button>
+          </div>
+        </div>
+
+        <div className="p-5 grid md:grid-cols-2 gap-6">
+          {/* Form */}
+          <section className="space-y-3">
+            <div>
+              <label className="form-label">Name</label>
+              <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
+            </div>
+            <div>
+              <label className="form-label">Beschreibung</label>
+              <input className={inputClass} value={desc} onChange={(e) => setDesc(e.target.value)} />
+            </div>
+            <Switch checked={isPrivate} onChange={setIsPrivate} label="Privat (nur Einladung/Passwort)" />
+            <div>
+              <label className="form-label">Passwort (optional)</label>
+              <input
+                className={inputClass}
+                type="password"
+                placeholder="leer lassen = unverändert"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </div>
+          </section>
+
+          {/* Members */}
+          <section className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="font-medium">Mitglieder ({selected.length})</div>
+              <input
+                className={inputClass + ' max-w-[220px]'}
+                placeholder="Benutzer suchen…"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+              />
+            </div>
+            <div className="grid md:grid-cols-2 gap-3">
+              <div className="rounded-2xl border border-gray-200 dark:border-gray-800 p-3">
+                <div className="text-sm mb-2 text-gray-500">Verfügbar</div>
+                <div className="max-h-[260px] overflow-auto grid gap-2">
+                  {loadingMembers && <div className="text-sm text-gray-500">lädt…</div>}
+                  {!loadingMembers &&
+                    available.map((u) => (
+                      <button
+                        key={u.id}
+                        onClick={() => u.user_id && add(u.user_id)}
+                        className="flex items-center justify-between rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-white/10 px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-white/20"
+                      >
+                        <span className="truncate">
+                          <span className="font-medium">{u.name ?? u.email}</span>
+                          {u.name ? <span className="text-gray-500 ml-2">{u.email}</span> : null}
+                        </span>
+                        <span className="text-xs text-gray-500">hinzufügen</span>
+                      </button>
+                    ))}
+                  {!loadingMembers && available.length === 0 && (
+                    <div className="text-sm text-gray-500">Keine Treffer.</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-blue-200 dark:border-blue-900 p-3 bg-blue-50/40 dark:bg-blue-900/10">
+                <div className="text-sm mb-2 text-gray-500">Mitglied in der Gruppe</div>
+                <div className="max-h-[260px] overflow-auto grid gap-2">
+                  {selected.map((u) => (
+                    <div key={u.user_id ?? `x-${u.id}`} className="flex items-center justify-between rounded-xl border border-blue-200 dark:border-blue-900 bg-white dark:bg-white/10 px-3 py-2">
+                      <span className="truncate">
+                        <span className="font-medium">{u.name ?? u.email}</span>
+                        {u.name ? <span className="text-gray-500 ml-2">{u.email}</span> : null}
+                      </span>
+                      <button className="text-xs underline" onClick={() => u.user_id && remove(u.user_id!)}>
+                        entfernen
+                      </button>
+                    </div>
+                  ))}
+                  {selected.length === 0 && <div className="text-sm text-gray-500">Noch keine Mitglieder.</div>}
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ======================= MAIN PAGE ======================= */
 export default function UsersAdminPage() {
   // ---------- Users ----------
   const [users, setUsers] = useState<AppUser[]>([]);
@@ -68,18 +337,11 @@ export default function UsersAdminPage() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [gQ, setGQ] = useState('');
   const [gLoading, setGLoading] = useState(false);
-  const [gMsg, setGMsg] = useState('');
-  const [gName, setGName] = useState('');
-  const [gDesc, setGDesc] = useState('');
-  const [gPrivate, setGPrivate] = useState(false);
-  const [gPassword, setGPassword] = useState('');
-  const [gSaving, setGSaving] = useState(false);
-  const [gEditingId, setGEditingId] = useState<number | null>(null);
 
   // Dialog: User → Gruppen zuweisen
   const [assignOpen, setAssignOpen] = useState<null | { user: AppUser; groupIds: number[] }>(null);
 
-  // ⬇️ NEU: Einladungs-Modal
+  // Einladungs-Modal
   const [inviteOpen, setInviteOpen] = useState<null | {
     groupId: number | null;
     selectedIds: number[];
@@ -87,6 +349,12 @@ export default function UsersAdminPage() {
     filter: string;
     onlyPrivate: boolean;
   }>(null);
+
+  // Gruppenmodal (neu/ändern)
+  const [groupModal, setGroupModal] = useState<{ open: boolean; group: Group | null }>({
+    open: false,
+    group: null,
+  });
 
   const pages = useMemo(() => Math.max(1, Math.ceil(total / pageSize)), [total, pageSize]);
 
@@ -188,54 +456,6 @@ export default function UsersAdminPage() {
   }, []);
   useEffect(() => { loadGroups(); }, [loadGroups]);
 
-  function resetGroupForm() {
-    setGEditingId(null);
-    setGName('');
-    setGDesc('');
-    setGPrivate(false);
-    setGPassword('');
-    setGMsg('');
-  }
-
-  async function saveGroup() {
-    setGSaving(true); setGMsg('');
-    try {
-      const creating = gEditingId === null;
-      const url = creating ? '/api/admin/groups' : `/api/admin/groups/${gEditingId}`;
-      const method = creating ? 'POST' : 'PATCH';
-
-      const body: any = {
-        name: gName.trim(),
-        description: gDesc.trim() || null,
-        is_private: gPrivate,
-      };
-      if (gPassword.trim()) body.password = gPassword.trim();
-
-      const res = await authedFetch(url, {
-        method, headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(j.error || 'Fehler beim Speichern');
-      setGMsg(creating ? 'Gruppe angelegt.' : 'Aktualisiert.');
-      await loadGroups();
-      if (creating) resetGroupForm();
-    } catch (e: any) {
-      setGMsg(e?.message ?? 'Fehler');
-    } finally {
-      setGSaving(false);
-      setGPassword('');
-    }
-  }
-
-  async function deleteGroup(id: number) {
-    if (!confirm('Diese Gruppe löschen? (Mitgliedschaften werden entfernt)')) return;
-    const r = await authedFetch(`/api/admin/groups/${id}`, { method: 'DELETE' });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) { alert(j.error ?? 'Löschen fehlgeschlagen'); return; }
-    await loadGroups();
-  }
-
   // Dialog öffnen: Gruppen eines Users laden
   async function openAssign(u: AppUser) {
     const r = await authedFetch(`/api/admin/users/${u.id}/groups`);
@@ -258,22 +478,22 @@ export default function UsersAdminPage() {
 
   // Filter für Gruppenliste
   const gFiltered = useMemo(() => {
-    const q = gQ.trim().toLowerCase();
-    return !q ? groups : groups.filter(g => g.name.toLowerCase().includes(q) || (g.description ?? '').toLowerCase().includes(q));
+    const q2 = gQ.trim().toLowerCase();
+    return !q2 ? groups : groups.filter(g => g.name.toLowerCase().includes(q2) || (g.description ?? '').toLowerCase().includes(q2));
   }, [gQ, groups]);
 
-  // ⬇️ NEU: Einladungs-Modal öffnen
+  // Einladungs-Modal öffnen
   function openInviteForGroup(g?: Group) {
     setInviteOpen({
       groupId: g?.id ?? null,
       selectedIds: [],
       message: '',
       filter: '',
-      onlyPrivate: !!g?.is_private, // wenn von privater Gruppe ausgelöst, vorfiltern
+      onlyPrivate: !!g?.is_private,
     });
   }
 
-  // Hilfsfunktionen fürs DnD-Modal
+  // Hilfsfunktionen fürs Invite-Modal
   const allUsersById = useMemo(() => {
     const m = new Map<number, AppUser>();
     for (const u of users) m.set(u.id, u);
@@ -287,39 +507,38 @@ export default function UsersAdminPage() {
     setInviteOpen(prev => prev ? { ...prev, selectedIds: prev.selectedIds.filter(x => x !== id) } : prev);
   }
 
-async function sendInvites() {
-  if (!inviteOpen) return;
-  const groupId = inviteOpen.groupId;
-  if (!groupId) { alert('Bitte eine Zielgruppe auswählen.'); return; }
-  if (inviteOpen.selectedIds.length === 0) { alert('Bitte mindestens einen Empfänger auswählen.'); return; }
+  async function sendInvites() {
+    if (!inviteOpen) return;
+    const groupId = inviteOpen.groupId;
+    if (!groupId) { alert('Bitte eine Zielgruppe auswählen.'); return; }
+    if (inviteOpen.selectedIds.length === 0) { alert('Bitte mindestens einen Empfänger auswählen.'); return; }
 
-  // mappe numerische UI-IDs -> Supabase UUIDs
-  const selectedUuids = inviteOpen.selectedIds
-    .map(id => allUsersById.get(id)?.user_id || null)
-    .filter((x): x is string => !!x);
+    const selectedUuids = inviteOpen.selectedIds
+      .map(id => allUsersById.get(id)?.user_id || null)
+      .filter((x): x is string => !!x);
 
-  if (selectedUuids.length === 0) {
-    alert('Ausgewählte Benutzer haben keine verknüpfte Auth-ID (user_id).');
-    return;
+    if (selectedUuids.length === 0) {
+      alert('Ausgewählte Benutzer haben keine verknüpfte Auth-ID (user_id).');
+      return;
+    }
+
+    const r = await authedFetch(`/api/admin/groups/${groupId}/invite`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userIds: selectedUuids, message: inviteOpen.message || null })
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { alert(j.error || 'Einladungen konnten nicht gesendet werden.'); return; }
+    setInviteOpen(null);
+    alert('Einladungen verschickt.');
   }
 
-  const r = await authedFetch(`/api/admin/groups/${groupId}/invite`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userIds: selectedUuids, message: inviteOpen.message || null }) // ⬅️ UUIDs
-  });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) { alert(j.error || 'Einladungen konnten nicht gesendet werden.'); return; }
-  setInviteOpen(null);
-  alert('Einladungen verschickt.');
-}
-
-  // Listen fürs Modal
+  // Listen fürs Invite-Modal
   const modalAvailableUsers = useMemo(() => {
     if (!inviteOpen) return [];
     const f = inviteOpen.filter.trim().toLowerCase();
     return users
-    .filter(u => !!u.user_id) 
+      .filter(u => !!u.user_id)
       .filter(u => !inviteOpen.selectedIds.includes(u.id))
       .filter(u => {
         if (!f) return true;
@@ -380,9 +599,8 @@ async function sendInvites() {
               <option value="admin">Admin</option>
             </select>
           </div>
-          <div className="flex items-center gap-2">
-            <input id="active" type="checkbox" checked={fActive} onChange={(e) => setFActive(e.target.checked)} />
-            <label htmlFor="active" className="text-sm">Aktiv</label>
+          <div className="flex items-center gap-3">
+            <Switch checked={fActive} onChange={setFActive} label="Aktiv" />
           </div>
           {editingId === null && (
             <div className="md:col-span-2">
@@ -393,7 +611,6 @@ async function sendInvites() {
           <div className="flex gap-2 md:col-span-3">
             <button disabled={!fEmail || saving} onClick={save} className={btnPrimary} type="button">{saving ? 'Speichern…' : 'Speichern'}</button>
             <button onClick={resetForm} className={btnBase} type="button">Neu</button>
-            {/* ⬇️ Neu: Globaler Invite-Button (ohne vorgewählte Gruppe) */}
             <button className={btnBase} type="button" onClick={() => openInviteForGroup()}>
               Benutzer einladen…
             </button>
@@ -440,17 +657,15 @@ async function sendInvites() {
                       <td className="px-3 py-2 truncate max-w-[22ch]">{u.name ?? '—'}</td>
                       <td className="px-3 py-2">{u.role}</td>
                       <td className="px-3 py-2">
-                        <input
-                          type="checkbox"
+                        <Switch
                           checked={u.active}
-                          onChange={async (e) => {
-                            const newActive = e.target.checked;
+                          onChange={async (v) => {
                             const res = await authedFetch(`/api/admin/users/${u.id}`, {
                               method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ active: newActive }),
+                              body: JSON.stringify({ active: v }),
                             });
                             if (res.ok) {
-                              setUsers((prev) => prev.map((x) => (x.id === u.id ? { ...x, active: newActive } : x)));
+                              setUsers((prev) => prev.map((x) => (x.id === u.id ? { ...x, active: v } : x)));
                             } else {
                               const j = await res.json().catch(() => ({}));
                               alert(j.error ?? 'Aktualisierung fehlgeschlagen');
@@ -485,47 +700,13 @@ async function sendInvites() {
       <div className={cardClass + ' space-y-4'}>
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-lg font-semibold">Gruppen</h2>
-          <input className={inputClass + ' w-64'} placeholder="Gruppen suchen…" value={gQ} onChange={(e) => setGQ(e.target.value)} />
-        </div>
-
-        {/* Formular Gruppe */}
-        <div className="grid md:grid-cols-5 gap-3 items-end">
-          <div className="md:col-span-2">
-            <label className="form-label">Name</label>
-            <input value={gName} onChange={(e) => setGName(e.target.value)} className={inputClass} placeholder="z.B. Vertrieb, Redaktion…" />
-          </div>
-          <div className="md:col-span-2">
-            <label className="form-label">Beschreibung</label>
-            <input value={gDesc} onChange={(e) => setGDesc(e.target.value)} className={inputClass} placeholder="optional" />
-          </div>
-          <div className="md:col-span-1">
-            <label className="form-label">Privat</label>
-            <div className="flex items-center gap-2">
-              <input id="g-private" type="checkbox" checked={gPrivate} onChange={(e) => setGPrivate(e.target.checked)} />
-              <label htmlFor="g-private" className="text-sm">nur Einladung/Passwort</label>
-            </div>
-          </div>
-          <div className="md:col-span-2">
-            <label className="form-label">Passwort (optional)</label>
-            <input
-              value={gPassword}
-              onChange={(e) => setGPassword(e.target.value)}
-              className={inputClass}
-              placeholder="leer lassen = unverändert"
-              type="password"
-            />
-            <p className="text-xs text-gray-500 mt-1">
-              Wird nur gesetzt/aktualisiert, wenn ausgefüllt. Private Gruppen erscheinen nicht in der Profil-Auswahl.
-            </p>
-          </div>
-          <div className="flex gap-2 md:col-span-1">
-            <button className={btnPrimary} disabled={!gName || gSaving} onClick={saveGroup}>
-              {gSaving ? 'Speichern…' : (gEditingId ? 'Gruppe speichern' : 'Gruppe anlegen')}
+          <div className="flex items-center gap-2">
+            <input className={inputClass + ' w-64'} placeholder="Gruppen suchen…" value={gQ} onChange={(e) => setGQ(e.target.value)} />
+            <button className={btnPrimary} onClick={() => setGroupModal({ open: true, group: null })}>
+              Neue Gruppe
             </button>
-            <button className={btnBase} onClick={resetGroupForm}>Neu</button>
           </div>
         </div>
-        {gMsg && <div className="text-sm text-gray-600 dark:text-gray-300">{gMsg}</div>}
 
         {/* Liste Gruppen */}
         {gLoading ? (
@@ -550,17 +731,15 @@ async function sendInvites() {
                     <td className="px-3 py-2 text-gray-600 dark:text-gray-300">{g.description ?? '—'}</td>
                     <td className="px-3 py-2">{typeof g.memberCount === 'number' ? g.memberCount : '—'}</td>
                     <td className="px-3 py-2">
-                      <input
-                        type="checkbox"
+                      <Switch
                         checked={g.is_active !== false}
-                        onChange={async (e) => {
-                          const is_active = e.target.checked;
+                        onChange={async (v) => {
                           const r = await authedFetch(`/api/admin/groups/${g.id}`, {
                             method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ is_active })
+                            body: JSON.stringify({ is_active: v })
                           });
                           if (r.ok) {
-                            setGroups(prev => prev.map(x => x.id === g.id ? { ...x, is_active } : x));
+                            setGroups(prev => prev.map(x => x.id === g.id ? { ...x, is_active: v } : x));
                           } else {
                             const j = await r.json().catch(() => ({}));
                             alert(j.error ?? 'Aktualisierung fehlgeschlagen');
@@ -569,17 +748,15 @@ async function sendInvites() {
                       />
                     </td>
                     <td className="px-3 py-2">
-                      <input
-                        type="checkbox"
+                      <Switch
                         checked={!!g.is_private}
-                        onChange={async (e) => {
-                          const is_private = e.target.checked;
+                        onChange={async (v) => {
                           const r = await authedFetch(`/api/admin/groups/${g.id}`, {
                             method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ is_private })
+                            body: JSON.stringify({ is_private: v })
                           });
                           if (r.ok) {
-                            setGroups(prev => prev.map(x => x.id === g.id ? { ...x, is_private } : x));
+                            setGroups(prev => prev.map(x => x.id === g.id ? { ...x, is_private: v } : x));
                           } else {
                             const j = await r.json().catch(() => ({}));
                             alert(j.error ?? 'Aktualisierung fehlgeschlagen');
@@ -588,20 +765,17 @@ async function sendInvites() {
                       />
                     </td>
                     <td className="px-3 py-2 text-right space-x-2">
-                      <button
-                        className={btnBase}
-                        onClick={() => {
-                          setGEditingId(g.id);
-                          setGName(g.name);
-                          setGDesc(g.description ?? '');
-                          setGPrivate(!!g.is_private);
-                          setGPassword('');
-                        }}
-                      >
-                        Bearbeiten
-                      </button>
+                      <button className={btnBase} onClick={() => setGroupModal({ open: true, group: g })}>Bearbeiten</button>
                       <button className={btnBase} onClick={() => openInviteForGroup(g)}>Einladen</button>
-                      <button className={btnBase} onClick={() => deleteGroup(g.id)}>Löschen</button>
+                      <button className={btnBase} onClick={() => {
+                        if (!confirm('Diese Gruppe löschen? (Mitgliedschaften werden entfernt)')) return;
+                        authedFetch(`/api/admin/groups/${g.id}`, { method: 'DELETE' })
+                          .then(async (r) => {
+                            const j = await r.json().catch(() => ({}));
+                            if (!r.ok) { alert(j.error ?? 'Löschen fehlgeschlagen'); return; }
+                            loadGroups();
+                          });
+                      }}>Löschen</button>
                     </td>
                   </tr>
                 ))}
@@ -666,7 +840,7 @@ async function sendInvites() {
         </div>
       )}
 
-      {/* ---------- NEU: Einladungs-Modal ---------- */}
+      {/* ---------- Einladungs-Modal ---------- */}
       {inviteOpen && (
         <div className="fixed inset-0 z-50">
           <div className="absolute inset-0 bg-black/40" onClick={() => setInviteOpen(null)} />
@@ -764,10 +938,7 @@ async function sendInvites() {
                 <div className="flex items-center justify-between mb-2">
                   <h4 className="font-medium">Eingeladen ({modalSelectedUsers.length})</h4>
                   {modalSelectedUsers.length > 0 && (
-                    <button
-                      className="text-xs underline"
-                      onClick={() => setInviteOpen(prev => prev && ({ ...prev, selectedIds: [] }))}
-                    >
+                    <button className="text-xs underline" onClick={() => setInviteOpen(prev => prev && ({ ...prev, selectedIds: [] }))}>
                       Liste leeren
                     </button>
                   )}
@@ -808,6 +979,15 @@ async function sendInvites() {
           </div>
         </div>
       )}
+
+      {/* Gruppen-Modal mounten */}
+      <GroupModal
+        open={groupModal.open}
+        onClose={() => setGroupModal({ open: false, group: null })}
+        group={groupModal.group}
+        allUsers={users}
+        onSaved={() => { loadGroups(); load(); }}
+      />
     </div>
   );
 }

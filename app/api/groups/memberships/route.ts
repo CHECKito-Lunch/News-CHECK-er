@@ -17,7 +17,7 @@ type MembershipRow = {
 
 // GET: Liste + IDs (wie vorher, nur mit withAuth)
 export const GET = withAuth(async (_req, _ctx, me) => {
-  const rows = await sql<MembershipRow[]>`
+  const rows: MembershipRow[] = await sql<MembershipRow[]>`
     select m.group_id as "groupId",
            g.name     as "groupName",
            m.role,
@@ -27,7 +27,12 @@ export const GET = withAuth(async (_req, _ctx, me) => {
      where m.user_id = ${me.sub}::uuid
      order by g.name asc
   `;
-  return json({ ok: true, memberships: rows, groupIds: rows.map(r => r.groupId) });
+
+  return json({
+    ok: true,
+    memberships: rows,
+    groupIds: rows.map((r: MembershipRow) => r.groupId), // TS7006 fix
+  });
 });
 
 // POST: { groupId, action: 'join' | 'leave' }
@@ -60,7 +65,7 @@ export const POST = withAuth(async (req, _ctx, me) => {
 export const PUT = withAuth(async (req, _ctx, me) => {
   const body = await req.json().catch(() => ({} as any));
   const groupIds: number[] = Array.isArray(body?.groupIds)
-    ? body.groupIds.map((x: any) => Number(x)).filter(Number.isFinite)
+    ? body.groupIds.map((x: unknown) => Number(x)).filter(Number.isFinite)
     : [];
 
   if (groupIds.length === 0) return json({ ok: false, error: 'groupIds_required' }, 400);
@@ -68,22 +73,24 @@ export const PUT = withAuth(async (req, _ctx, me) => {
   const current = await sql<{ group_id: number }[]>`
     select group_id from group_members where user_id = ${me.sub}::uuid
   `;
-  const have = new Set(current.map(r => r.group_id));
-  const want = new Set(groupIds);
 
-  const toAdd = groupIds.filter(id => !have.has(id));
-  const toRemove = [...have].filter(id => !want.has(id));
+  // Typisiere Set explizit → keine impliziten any
+  const have = new Set<number>(current.map((r: { group_id: number }) => r.group_id));
+  const want = new Set<number>(groupIds);
+
+  const toAdd: number[] = groupIds.filter((id: number) => !have.has(id));
+  const toRemove: number[] = [...have].filter((id: number) => !want.has(id));
 
   if (toAdd.length) {
-  const tuples = toAdd.map(id =>
-    sql`(${id}, ${me.sub}::uuid, 'member', now())`
-  );
-  await sql`
-    insert into group_members (group_id, user_id, role, joined_at)
-    values ${sql(tuples)}
-    on conflict (group_id, user_id) do nothing
-  `;
-}
+    const tuples = toAdd.map((id: number) =>
+      sql`(${id}, ${me.sub}::uuid, 'member', now())`
+    );
+    await sql`
+      insert into group_members (group_id, user_id, role, joined_at)
+      values ${sql(tuples)}
+      on conflict (group_id, user_id) do nothing
+    `;
+  }
 
   if (toRemove.length) {
     await sql`

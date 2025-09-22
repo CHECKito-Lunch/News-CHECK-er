@@ -2,8 +2,27 @@
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-import { NextRequest, NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
+import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
+
+type CalendarRow = {
+  id: number;
+  slug: string;
+  title: string;
+  starts_at: string;             // ISO
+  ends_at: string | null;        // ISO | null
+};
+
+type FeedRow = {
+  id: number;
+  slug: string;
+  title: string;
+  summary: string | null;
+  starts_at: string;             // ISO
+  location: string | null;
+  hero_image_url: string | null;
+};
 
 /**
  * Unterstützte Modi:
@@ -27,7 +46,7 @@ export async function GET(req: NextRequest) {
       start.setHours(0, 0, 0, 0);
       const startIso = start.toISOString();
 
-      const rows = await sql<any[]>`
+      const rows: CalendarRow[] = await sql<CalendarRow[]>`
         select id, slug, title, starts_at, ends_at
         from public.events
         where status = 'published'
@@ -37,7 +56,7 @@ export async function GET(req: NextRequest) {
       `;
 
       // FullCalendar-Objekte (dein Style kommt aus der Komponente, Farben sind optional)
-      const events = rows.map(r => ({
+      const events = rows.map((r: CalendarRow) => ({
         title: `🟢 ${r.title}`,
         start: r.starts_at,
         end:   r.ends_at ?? undefined,
@@ -54,7 +73,7 @@ export async function GET(req: NextRequest) {
       // Für den Feed: veröffentlichte Events im Fenster [heute-60d .. Zukunft], sortiert nach Datum (neu/nah zuerst)
       const since = new Date(Date.now() - 1000 * 60 * 60 * 24 * 60).toISOString();
 
-      const rows = await sql<any[]>`
+      const rows: FeedRow[] = await sql<FeedRow[]>`
         select id, slug, title, summary, starts_at, location, hero_image_url
         from public.events
         where status = 'published'
@@ -67,7 +86,7 @@ export async function GET(req: NextRequest) {
     }
 
     // Fallback: einfache Liste (z. B. wenn jemand /api/events ohne Query aufruft)
-    const rows = await sql<any[]>`
+    const rows: FeedRow[] = await sql<FeedRow[]>`
       select id, slug, title, summary, starts_at, location, hero_image_url
       from public.events
       where status = 'published'

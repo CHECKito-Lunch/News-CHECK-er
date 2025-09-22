@@ -1,89 +1,101 @@
 // app/api/admin/groups/[id]/invite/route.ts
-import { NextRequest } from 'next/server';
-import { sql } from '@/lib/db';
-import { json } from '@/lib/auth-server';
-import { withModerator } from '@/lib/with-auth';
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-type RowUid = { user_id: string };
+import type { NextRequest } from "next/server";
+import { sql } from "@/lib/db";
+import { json } from "@/lib/auth-server";
+import { withModerator, getParamNumber } from "@/lib/with-auth";
 
-export const POST = withModerator(async (req: NextRequest, ctx, me) => {
-  // params robust (Next 15 kann Promise liefern)
-  const rawParams: any = (ctx as any)?.params;
-  const params = rawParams && typeof rawParams?.then === 'function' ? await rawParams : rawParams ?? {};
-  const groupId = Number(params?.id);
-  if (!Number.isFinite(groupId) || groupId <= 0) return json({ error: 'Ungültige groupId' }, 400);
+type CountRow = { n: number };
 
-  const body = await req.json().catch(() => ({} as any));
-  const message: string | null =
-    typeof body?.message === 'string' && body.message.trim() ? body.message.trim() : null;
-
-  const rawIds: any[] = Array.isArray(body?.userIds) ? body.userIds : [];
-  if (rawIds.length === 0) return json({ error: 'userIds erforderlich' }, 400);
-
-  // in UUIDs und numerische IDs aufteilen
-  const asText = rawIds.map((x) => String(x ?? '').trim()).filter(Boolean);
-  const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[089ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-  const uuids = Array.from(new Set(asText.filter((x) => uuidRe.test(x))));
-  const nums  = Array.from(new Set(asText.map((x) => Number(x)).filter(Number.isFinite)));
-
-  if (uuids.length === 0 && nums.length === 0) {
-    return json({ error: 'Keine gültigen Nutzer' }, 400);
-  }
-
-  // aktive Nutzer holen – einmal über user_id (UUID), einmal über id (int)
-  let rows: RowUid[] = [];
-  if (uuids.length) {
-    rows = rows.concat(await sql<RowUid[]>`
-      select user_id::text as user_id
-      from public.app_users
-      where active = true and user_id::text in ${sql(uuids)}
-    `);
-  }
-  if (nums.length) {
-    rows = rows.concat(await sql<RowUid[]>`
-      select user_id::text as user_id
-      from public.app_users
-      where active = true and id in ${sql(nums)}
-    `);
-  }
-
-  const validUids = Array.from(new Set(rows.map((r) => r.user_id)));
-  if (validUids.length === 0) {
-    return json({ error: 'Keine gültigen Nutzer' }, 400);
-  }
-
-  // bereits offene Einladungen ausfiltern
-  const existing = await sql<{ user_id: string }[]>`
-    select invited_user_id::text as user_id
-    from public.group_invitations
-    where group_id = ${groupId}
-      and invited_user_id::text in ${sql(validUids)}
-      and accepted_at is null and declined_at is null and revoked_at is null
-  `;
-  const existingSet = new Set(existing.map((r) => r.user_id));
-  const toInvite = validUids.filter((u) => !existingSet.has(u));
-
-  if (toInvite.length === 0) {
-    return json({ ok: true, invited: 0, skipped: { alreadyPending: existing.length } });
-  }
-
-  // Inserts (kurze TX, keine sql.join-Nutzung nötig)
-  await sql.begin(async (trx: any) => {
-    for (const uid of toInvite) {
-      await trx`
-        insert into public.group_invitations (group_id, invited_user_id, invited_by, message)
-        values (${groupId}, ${uid}::uuid, ${me.sub}::uuid, ${message})
-      `;
+// WICHTIG: 2. Argument als `any` typisieren, damit Nexts Checker zufrieden ist.
+export async function POST(
+  req: NextRequest,
+  ctx: any // eslint-disable-line @typescript-eslint/no-explicit-any
+) {
+  // Wrapper hier anwenden, damit die exportierte Signatur exakt passt.
+  return withModerator(async (req2, ctx2, me) => {
+    // groupId robust entpacken (Helper akzeptiert auch Promise-params)
+    const groupId = await getParamNumber(ctx2, "id");
+    if (!groupId || groupId <= 0) {
+      return json({ error: "Ungültige groupId" }, 400);
     }
-  });
 
-  return json({
-    ok: true,
-    invited: toInvite.length,
-    skipped: { alreadyPending: existing.length }
-  });
-});
+    // Body sicher narrieren
+    const body = (await req2.json().catch(() => ({}))) as {
+      userIds?: unknown[];
+      message?: unknown;
+    };
+
+    const message =
+      typeof body?.message === "string" && body.message.trim()
+        ? body.message.trim()
+        : null;
+
+    const raw = Array.isArray(body?.userIds) ? body!.userIds! : [];
+    if (raw.length === 0) return json({ error: "userIds erforderlich" }, 400);
+
+    const texts = raw.map((x) => String(x ?? "").trim()).filter(Boolean);
+
+    const uuidRe =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[089ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+    const uuids = Array.from(new Set(texts.filter((t) => uuidRe.test(t))));
+    const ints = Array.from(
+      new Set(
+        texts
+          .map((t) => Number(t))
+          .filter((n): n is number => Number.isFinite(n))
+      )
+    );
+
+    if (uuids.length === 0 && ints.length === 0) {
+      return json({ error: "Keine gültigen Nutzer" }, 400);
+    }
+
+    // Bedingten WHERE-Block bauen (als SQL-Fragment)
+    const whereFragment =
+      uuids.length && ints.length
+        ? sql`(u.user_id::text in ${sql(uuids)} or u.id in ${sql(ints)})`
+        : uuids.length
+        ? sql`(u.user_id::text in ${sql(uuids)})`
+        : sql`(u.id in ${sql(ints)})`;
+
+    // Ein einziges Insert über SELECT, vermeidet N Einzel-Statements
+    const rows = await sql<CountRow[]>`
+      with candidates as (
+        select u.user_id
+        from public.app_users u
+        where u.active = true
+          and ${whereFragment}
+      ),
+      ins as (
+        insert into public.group_invitations (group_id, invited_user_id, invited_by, message)
+        select ${groupId}, c.user_id, ${me.sub}::uuid, ${message}
+        from candidates c
+        where not exists (
+          select 1
+          from public.group_invitations gi
+          where gi.group_id = ${groupId}
+            and gi.invited_user_id = c.user_id
+            and gi.accepted_at is null
+            and gi.declined_at is null
+            and gi.revoked_at  is null
+        )
+        returning 1
+      )
+      select count(*)::int as n from ins
+    `;
+
+    const invited = rows[0]?.n ?? 0;
+    return json({ ok: true, invited });
+  })(req, ctx);
+}
 
 export function GET() {
-  return new Response('Method Not Allowed', { status: 405, headers: { Allow: 'POST' } });
+  return new Response("Method Not Allowed", {
+    status: 405,
+    headers: { Allow: "POST" },
+  });
 }

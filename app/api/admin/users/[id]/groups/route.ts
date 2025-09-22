@@ -38,10 +38,11 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: false, error: 'user_uuid_not_found' }, { status: 404 });
   }
 
-  const rows = await sql<{ group_id: string | number }[]>`
+  type Row = { group_id: number | string };
+  const rows: Row[] = await sql<Row[]>`
     select group_id from public.group_members where user_id = ${userUuid}
   `;
-  const groupIds = rows.map(r => Number(r.group_id));
+  const groupIds: number[] = rows.map((r: Row) => Number(r.group_id));
 
   return NextResponse.json({ ok: true, groupIds });
 }
@@ -64,7 +65,7 @@ export async function PUT(request: Request) {
     : [];
 
   try {
-    await sql.begin(async (tx) => {
+    await sql.begin(async (tx: any) => {
       // Alles entfernen …
       await tx`delete from public.group_members where user_id = ${userUuid}`;
 

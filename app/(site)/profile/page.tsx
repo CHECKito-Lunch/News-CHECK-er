@@ -399,14 +399,23 @@ function TeamsAndGroups() {
           return;
         }
 
-        const gJ = await gRes.json().catch(() => ({}));
-        const openGroups: Group[] = Array.isArray(gJ?.data) ? gJ.data : Array.isArray(gJ) ? gJ : [];
+       const gJ = await gRes.json().catch(() => ({}));
+const openGroups: Group[] =
+  Array.isArray(gJ?.data)   ? gJ.data :
+  Array.isArray(gJ?.groups) ? gJ.groups :
+  Array.isArray(gJ?.items)  ? gJ.items :
+  Array.isArray(gJ)         ? gJ : [];
 
-        const mJ = await mRes.json().catch(() => ({}));
-        let memberIds: number[] = [];
-        if (Array.isArray(mJ)) memberIds = mJ as number[];
-        else if (Array.isArray(mJ?.groupIds)) memberIds = mJ.groupIds as number[];
-        else memberIds = openGroups.filter(g => !!g.isMember).map(g => g.id);
+const mJ = await mRes.json().catch(() => ({}));
+let memberIds: number[] = [];
+if (Array.isArray(mJ)) memberIds = mJ as number[];
+else if (Array.isArray(mJ?.groupIds)) memberIds = mJ.groupIds as number[];
+else if (Array.isArray(mJ?.memberships))
+  memberIds = mJ.memberships
+    .map((x: any) => Number(x.groupId))
+    .filter(Number.isFinite);
+else
+  memberIds = openGroups.filter(g => !!g.isMember).map(g => g.id);
 
         const missingIds = memberIds.filter(id => !openGroups.some(g => g.id === id));
         const closedGroups = await fetchClosedGroupsByIds(missingIds);

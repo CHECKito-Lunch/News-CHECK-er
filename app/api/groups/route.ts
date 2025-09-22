@@ -1,37 +1,110 @@
 // app/api/groups/route.ts
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-import type { NextRequest } from 'next/server';
-import { NextResponse } from 'next/server';
-import { sql } from '@/lib/db';
-import { requireUser } from '@/lib/auth-server';
-const json = (d:any, s=200) => NextResponse.json(d,{status:s});
+import type { NextRequest } from "next/server";
+import { NextResponse } from "next/server";
+import { sql } from "@/lib/db";
+import { maybeUser } from "@/lib/auth-server";
+
+const json = <T,>(d: T, s = 200) => NextResponse.json<T>(d, { status: s });
+
+type Row = {
+  id: number;
+  name: string;
+  description: string | null;
+  is_private: boolean;
+  is_active: boolean;
+  member_count: number;
+  is_member: boolean;
+};
 
 export async function GET(req: NextRequest) {
-  try {
-    const me = await requireUser(req);
+  const me = await maybeUser(req);               // kann null sein
+  const userId = me?.sub ?? "";                  // für EXISTS/compare
+  const url = new URL(req.url);
+  const idsParam = url.searchParams.get("ids");
 
-    const rows = await sql<any[]>`
-      with mc as (
-        select group_id, count(*)::int as member_count
-          from public.group_members
-         group by group_id
-      )
-      select g.id, g.name, g.description,
-             coalesce(mc.member_count,0) as "memberCount",
-             true as "isMember"
-        from public.group_members m
-        join public.groups g on g.id = m.group_id
-   left join mc on mc.group_id = g.id
-       where m.user_id = ${me.sub}::uuid
-       order by g.name asc
+  // --- 1) Explizite IDs: immer zurückgeben (auch private), wenn aktiv ---
+  if (idsParam) {
+    const ids: number[] = idsParam
+      .split(",")
+      .map((s) => Number(s.trim()))
+      .filter(Number.isFinite);
+
+    if (ids.length === 0) return json({ ok: true, data: [] as const });
+
+    const rows = await sql<Row[]>`
+      select
+        g.id, g.name, g.description, g.is_private, g.is_active,
+        coalesce(c.cnt, 0)::int as member_count,
+        exists (
+          select 1 from public.group_members m
+          where m.group_id = g.id and m.user_id::text = ${userId}
+        ) as is_member
+      from public.groups g
+      left join (
+        select group_id, count(*)::int as cnt
+        from public.group_members
+        group by group_id
+      ) c on c.group_id = g.id
+      where g.id in ${sql(ids)} and g.is_active = true
+      order by g.name asc
     `;
 
-    return json({ ok:true, data: rows });
-  } catch (e:any) {
-    if (e?.message === 'unauthorized') return json({ ok:false, error:'unauthorized', data: [] }, 200);
-    console.error('[groups GET]', e);
-    return json({ ok:true, data: [] }, 200);
+    const data = rows.map((r: Row) => ({
+      id: r.id,
+      name: r.name,
+      description: r.description,
+      memberCount: r.member_count,
+      isMember: r.is_member,
+      is_private: r.is_private,
+    }));
+    return json({ ok: true, data });
   }
+
+  // --- 2) Standardliste: öffentlich + meine (auch private) ---
+  const rows = await sql<Row[]>`
+    with pub as (
+      select g.*
+      from public.groups g
+      where g.is_active = true and g.is_private = false
+    ),
+    mine as (
+      select g.*
+      from public.groups g
+      join public.group_members m on m.group_id = g.id
+      where g.is_active = true and m.user_id::text = ${userId}
+    ),
+    all_g as (
+      select * from pub
+      union
+      select * from mine
+    ),
+    counts as (
+      select group_id, count(*)::int as cnt
+      from public.group_members
+      group by group_id
+    )
+    select
+      g.id, g.name, g.description, g.is_private, g.is_active,
+      coalesce(c.cnt, 0)::int as member_count,
+      exists (
+        select 1 from public.group_members m
+        where m.group_id = g.id and m.user_id::text = ${userId}
+      ) as is_member
+    from all_g g
+    left join counts c on c.group_id = g.id
+    order by g.name asc
+  `;
+
+  const data = rows.map((r: Row) => ({
+    id: r.id,
+    name: r.name,
+    description: r.description,
+    memberCount: r.member_count,
+    isMember: r.is_member,
+  }));
+
+  return json({ ok: true, data });
 }

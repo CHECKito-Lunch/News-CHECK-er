@@ -17,7 +17,7 @@ type Row = {
 };
 
 export const GET = withAuth(async (_req, _ctx, me) => {
-  const rows = await sql<Row[]>`
+  const rows: Row[] = await sql<Row[]>`
     select
       g.id,
       g.name,
@@ -40,6 +40,6 @@ export const GET = withAuth(async (_req, _ctx, me) => {
   return json({
     ok: true,
     data: rows,
-    groupIds: rows.map(r => r.id),
+    groupIds: rows.map((r: Row) => r.id), // TS7006 fix
   });
 });
