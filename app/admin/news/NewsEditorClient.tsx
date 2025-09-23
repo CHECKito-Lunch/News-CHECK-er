@@ -11,14 +11,30 @@ import type { Option, SourceRow, PostRow } from '../shared/types';
 import RichTextEditor from '../../components/RichTextEditor';
 
 type ImageRow = {
-  url: string;
-  caption?: string | null;
-  // `path` kommt vom Upload-Endpunkt zurück (praktisch für DELETE).
-  path?: string | null;
+  url: string;                 // für Preview im Editor
+  path?: string | null;        // Pfad im Bucket (wird in DB gespeichert)
+  caption?: string | null;     // Editor-Label -> DB: title
   sort_order?: number | null;
 };
 
 const EMOJI_CHOICES = ['📌','📅','🗓️','📣','📊','📝','🧑‍💻','🤝','☕','🎉','🛠️','🧪'];
+
+// ----- Helpers -----
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
+
+function publicUrlFromPath(path?: string | null, bucket = 'uploads'): string {
+  if (!path) return '';
+  if (!SUPABASE_URL) return ''; // Fallback: kein Preview möglich, aber Speichern geht
+  // https://<project>.supabase.co/storage/v1/object/public/<bucket>/<path>
+  return `${SUPABASE_URL.replace(/\/+$/,'')}/storage/v1/object/public/${bucket}/${path.replace(/^\/+/,'')}`;
+}
+
+// Public-URL → Bucket-Pfad extrahieren (falls Upload-API mal kein path liefert)
+function guessPathFromUrl(url: string): string | null {
+  // .../storage/v1/object/public/<bucket>/<path>
+  const m = url.match(/\/storage\/v1\/object\/public\/[^/]+\/(.+)$/);
+  return m?.[1] ?? null;
+}
 
 export default function NewsEditorClient() {
   const { loading, sessionOK, isAdmin, authMsg, setAuthMsg, userEmail, setUserEmail, userPassword, setUserPassword, doLogin } = useAdminAuth();
@@ -60,8 +76,9 @@ export default function NewsEditorClient() {
     (async () => {
       const res = await fetch(`/api/admin/posts/${editIdFromUrl}`, { credentials:'same-origin' });
       const json = await res.json().catch(()=>({}));
-      const p: PostRow & { images?: ImageRow[] } | undefined = json?.data;
+      const p: (PostRow & { images?: any[] }) | undefined = json?.data;
       if (!p) return;
+
       setEditingId(p.id);
       setTitle(p.title ?? ''); setSlug(p.slug ?? ''); setSummary(p.summary ?? ''); setContent(p.content ?? '');
       // @ts-ignore vendor_id steckt in PostRow
@@ -73,9 +90,22 @@ export default function NewsEditorClient() {
       // @ts-ignore
       setBadgeIds((p as any).badges?.map((b:any)=>b.id) ?? []);
       setSources(((p as any).sources ?? []).map((s:any) => ({ url:s.url, label:s.label ?? '' })) || [{ url:'', label:'' }]);
-      setImages(Array.isArray((p as any).images) ? (p as any).images.map((im:ImageRow, i:number)=>({
-        url: im.url, caption: im.caption ?? '', path: im.path ?? null, sort_order: im.sort_order ?? i
-      })) : []);
+
+      // Bilder aus Admin-Detail: robust auf beiden Formaten
+      // Variante A (API liefert url/caption/sort_order)
+      // Variante B (API liefert path/title/sort_order)
+      const imgs = Array.isArray((p as any).images) ? (p as any).images : [];
+      const norm: ImageRow[] = imgs.map((im: any, i: number) => {
+        const path = (im.path ?? null) as string | null;
+        const url  = im.url ?? publicUrlFromPath(path) ?? '';
+        return {
+          url,
+          path,
+          caption: im.caption ?? im.title ?? '',
+          sort_order: Number.isFinite(im.sort_order) ? im.sort_order : i,
+        };
+      });
+      setImages(norm);
       setResult('');
     })();
   }, [editIdFromUrl, sessionOK, isAdmin]);
@@ -135,8 +165,14 @@ export default function NewsEditorClient() {
         const folder = `news/${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}`;
         fd.append('folder', folder);
         // -> Upload
-        const j = await uploadToApi(fd);
-        next.push({ url: j.url, path: j.path ?? null, caption: '', sort_order: (images.length + next.length - 1) });
+        const j = await uploadToApi(fd); // { url, path? }
+        const path = j.path ?? guessPathFromUrl(j.url) ?? null;
+        next.push({
+          url: j.url,
+          path,
+          caption: '',
+          sort_order: images.length + next.length - 1,
+        });
       }
       setImages(prev => {
         const merged = [...prev, ...next].map((im, i) => ({ ...im, sort_order: i }));
@@ -176,7 +212,18 @@ export default function NewsEditorClient() {
 
     const now = new Date();
     const effIso = effectiveFrom ? fromLocalInput(effectiveFrom) : null;
-    const finalStatus: PostRow['status'] = isDraft ? 'draft' : (effIso && new Date(effIso).getTime() > now.getTime()) ? 'scheduled' : 'published';
+    const finalStatus: PostRow['status'] = isDraft
+      ? 'draft'
+      : (effIso && new Date(effIso).getTime() > now.getTime())
+        ? 'scheduled'
+        : 'published';
+
+    // Für DB: { path, title, sort_order }
+    const imagesForDb = images.map((im, i) => ({
+      path: im.path ?? guessPathFromUrl(im.url),                    // **Pfad** in Storage
+      title: (im.caption ?? '').trim() || null,                     // DB-Spalte "title"
+      sort_order: Number.isFinite(im.sort_order) ? im.sort_order! : i,
+    })).filter(x => !!x.path); // nur mit gültigem path speichern
 
     const payload: any = {
       post: {
@@ -188,20 +235,30 @@ export default function NewsEditorClient() {
       },
       categoryIds,
       badgeIds,
-      sources: sources.map((s,i)=>({ url:s.url.trim(), label:s.label?.trim() || null, sort_order:i })).filter(s=>s.url),
-      // >>> Bilder an API übergeben
-      images: images.map((im, i) => ({ url: im.url, caption: (im.caption ?? '').trim() || null, sort_order: i })),
+      sources: sources
+        .map((s,i)=>({ url:s.url.trim(), label:s.label?.trim() || null, sort_order:i }))
+        .filter(s=>s.url),
+      // >>> Bilder an API übergeben – für post_images
+      images: imagesForDb,
     };
 
     const url = editingId ? `/api/admin/posts/${editingId}` : '/api/news/admin';
     const method = editingId ? 'PATCH' : 'POST';
 
     try {
-      const res = await fetch(url, { method, headers:{ 'Content-Type':'application/json' }, credentials:'same-origin', body: JSON.stringify(payload) });
+      const res = await fetch(url, {
+        method,
+        headers:{ 'Content-Type':'application/json' },
+        credentials:'same-origin',
+        body: JSON.stringify(payload)
+      });
       const json = await res.json().catch(()=>({}));
       if (!res.ok) setResult(`Fehler: ${json.error || 'unbekannt'}`);
       else {
-        const statusMsg = finalStatus === 'draft' ? 'als Entwurf gespeichert.' : finalStatus === 'scheduled' ? 'geplant (sichtbar ab „gültig ab …“).' : 'veröffentlicht.';
+        const statusMsg =
+          finalStatus === 'draft'     ? 'als Entwurf gespeichert.' :
+          finalStatus === 'scheduled' ? 'geplant (sichtbar ab „gültig ab …“).' :
+                                        'veröffentlicht.';
         setResult(`${editingId ? 'Aktualisiert' : 'Gespeichert'} – ${statusMsg} ${json.id ? `ID: ${json.id}` : ''}${json.slug ? `, /news/${json.slug}` : ''}`);
         if (!editingId) resetForm();
       }
@@ -321,7 +378,7 @@ export default function NewsEditorClient() {
                     {/* Preview */}
                     <div className="w-24 h-20 overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700 bg-white/50 dark:bg-white/10">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={im.url} alt="" className="w-full h-full object-cover" />
+                      <img src={im.url || publicUrlFromPath(im.path)} alt="" className="w-full h-full object-cover" />
                     </div>
 
                     {/* Caption */}
