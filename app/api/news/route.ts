@@ -20,12 +20,19 @@ type PostRow = {
   post_categories: { post_id: number; category: { id: number; name: string; color: string | null } }[];
   post_badges:     { post_id: number; badge:    { id: number; name: string; color: string | null; kind: string | null } }[];
   sources:         { url: string; label: string | null; sort_order: number | null }[];
-  images:          { path: string; title: string | null; sort_order: number | null }[]; // NEU
+  images:          { path: string; title: string | null; sort_order: number | null }[];
 };
+
 type AppUserRow = { user_id: string; name: string | null };
-type AugmentedPostRow = PostRow & { author_name: string | null };
+
+/** Rückgabe-Typ mit aufgelösten Bild-URLs */
+type AugmentedPostRow = Omit<PostRow, 'images'> & {
+  author_name: string | null;
+  images: { url: string; caption: string | null; sort_order: number | null }[];
+};
 
 const AGENT_BADGE_NAME = '⚡ Agent';
+const UPLOAD_BUCKET = process.env.NEXT_PUBLIC_SUPABASE_UPLOAD_BUCKET || 'uploads';
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
@@ -71,7 +78,7 @@ export async function GET(req: NextRequest) {
     post_categories ( post_id, category:category_id ( id, name, color ) ),
     post_badges     ( post_id, badge:badge_id ( id, name, color, kind ) ),
     sources:post_sources ( url, label, sort_order ),
-    images:post_images ( path, title, sort_order )  -- NEU
+    images:post_images ( path, title, sort_order )
   `;
   if (categoryFilterIds.length) selectStr = selectStr.replace('post_categories (', 'post_categories!inner(');
   if (badgeFilterIds.length)    selectStr = selectStr.replace('post_badges     (', 'post_badges!inner(');
@@ -99,6 +106,7 @@ export async function GET(req: NextRequest) {
 
   const rows: PostRow[] = Array.isArray(data) ? (data as any) : [];
 
+  // Autorennamen auflösen
   const authorIds = Array.from(new Set(rows.map(r => r.author_id).filter((v): v is string => !!v)));
   let nameByUserId = new Map<string, string>();
   if (authorIds.length) {
@@ -106,11 +114,24 @@ export async function GET(req: NextRequest) {
     if (Array.isArray(usersRaw)) nameByUserId = new Map((usersRaw as AppUserRow[]).map(u => [u.user_id, u.name ?? '']));
   }
 
-  const withAuthor: AugmentedPostRow[] = rows.map(r => ({
-    ...r,
-    images: (r.images || []).sort((a,b)=>(a.sort_order??0)-(b.sort_order??0)),
-    author_name: r.author_id ? (nameByUserId.get(r.author_id) ?? null) : null,
-  }));
+  // Storage Public-URLs auflösen
+  const storage = supabase.storage.from(UPLOAD_BUCKET);
+
+  const withAuthor: AugmentedPostRow[] = rows.map(r => {
+    const sorted = (r.images || []).slice().sort((a,b)=>(a.sort_order ?? 0) - (b.sort_order ?? 0));
+    const images = sorted
+      .map(im => {
+        const url = im?.path ? storage.getPublicUrl(im.path).data.publicUrl : null;
+        return url ? { url, caption: im.title ?? null, sort_order: im.sort_order ?? null } : null;
+      })
+      .filter((x): x is { url: string; caption: string | null; sort_order: number | null } => !!x);
+
+    return {
+      ...r,
+      images,
+      author_name: r.author_id ? (nameByUserId.get(r.author_id) ?? null) : null,
+    };
+  });
 
   return NextResponse.json({ data: withAuthor, page, pageSize, total: count ?? 0 });
 }
@@ -124,7 +145,7 @@ type Body = {
   categoryIds?: number[];
   badgeIds?: number[];
   sources?: { url: string; label?: string | null; sort_order?: number }[];
-  images?:  { path: string; title?: string | null; sort_order?: number }[]; // NEU
+  images?:  { path: string; title?: string | null; sort_order?: number }[];
 };
 
 export async function POST(req: NextRequest) {
@@ -159,7 +180,9 @@ export async function POST(req: NextRequest) {
     if (e3) return NextResponse.json({ error: e3.message }, { status: 500 });
   }
   if (images.length) {
-    const rows = images.filter(x=>x.path?.trim()).map((x,i)=>({ post_id, path:x.path.trim(), title:x.title ?? null, sort_order:x.sort_order ?? i }));
+    const rows = images
+      .filter(x=>x.path?.trim())
+      .map((x,i)=>({ post_id, path:x.path.trim(), title:x.title ?? null, sort_order:x.sort_order ?? i }));
     const { error: e4 } = await s.from('post_images').insert(rows);
     if (e4) return NextResponse.json({ error: e4.message }, { status: 500 });
   }
@@ -177,7 +200,7 @@ export async function POST(req: NextRequest) {
       categories: { added: categoryIds, removed: [] },
       badges: { added: badgeIds, removed: [] },
       sources: { added: sources.map(s => s.url), removed: [] },
-      images:  { added: images.map(i => i.path), removed: [] } // NEU
+      images:  { added: images.map(i => i.path), removed: [] }
     },
   });
 
