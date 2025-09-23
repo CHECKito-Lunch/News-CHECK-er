@@ -1,141 +1,61 @@
-// app/api/events/[id]/rsvp/route.ts
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
-
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies as getCookies } from 'next/headers';
-import { sql } from '@/lib/db';
+import { supabaseServer } from '@/lib/supabase-server';
+import { getUserFromRequest } from '@/lib/getUserFromRequest';
 
-type State = 'confirmed' | 'waitlist';
-const json = (data: any, status = 200) => NextResponse.json(data, { status });
+type State = 'none' | 'confirmed' | 'waitlist';
 
-// URL-Helfer: .../api/events/:id/rsvp  -> number | null
-function extractId(url: string): number | null {
-  try {
-    const parts = new URL(url).pathname.split('/').filter(Boolean);
-    // [..., 'events', ':id', 'rsvp']
-    const idStr = parts[parts.length - 2];
-    const id = Number(idStr);
-    return Number.isFinite(id) ? id : null;
-  } catch {
-    return null;
-  }
+export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
+  const s = await supabaseServer();
+  const user = await getUserFromRequest();
+  if (!user) return NextResponse.json({ ok: false }, { status: 401 });
+
+  const event_id = Number(params.id);
+  const { data } = await s
+    .from('event_registrations')
+    .select('state')
+    .eq('event_id', event_id)
+    .eq('user_id', user.id) // RLS + Cast in Policy
+    .maybeSingle();
+
+  return NextResponse.json({ ok: true, state: (data?.state as State) ?? 'none' });
 }
 
-async function getUserIdFromCookies(): Promise<string | null> {
-  try {
-    const c = await getCookies();
+export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+  const s = await supabaseServer();
+  const user = await getUserFromRequest();
+  if (!user) return NextResponse.json({ ok: false }, { status: 401 });
 
-    // 1) bevorzugt explizites user_id-Cookie
-    const uid = c.get('user_id')?.value || null;
-    if (uid) return uid;
-
-    // 2) Fallback: aus "auth" (Supabase access_token) die sub extrahieren
-    const auth = c.get('auth')?.value;
-    if (!auth || !auth.includes('.')) return null;
-
-    try {
-      const payloadB64 = auth.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-      const payloadJson = Buffer.from(payloadB64, 'base64').toString('utf8');
-      const payload = JSON.parse(payloadJson);
-      const sub = typeof payload?.sub === 'string' ? payload.sub : null;
-      return sub || null;
-    } catch {
-      return null;
-    }
-  } catch {
-    return null;
-  }
-}
-
-async function getCounts(eid: number) {
-  const [row] = await sql<{ confirmed_count: number; waitlist_count: number }[]>`
-    SELECT
-      COUNT(*) FILTER (WHERE er.state = 'confirmed') AS confirmed_count,
-      COUNT(*) FILTER (WHERE er.state NOT IN ('confirmed','cancelled')) AS waitlist_count
-    FROM public.event_registrations er
-    WHERE er.event_id = ${eid}
-  `;
-  return {
-    confirmed_count: Number(row?.confirmed_count ?? 0),
-    waitlist_count: Number(row?.waitlist_count ?? 0),
-  };
-}
-
-// ------- GET: Status des eingeloggten Nutzers für dieses Event -------
-export async function GET(req: NextRequest) {
-  const eid = extractId(req.url);
-  if (eid === null) return json({ ok: false, error: 'invalid_id' }, 400);
-
-  const userId = await getUserIdFromCookies();
-  if (!userId) return json({ ok: false, error: 'unauthorized' }, 401);
-
-  const [row] = await sql<{ state: string }[]>`
-    SELECT state
-    FROM public.event_registrations
-    WHERE event_id = ${eid} AND user_id = ${userId}
-    LIMIT 1
-  `;
-  return json({ ok: true, state: (row?.state ?? 'none') });
-}
-
-// ------- POST: join/leave -------
-export async function POST(req: NextRequest) {
-  const eid = extractId(req.url);
-  if (eid === null) return json({ ok: false, error: 'invalid_id' }, 400);
-
-  const userId = await getUserIdFromCookies();
-  if (!userId) return json({ ok: false, error: 'unauthorized' }, 401);
-
-  let body: any = {};
-  try { body = await req.json(); } catch {}
-
-  const action = String(body?.action ?? '');
-  if (action !== 'join' && action !== 'leave') {
-    return json({ ok: false, error: 'invalid_action' }, 400);
-  }
-
-  // Event (für capacity)
-  const [ev] = await sql<{ capacity: number | null }[]>`
-    SELECT capacity FROM public.events WHERE id = ${eid} LIMIT 1
-  `;
-  if (!ev) return json({ ok: false, error: 'event_not_found' }, 404);
+  const event_id = Number(params.id);
+  const { action } = await req.json().catch(() => ({} as any)); // 'join' | 'leave' | 'waitlist'
 
   if (action === 'leave') {
-    await sql`
-      DELETE FROM public.event_registrations
-      WHERE event_id = ${eid} AND user_id = ${userId}
-    `;
-    const after = await getCounts(eid);
-    return json({
-      ok: true,
-      state: 'none',
-      confirmed_count: after.confirmed_count,
-      waitlist_count: after.waitlist_count,
-      notice: 'Abmeldung gespeichert.',
-    });
+    await s.from('event_registrations')
+      .delete()
+      .eq('event_id', event_id)
+      .eq('user_id', user.id);
+    return NextResponse.json({ ok: true, state: 'none' });
   }
 
-  // action === 'join'
-  const counts = await getCounts(eid);
-  const isFull = ev.capacity != null && counts.confirmed_count >= Number(ev.capacity);
-  const targetState: State = isFull ? 'waitlist' : 'confirmed';
+  // Kapazität prüfen
+  let nextState: State = 'confirmed';
+  const { data: ev } = await s.from('events').select('capacity').eq('id', event_id).maybeSingle();
+  if (ev?.capacity != null) {
+    const { count } = await s
+      .from('event_registrations')
+      .select('user_id', { count: 'exact', head: true })
+      .eq('event_id', event_id)
+      .eq('state', 'confirmed');
+    if ((count ?? 0) >= ev.capacity) nextState = 'waitlist';
+  }
 
-  await sql`
-    INSERT INTO public.event_registrations (event_id, user_id, state)
-    VALUES (${eid}, ${userId}, ${targetState})
-    ON CONFLICT (event_id, user_id) DO UPDATE
-      SET state = EXCLUDED.state
-  `;
+  if (action === 'waitlist') nextState = 'waitlist';
 
-  const after = await getCounts(eid);
-  return json({
-    ok: true,
-    state: targetState,
-    confirmed_count: after.confirmed_count,
-    waitlist_count: after.waitlist_count,
-    notice: isFull
-      ? 'Event ist voll – du bist auf der Warteliste. :)'
-      : 'Du bist angemeldet.',
-  });
+  // Upsert
+  const { error } = await s.from('event_registrations').upsert(
+    { event_id, user_id: user.id, state: nextState, updated_at: new Date().toISOString() },
+    { onConflict: 'event_id,user_id' },
+  );
+  if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+
+  return NextResponse.json({ ok: true, state: nextState });
 }
