@@ -1,108 +1,80 @@
-// app/api/news/admin/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { getUserFromRequest } from '@/lib/getUserFromRequest';
+import { T } from '@/lib/tables';
+
+type Body = {
+  post: {
+    title: string;
+    summary: string | null;
+    content: string | null;
+    slug: string | null;
+    vendor_id: number | null;
+    status: 'draft'|'scheduled'|'published';
+    pinned_until: string | null;
+    effective_from: string | null;
+  };
+  categoryIds?: number[];
+  badgeIds?: number[];
+  sources?: { url: string; label?: string | null; sort_order?: number }[];
+};
 
 export async function POST(req: NextRequest) {
   const s = supabaseAdmin();
+  const { post, categoryIds = [], badgeIds = [], sources = [] } = (await req.json()) as Body;
 
-  const body = await req.json().catch(() => ({}));
-  const post = body?.post ?? {};
-  const categoryIds: number[] = Array.isArray(body?.categoryIds) ? body.categoryIds : [];
-  const badgeIds: number[] = Array.isArray(body?.badgeIds) ? body.badgeIds : [];
-  const sources: { url: string; label: string | null; sort_order: number | null }[] =
-    Array.isArray(body?.sources) ? body.sources : [];
-  const images: { path?: string | null; title?: string | null; sort_order?: number | null }[] =
-    Array.isArray(body?.images) ? body.images : [];
+  // Editor ermitteln
+  const user = await getUserFromRequest();
+  const editor_user_id = user?.id ?? null;
 
-  // Minimale Validierung
-  const title = String(post?.title ?? '').trim();
-  const slug  = String(post?.slug  ?? '').trim();
-  if (!title || !slug) {
-    return NextResponse.json({ ok: false, error: 'title_and_slug_required' }, { status: 400 });
-  }
-
-  // Slug-Kollision prüfen
-  {
-    const { data: existing, error } = await s.from('posts').select('id').eq('slug', slug).maybeSingle();
-    if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
-    if (existing?.id) {
-      return NextResponse.json({ ok: false, error: 'slug_exists' }, { status: 409 });
-    }
-  }
-
-  // Post anlegen
-  const insertPost = {
-    title,
-    slug,
-    summary: post?.summary ?? null,
-    content: post?.content ?? null, // HTML
-    vendor_id: Number.isFinite(Number(post?.vendor_id)) ? Number(post.vendor_id) : null,
-    status: ['draft', 'published', 'scheduled'].includes(post?.status) ? post.status : 'published',
-    pinned_until: post?.pinned_until ?? null,
-    effective_from: post?.effective_from ?? null,
-  };
-
-  const { data: created, error: errCreate } = await s
-    .from('posts')
-    .insert(insertPost)
+  // 1) Post
+  const { data: created, error } = await s
+    .from(T.posts)
+    .insert({ ...post, author_id: editor_user_id })
     .select('id, slug')
     .single();
 
-  if (errCreate || !created) {
-    return NextResponse.json({ ok: false, error: errCreate?.message ?? 'create_failed' }, { status: 500 });
-  }
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  const postId = created.id as number;
+  const post_id = created.id as number;
 
-  // Kategorien
+  // 2) Joins
   if (categoryIds.length) {
-    try {
-      await s.from('post_categories').insert(
-        categoryIds.map((cid) => ({ post_id: postId, category_id: cid }))
-      );
-    } catch { /* ignore */ }
+    const rows = categoryIds.map((category_id) => ({ post_id, category_id }));
+    const { error: e1 } = await s.from(T.postCategories).insert(rows);
+    if (e1) return NextResponse.json({ error: e1.message }, { status: 500 });
   }
-
-  // Badges
   if (badgeIds.length) {
-    try {
-      await s.from('post_badges').insert(
-        badgeIds.map((bid) => ({ post_id: postId, badge_id: bid }))
-      );
-    } catch { /* ignore */ }
+    const rows = badgeIds.map((badge_id) => ({ post_id, badge_id }));
+    const { error: e2 } = await s.from(T.postBadges).insert(rows);
+    if (e2) return NextResponse.json({ error: e2.message }, { status: 500 });
   }
-
-  // Quellen
   if (sources.length) {
-    try {
-      await s.from('post_sources').insert(
-        sources
-          .filter((sx) => sx?.url)
-          .map((sx) => ({
-            post_id: postId,
-            url: sx.url,
-            label: sx.label ?? null,
-            sort_order: Number.isFinite(Number(sx.sort_order)) ? Number(sx.sort_order) : null,
-          }))
-      );
-    } catch { /* ignore */ }
+    const rows = sources
+      .filter((x) => x.url?.trim())
+      .map((x, i) => ({ post_id, url: x.url.trim(), label: x.label ?? null, sort_order: x.sort_order ?? i }));
+    const { error: e3 } = await s.from('post_sources').insert(rows);
+    if (e3) return NextResponse.json({ error: e3.message }, { status: 500 });
   }
 
-  // >>> Bilder in post_images
-  const imgs = images
-    .map((im, i) => ({
-      post_id: postId,
-      path: im?.path ?? null,                      // Pfad im Storage
-      title: (im?.title ?? null) as string | null, // DB-Spalte "title"
-      sort_order: Number.isFinite(Number(im?.sort_order)) ? Number(im!.sort_order) : i,
-    }))
-    .filter((x) => !!x.path);
+  // 3) Revision „create“
+  const editorName =
+    editor_user_id
+      ? (await s.from(T.appUsers).select('name').eq('user_id', editor_user_id).maybeSingle()).data?.name ?? null
+      : null;
 
-  if (imgs.length) {
-    try {
-      await s.from('post_images').insert(imgs);
-    } catch { /* ignore */ }
-  }
+  await s.from('post_revisions').insert({
+    post_id,
+    editor_user_id,
+    editor_name: editorName,
+    action: 'create',
+    changes: {
+      fields: Object.entries(post).map(([key, val]) => ({ key, from: null, to: val })),
+      categories: { added: categoryIds, removed: [] },
+      badges: { added: badgeIds, removed: [] },
+      sources: { added: sources.map((s) => s.url), removed: [] },
+    },
+  });
 
-  return NextResponse.json({ ok: true, id: postId, slug: created.slug });
+  return NextResponse.json({ id: post_id, slug: created.slug ?? post.slug ?? null });
 }
