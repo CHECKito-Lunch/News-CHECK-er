@@ -486,25 +486,18 @@ function CalendarModern({ events }: { events: any[] }) {
   const todayStart = useMemo(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }, []);
   const api = () => calRef.current?.getApi();
 
-  // Fancy Event Renderer: Zeitraum + Icon + kleine Progress-Bar
+  // Helper
+  const fmtDate = (d: Date) =>
+    d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+  // Fancy Renderer: Monat ≠ Liste
   function renderEventContent(arg: any) {
-    const ev = arg.event;
+    const { event: ev, view, isStart } = arg;
     const isAllDay = ev.allDay;
     const start: Date | null = ev.start ? new Date(ev.start) : null;
     const endEx: Date | null = ev.end ? new Date(ev.end) : null;
-    // Ganztägig: FullCalendar gibt end exklusiv → für Anzeige inklusiv -1 Tag
+    // all-day: FullCalendar liefert end exklusiv → für Anzeige 1 Tag abziehen
     const endIn = endEx && isAllDay ? new Date(endEx.getTime() - 86400000) : endEx;
-
-    // Zeittext
-    let timeText = arg.timeText || '';
-    if (isAllDay && start) {
-      const fmt = (d: Date) =>
-        d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
-      timeText =
-        endIn && start.toDateString() !== endIn.toDateString()
-          ? `${fmt(start)} – ${fmt(endIn)}`
-          : 'ganztägig';
-    }
 
     // Icon
     let icon = (ev.extendedProps && (ev.extendedProps as any).icon) || '';
@@ -515,16 +508,50 @@ function CalendarModern({ events }: { events: any[] }) {
       else icon = '📅';
     }
 
-    // Progress-Bar nur für mehrtägige all-day Events und wenn "heute" innerhalb
+    // Fortschritt nur für laufende mehrtägige all-day Events
     let progressPct = 0;
-    if (isAllDay && start && endIn && start <= todayStart && todayStart <= endIn) {
-      const one = 86400000;
-      const totalDays = Math.max(1, Math.round((endIn.getTime() - start.getTime()) / one) + 1);
-      const elapsed = Math.min(
-        totalDays,
-        Math.max(0, Math.round((todayStart.getTime() - start.getTime()) / one) + 1)
+    if (view.type === 'dayGridMonth' || view.type === 'listUpcoming') {
+      if (isAllDay && start && endIn && start <= todayStart && todayStart <= endIn) {
+        const one = 86400000;
+        const totalDays = Math.max(1, Math.round((endIn.getTime() - start.getTime()) / one) + 1);
+        const elapsed = Math.min(
+          totalDays,
+          Math.max(0, Math.round((todayStart.getTime() - start.getTime()) / one) + 1)
+        );
+        progressPct = Math.round((elapsed / totalDays) * 100);
+      }
+    }
+
+    // --- MONATSANSICHT ------------------------------------------------
+    if (view.type === 'dayGridMonth') {
+      // In der Monatsansicht zeigen wir KEIN "ganztägig" – nur einen Balken;
+      // Icon + Titel nur am Starttag, damit es nicht jeden Tag wiederholt wird.
+      return (
+        <div className="w-full px-1 py-0.5">
+          <div className="h-1.5 w-full rounded-full bg-blue-500/15 overflow-hidden border border-blue-500/20">
+            <div
+              className="h-full bg-blue-600"
+              style={{ width: '100%' }}
+            />
+          </div>
+          {isStart && (
+            <div className="mt-1 flex items-center gap-1 text-[11px] font-medium leading-none">
+              <span className="leading-none">{icon}</span>
+              <span className="truncate">{ev.title}</span>
+            </div>
+          )}
+        </div>
       );
-      progressPct = Math.round((elapsed / totalDays) * 100);
+    }
+
+    // --- LISTENANSICHT ------------------------------------------------
+    // Zeittext: „ganztägig“ oder „DD.MM.YYYY – DD.MM.YYYY“
+    let timeText = arg.timeText || '';
+    if (isAllDay && start) {
+      timeText =
+        endIn && start.toDateString() !== endIn.toDateString()
+          ? `${fmtDate(start)} – ${fmtDate(endIn)}`
+          : 'ganztägig';
     }
 
     return (
@@ -578,12 +605,19 @@ function CalendarModern({ events }: { events: any[] }) {
         initialDate={todayStart}
         validRange={{ start: todayStart }}
         events={events}
+        // --- wichtige Tweaks ---
+        eventDisplay="block"                 // damit unser Block-Renderer in dayGrid sauber läuft
+        displayEventTime={false}             // kein „all-day“ in der Monatsansicht
+        // -----------------------
         datesSet={(arg) => setTitle(arg.view.title)}
         eventClassNames={() => 'rounded-lg border border-blue-500/20 bg-blue-500/10 text-blue-900 dark:text-blue-200'}
         eventContent={renderEventContent}
         buttonText={{ today: 'Heute', month: 'Monat', list: 'Liste', week: 'Woche' }}
         noEventsText="Keine Termine im ausgewählten Zeitraum."
-        views={{ listUpcoming: { type: 'list', duration: { days: 60 }, buttonText: 'Liste' }, dayGridMonth: { type: 'dayGridMonth' } }}
+        views={{
+          listUpcoming: { type: 'list', duration: { days: 60 }, buttonText: 'Liste' },
+          dayGridMonth: { type: 'dayGridMonth' }
+        }}
       />
     </>
   );
