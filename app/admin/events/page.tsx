@@ -34,6 +34,21 @@ const toInputFromIso = (iso: string | null | undefined) => {
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
 
+/* ---------- Teilnehmer ---------- */
+type Attendee = {
+  event_id: number;
+  user_id: string;
+  state: 'confirmed' | 'waitlist';
+  created_at: string;
+  updated_at?: string;
+  name?: string | null;
+  email?: string | null;
+};
+
+function classNames(...xs: (string | false | null | undefined)[]) {
+  return xs.filter(Boolean).join(' ');
+}
+
 export default function AdminEventsPage() {
   // liste
   const [rows, setRows] = useState<EventRow[]>([]);
@@ -55,6 +70,13 @@ export default function AdminEventsPage() {
   // media
   const [heroUrl, setHeroUrl] = useState<string>('');
   const [gallery, setGallery] = useState<string[]>([]);
+
+  // --- Teilnehmer-Modal State ---
+  const [attModalOpen, setAttModalOpen] = useState(false);
+  const [attEvent, setAttEvent] = useState<EventRow | null>(null);
+  const [attLoading, setAttLoading] = useState(false);
+  const [attErr, setAttErr] = useState('');
+  const [attRows, setAttRows] = useState<Attendee[]>([]);
 
   async function load() {
     setLoading(true);
@@ -153,6 +175,64 @@ export default function AdminEventsPage() {
     setGallery(gal);
     setHeroUrl(ev.hero_image_url || '');
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  /* ---------- Teilnehmer-Modal Logik ---------- */
+  async function loadAttendees(event: EventRow) {
+    setAttErr(''); setAttLoading(true);
+    try {
+      const r = await fetch(`/api/admin/events/${event.id}/attendees`, { credentials: 'include' });
+      const j = await r.json().catch(()=> ({}));
+      if (!r.ok) throw new Error(j?.error || `HTTP ${r.status}`);
+      setAttRows(Array.isArray(j.data) ? j.data : []);
+    } catch (e:any) {
+      setAttRows([]); setAttErr(e?.message || 'Fehler beim Laden');
+    } finally {
+      setAttLoading(false);
+    }
+  }
+
+  function openAttendees(event: EventRow) {
+    setAttEvent(event);
+    setAttModalOpen(true);
+    loadAttendees(event);
+  }
+
+  async function setStateFor(user_id: string, next: 'confirmed'|'waitlist') {
+    if (!attEvent) return;
+    const prev = attRows.slice();
+    // optimistic
+    setAttRows(rs => rs.map(r => r.user_id===user_id ? { ...r, state: next } : r));
+    try {
+      const r = await fetch(`/api/admin/events/${attEvent.id}/attendees`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id, state: next })
+      });
+      if (!r.ok) throw new Error((await r.json().catch(()=>({})))?.error || 'Fehler');
+      await load(); // Zähler der Eventliste auffrischen
+    } catch (e:any) {
+      setAttRows(prev); setAttErr(e?.message || 'Änderung fehlgeschlagen');
+    }
+  }
+
+  async function removeAttendee(user_id: string) {
+    if (!attEvent) return;
+    const prev = attRows.slice();
+    setAttRows(rs => rs.filter(r => r.user_id !== user_id)); // optimistic
+    try {
+      const r = await fetch(`/api/admin/events/${attEvent.id}/attendees`, {
+        method: 'DELETE',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id })
+      });
+      if (!r.ok) throw new Error((await r.json().catch(()=>({})))?.error || 'Fehler');
+      await load();
+    } catch (e:any) {
+      setAttRows(prev); setAttErr(e?.message || 'Entfernen fehlgeschlagen');
+    }
   }
 
   return (
@@ -317,6 +397,7 @@ export default function AdminEventsPage() {
                     <td className="px-3 py-2 text-right space-x-2">
                       <a className={btn} href={`/events/${ev.slug}`} target="_blank">Öffnen</a>
                       <button className={btn} onClick={()=>startEdit(ev)}>Bearbeiten</button>
+                      <button className={btn} onClick={()=>openAttendees(ev)}>Teilnehmer</button>
                       <button className={btn} onClick={()=>del(ev.id)}>Löschen</button>
                     </td>
                   </tr>
@@ -326,6 +407,76 @@ export default function AdminEventsPage() {
           </div>
         )}
       </div>
+
+      {/* Teilnehmer-Modal */}
+      <Modal
+        open={attModalOpen}
+        onClose={()=> setAttModalOpen(false)}
+        title={attEvent ? `Teilnehmer – ${attEvent.title}` : 'Teilnehmer'}
+      >
+        {/* Kopf: Kapazität & Zähler */}
+        {attEvent && (
+          <div className="mb-3 text-sm text-gray-600 dark:text-gray-300 flex flex-wrap items-center gap-3">
+            <span>Kapazität: <b>{attEvent.capacity ?? '∞'}</b></span>
+            <span>Bestätigt: <b>{attRows.filter(r=>r.state==='confirmed').length}</b></span>
+            <span>Warteliste: <b>{attRows.filter(r=>r.state==='waitlist').length}</b></span>
+            <button
+              className={btn + ' ml-auto'}
+              onClick={()=> loadAttendees(attEvent)}
+              disabled={attLoading}
+            >
+              {attLoading ? 'Aktualisiere…' : 'Neu laden'}
+            </button>
+          </div>
+        )}
+
+        {attErr && <div className="mb-3 text-sm text-red-600">{attErr}</div>}
+
+        {/* Liste */}
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="text-left">
+                <th className="px-3 py-2">User</th>
+                <th className="px-3 py-2">E-Mail</th>
+                <th className="px-3 py-2">Status</th>
+                <th className="px-3 py-2 text-right">Aktionen</th>
+              </tr>
+            </thead>
+            <tbody>
+              {attRows.length === 0 && (
+                <tr><td className="px-3 py-6 text-gray-500" colSpan={4}>Keine Anmeldungen.</td></tr>
+              )}
+              {attRows.map(r => (
+                <tr key={r.user_id} className="border-t border-gray-100 dark:border-gray-800">
+                  <td className="px-3 py-2">{r.name || '—'}</td>
+                  <td className="px-3 py-2">{r.email || '—'}</td>
+                  <td className="px-3 py-2">
+                    <span
+                      className={classNames(
+                        'inline-flex items-center px-2 py-0.5 rounded-full border text-xs',
+                        r.state==='confirmed'
+                          ? 'border-emerald-300 text-emerald-700 dark:border-emerald-600/50 dark:text-emerald-300'
+                          : 'border-amber-300 text-amber-700 dark:border-amber-600/50 dark:text-amber-300'
+                      )}
+                    >
+                      {r.state === 'confirmed' ? 'bestätigt' : 'Warteliste'}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-right space-x-2">
+                    {r.state === 'waitlist' ? (
+                      <button className={btn} onClick={()=> setStateFor(r.user_id, 'confirmed')}>Bestätigen</button>
+                    ) : (
+                      <button className={btn} onClick={()=> setStateFor(r.user_id, 'waitlist')}>Auf Warteliste</button>
+                    )}
+                    <button className={btn} onClick={()=> removeAttendee(r.user_id)}>Entfernen</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Modal>
     </div>
   );
 }
@@ -444,3 +595,24 @@ function MarkdownEditor({
   );
 }
 const toolBtn = 'px-2 py-1 text-sm rounded hover:bg-white/70 dark:hover:bg-white/10';
+
+/* ---------- Modal ---------- */
+function Modal({
+  open, onClose, children, title
+}: { open: boolean; onClose: () => void; title: string; children: React.ReactNode }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="absolute inset-0 flex items-center justify-center p-4">
+        <div className="w-full max-w-3xl rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-xl">
+          <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-gray-200 dark:border-gray-800">
+            <h3 className="text-lg font-semibold">{title}</h3>
+            <button className={btn} onClick={onClose}>Schließen</button>
+          </div>
+          <div className="p-4">{children}</div>
+        </div>
+      </div>
+    </div>
+  );
+}

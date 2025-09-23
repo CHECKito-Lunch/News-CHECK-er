@@ -1,6 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server';
+// app/api/admin/events/[id]/attendees/route.ts
+import { NextResponse } from 'next/server';
 import { supabaseServer } from '@/lib/supabase-server';
 import { getUserFromRequest } from '@/lib/getUserFromRequest';
+import build from 'next/dist/build';
 
 async function requireAdmin() {
   const s = await supabaseServer();
@@ -10,13 +12,13 @@ async function requireAdmin() {
   return { s, ok: data?.role === 'admin' };
 }
 
-export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(_req: Request, { params }: any) {
   const { s, ok } = await requireAdmin();
   if (!ok) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
 
   const event_id = Number(params.id);
+  if (!Number.isFinite(event_id)) return NextResponse.json({ error: 'bad_event_id' }, { status: 400 });
 
-  // Wenn du die View angelegt hast, ist das hier am bequemsten:
   const { data, error } = await s
     .from('event_registrations_with_user')
     .select('*')
@@ -28,15 +30,18 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   return NextResponse.json({ data });
 }
 
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, { params }: any) {
   const { s, ok } = await requireAdmin();
   if (!ok) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
 
   const event_id = Number(params.id);
-  const { user_id, state } = await req.json().catch(() => ({} as any)); // 'confirmed' | 'waitlist'
-  if (!user_id || !['confirmed','waitlist'].includes(state)) {
+  if (!Number.isFinite(event_id)) return NextResponse.json({ error: 'bad_event_id' }, { status: 400 });
+
+  const { user_id, state } = await req.json().catch(() => ({} as any));
+  if (!user_id || !['confirmed', 'waitlist'].includes(state)) {
     return NextResponse.json({ error: 'bad_request' }, { status: 400 });
   }
+
   const { error } = await s
     .from('event_registrations')
     .update({ state, updated_at: new Date().toISOString() })
@@ -47,11 +52,13 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   return NextResponse.json({ ok: true });
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(req: Request, { params }: any) {
   const { s, ok } = await requireAdmin();
   if (!ok) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
 
   const event_id = Number(params.id);
+  if (!Number.isFinite(event_id)) return NextResponse.json({ error: 'bad_event_id' }, { status: 400 });
+
   const { user_id } = await req.json().catch(() => ({} as any));
   if (!user_id) return NextResponse.json({ error: 'bad_request' }, { status: 400 });
 
