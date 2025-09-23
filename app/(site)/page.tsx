@@ -30,17 +30,18 @@ type KPI = {
 
 type Tool = { id: number; title: string; icon: string; href: string };
 
-// Termin jetzt mit start/end und optional Icon
-export type Termin = {
+// ⬇︎ Termin-Typ erweitert, mit Fallbacks für alte Daten
+type Termin = {
   id: number;
   title: string;
-  starts_at: string;
-  ends_at?: string | null;
-  icon?: string | null;
-  // Legacy
+  starts_at: string;          // Pflicht in neuer API
+  ends_at?: string | null;    // optional (inklusiv in DB; FC bekommt exklusiv)
+  icon?: string | null;       // optional (z. B. "📌" | "🏖️")
+  // Legacy-Felder (Server liefert evtl. noch diese)
   date?: string; start?: string; end?: string | null;
 };
 
+// FEED: events
 type EventFeedRow = {
   id: number; slug: string; title: string;
   summary: string | null;
@@ -55,6 +56,7 @@ const card =
 const header =
   'flex items-center justify-between gap-3 mb-3 px-2';
 
+/* ---------- Helfer für Feed ---------- */
 const isAgentNews = (it: Item) =>
   (it.post_badges || []).some(pb => {
     const n = (pb?.badge?.name || '').toLowerCase();
@@ -73,11 +75,15 @@ export default function HomePage() {
   const [termine, setTermine] = useState<Termin[]>([]);
   const [meta, setMeta] = useState<{ badges: Badge[] }>({ badges: [] });
 
-  const [dbEvents, setDbEvents] = useState<any[]>([]);
-  const [feedEvents, setFeedEvents] = useState<EventFeedRow[]>([]);
+  // Events aus DB
+  const [dbEvents, setDbEvents] = useState<any[]>([]);          // Kalender
+  const [feedEvents, setFeedEvents] = useState<EventFeedRow[]>([]); // FEED
+
+  // Agent-News (unten)
   const [tourNews, setTourNews] = useState<Item[]>([]);
   const [tourLoading, setTourLoading] = useState<boolean>(true);
   const [tourErr, setTourErr] = useState<string>('');
+
   const [loadingFeed, setLoadingFeed] = useState(true);
   const [loadingSide, setLoadingSide] = useState(true);
 
@@ -106,6 +112,7 @@ export default function HomePage() {
     })();
   }, []);
 
+  // KPIs/Tools/Termine + Events + News (Start + jüngste News)
   useEffect(() => {
     (async () => {
       setLoadingSide(true);
@@ -145,6 +152,7 @@ export default function HomePage() {
         };
 
         const fetchRecentNews = async (): Promise<Item[]> => {
+          // bevorzugt spezieller Feed, sonst generisch
           let r = await fetch('/api/news?feed=1&page=1&pageSize=30');
           let j = await r.json().catch(() => ({}));
           if (r.ok && Array.isArray(j?.data)) return j.data as Item[];
@@ -171,6 +179,7 @@ export default function HomePage() {
     })();
   }, [startBadgeId]);
 
+  // Agent-News (unten)
   useEffect(() => {
     let cancelled = false;
     async function loadTourNews() {
@@ -204,23 +213,24 @@ export default function HomePage() {
     return () => { cancelled = true; };
   }, []);
 
-  // Kalender-Events ----------------------------------------------------
+  // Kalender-Events (Termine + DB-Events + ICS)
   const events = useMemo(() => ([
     ...termine.map(t => ({
       id: String(t.id),
       title: t.title,
-      start: t.starts_at || t.start || t.date,
-      end: (t.ends_at || t.end) || undefined,
+      start: t.starts_at || t.start || t.date,              // Fallbacks für Legacy
+      end:   (t.ends_at || t.end) || undefined,             // FC erwartet exklusives end
       allDay: true,
       backgroundColor: '#2563eb',
       textColor: '#fff',
-      extendedProps: { icon: t.icon || '📌' },
+      extendedProps: { icon: t.icon || '📌' },              // Icon sauber übergeben
     })),
     ...dbEvents,
     { url: 'https://feiertage-api.de/api/?bundesland=SN&out=ical', format: 'ics' as const },
     { url: 'https://www.schulferien.org/iCal/Ferien/ical/Sachsen.ics', format: 'ics' as const },
   ]), [termine, dbEvents]);
 
+  // FEED: News + Events bündeln & sortieren
   const unifiedFeed = useMemo(() => {
     const news = items.map(it => ({
       kind: 'news' as const,
@@ -239,38 +249,264 @@ export default function HomePage() {
 
   return (
     <div className="container max-w-7xl mx-auto py-6 space-y-8">
-      {/* ... oben unverändert ... */}
+      {/* OBERER BEREICH: Drei Kacheln (KPIs, Tools, Kalender) */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* KPIs */}
+        <section className={card + ' p-4'}>
+          <div className={header}><h2 className="text-lg font-semibold">Kennzahlen</h2></div>
+          {loadingSide ? (
+            <div className="grid grid-cols-2 gap-3 animate-pulse">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="h-16 rounded-xl bg-gray-50/70 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-800" />
+              ))}
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              {kpis.length === 0 && <div className="text-sm text-gray-500 col-span-2">Noch keine KPIs hinterlegt.</div>}
+              {kpis.slice(0, 6).map(k => (
+                <div key={k.id} className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/60 p-3">
+                  <div className="text-[12px] text-gray-500">{k.label}</div>
+                  <div className="mt-0.5 text-2xl font-semibold tracking-tight">
+                    {k.value}{k.unit && <span className="text-sm font-normal ml-1">{k.unit}</span>}
+                  </div>
+                  {k.trend && (
+                    <div className="text-xs mt-1" style={{ color: k.color || undefined }}>
+                      {k.trend === 'up' ? '▲' : k.trend === 'down' ? '▼' : '→'} Trend
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* Tools */}
+        <section className={card + ' p-4'}>
+          <div className={header}><h2 className="text-lg font-semibold">Die wichtigsten Tools</h2></div>
+          {loadingSide ? (
+            <div className="grid grid-cols-2 gap-3 animate-pulse">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="h-12 rounded-xl bg-gray-50/70 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-800" />
+              ))}
+            </div>
+          ) : (
+            <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {tools.length === 0 && <li className="text-sm text-gray-500">Keine Tools gefunden.</li>}
+              {tools.map(tool => (
+                <li key={tool.id}>
+                  <Link
+                    href={tool.href}
+                    className="group flex items-center gap-2 rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/60 px-3 py-2 hover:bg-white/70 dark:hover:bg-white/10"
+                  >
+                    <span aria-hidden className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-white/10">
+                      {tool.icon}
+                    </span>
+                    <span className="truncate">{tool.title}</span>
+                    <svg className="ml-auto h-4 w-4 opacity-60 group-hover:opacity-100" viewBox="0 0 24 24">
+                      <path d="M7 17L17 7M9 7h8v8" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" />
+                    </svg>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        {/* Kalender */}
+        <section className={card + ' p-4'}>
+          <div className={header}><h2 className="text-lg font-semibold">Termine, Ferien & Feiertage</h2></div>
+          <CalendarModern events={events} />
+        </section>
+      </div>
+
+      {/* MITTE: Was gibt's Neues? (volle Breite) */}
       <section className={card + ' p-4'}>
-        <div className={header}><h2 className="text-lg font-semibold">Termine, Ferien & Feiertage</h2></div>
-        <CalendarModern events={events} />
+        <div className={header}>
+          <h2 className="text-lg font-semibold">Was gibt&apos;s Neues?</h2>
+          <div className="flex items-center gap-3 text-sm">
+            <Link href="/events" className="text-blue-600 hover:underline">Alle Events →</Link>
+            <Link href="/news" className="text-blue-600 hover:underline">Alle News →</Link>
+          </div>
+        </div>
+
+        {loadingFeed && (
+          <ul className="grid gap-3 animate-pulse">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <li key={i} className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50/70 dark:bg-gray-800/50 h-20" />
+            ))}
+          </ul>
+        )}
+
+        {!loadingFeed && unifiedFeed.length === 0 && (
+          <div className="text-sm text-gray-500 px-2 py-2">Keine Einträge.</div>
+        )}
+
+        {!loadingFeed && unifiedFeed.length > 0 && (
+          <ul className="grid gap-3">
+            {unifiedFeed.map(entry => (
+              <li key={entry.key} className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/60 p-4">
+                {entry.kind === 'news'
+                  ? <NewsCard it={entry.data as Item} />
+                  : <EventCard ev={entry.data as EventFeedRow} />
+                }
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
-      {/* ... restlicher Code unverändert ... */}
+
+      {/* TOURISTISCHE NEWS (am Seitenende) */}
+      <section className={card + ' p-4'}>
+        <div className={header}>
+          <h2 className="text-lg font-semibold">Touristische News (automatisch)</h2>
+          <Link href="/news" className="text-sm text-blue-600 hover:underline">Alle News ansehen →</Link>
+        </div>
+
+        {tourLoading && (
+          <ul className="grid gap-3 animate-pulse">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <li key={i} className="h-20 rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50/70 dark:bg-gray-800/50" />
+            ))}
+          </ul>
+        )}
+        {!tourLoading && tourErr && <div className="text-sm text-red-600">{tourErr}</div>}
+        {!tourLoading && !tourErr && tourNews.length === 0 && (
+          <div className="text-sm text-gray-500">Aktuell keine Einträge.</div>
+        )}
+        {!tourLoading && !tourErr && tourNews.length > 0 && (
+          <ul className="grid gap-3">
+            {tourNews.map(it => (
+              <li key={it.id} className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/60 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="text-base font-semibold text-blue-700 dark:text-blue-400 leading-snug">
+                    {it.slug ? <Link href={`/news/${it.slug}`} className="hover:underline">{it.title}</Link> : it.title}
+                  </div>
+                  <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border border-blue-200 text-blue-700 dark:border-blue-500/40 dark:text-blue-300">⚡ Agent</span>
+                </div>
+                {it.vendor && <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">{it.vendor.name}</div>}
+                {it.summary ? (
+                  <p className="text-gray-700 dark:text-gray-300 mt-2 text-sm">{it.summary}</p>
+                ) : it.content ? (
+                  <div className="prose dark:prose-invert max-w-none prose-p:my-2 mt-2 text-sm">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{it.content.slice(0, 320)}</ReactMarkdown>
+                  </div>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </div>
   );
 }
 
-// Kalender mit Custom Renderer ----------------------------------------
+/* ---- Kartenrenderer ------------------------------------------------- */
+
+function NewsCard({ it }: { it: Item }) {
+  const imgs = Array.isArray(it.images) ? [...it.images].sort((a,b)=> (a.sort_order ?? 0) - (b.sort_order ?? 0)) : [];
+  const thumb = imgs[0]?.url ?? null;
+  const date = new Date((it as any).published_at || (it as any).created_at || 0);
+  const dateStr = isNaN(date.getTime()) ? null : date.toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' });
+
+  return (
+    <div className="flex gap-3">
+      {thumb && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={thumb} alt="" className="h-16 w-24 object-cover rounded-lg border border-gray-200 dark:border-gray-700" />
+      )}
+
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="inline-flex items-center px-2 py-0.5 text-[11px] rounded-full border border-blue-300 text-blue-700 dark:border-blue-600/50 dark:text-blue-300">News</span>
+          {dateStr && <span className="text-xs text-gray-500">{dateStr}</span>}
+        </div>
+
+        <div className="text-base font-semibold leading-snug mt-0.5">
+          {it.slug ? (
+            <Link href={`/news/${it.slug}`} className="text-blue-700 dark:text-blue-300 hover:underline">
+              {it.title}
+            </Link>
+          ) : (
+            <span className="text-blue-700 dark:text-blue-300">{it.title}</span>
+          )}
+        </div>
+
+        {it.vendor && <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{it.vendor.name}</div>}
+
+        {(it.summary || it.content) && (
+          <p className="text-sm text-gray-700 dark:text-gray-300 mt-1 line-clamp-3">
+            {it.summary || (it.content ? it.content.replace(/\s+/g,' ').slice(0, 220) : '')}
+          </p>
+        )}
+
+        {it.post_badges?.length ? (
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {it.post_badges.slice(0,3).map(({ badge }) => (
+              <span key={badge.id} className="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] leading-4 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200">
+                {badge.name}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function EventCard({ ev }: { ev: EventFeedRow }) {
+  const start = new Date(ev.starts_at);
+  const dateStr = start.toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' });
+  return (
+    <div className="flex gap-3">
+      {ev.hero_image_url && (
+        <img src={ev.hero_image_url} alt="" className="h-16 w-24 object-cover rounded-lg border border-gray-200 dark:border-gray-700" />
+      )}
+      <div className="min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="inline-flex items-center px-2 py-0.5 text-[11px] rounded-full border border-green-300 text-green-700 dark:border-green-600/50 dark:text-green-300">Event</span>
+          <span className="text-xs text-gray-500">{dateStr}{ev.location ? ` · ${ev.location}` : ''}</span>
+        </div>
+        <div className="text-base font-semibold leading-snug mt-0.5">
+          <Link href={`/events/${ev.slug}`} className="text-emerald-700 dark:text-emerald-300 hover:underline">
+            {ev.title}
+          </Link>
+        </div>
+        {ev.summary && <p className="text-sm text-gray-700 dark:text-gray-300 mt-1 line-clamp-3">{ev.summary}</p>}
+      </div>
+    </div>
+  );
+}
+
+/* ---- Kalender ------------------------------------------------------- */
+
 function CalendarModern({ events }: { events: any[] }) {
   const calRef = useRef<FullCalendar | null>(null);
-  const [title, setTitle] = useState('');
-  const todayStart = useMemo(() => { const d = new Date(); d.setHours(0,0,0,0); return d; }, []);
+  const [title, setTitle] = useState<string>('');
+
+  const todayStart = useMemo(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }, []);
   const api = () => calRef.current?.getApi();
 
+  // Fancy Event Renderer: Zeitraum + Icon + kleine Progress-Bar
   function renderEventContent(arg: any) {
     const ev = arg.event;
     const isAllDay = ev.allDay;
-    const start = ev.start ? new Date(ev.start) : null;
-    const endEx = ev.end ? new Date(ev.end) : null;
+    const start: Date | null = ev.start ? new Date(ev.start) : null;
+    const endEx: Date | null = ev.end ? new Date(ev.end) : null;
+    // Ganztägig: FullCalendar gibt end exklusiv → für Anzeige inklusiv -1 Tag
     const endIn = endEx && isAllDay ? new Date(endEx.getTime() - 86400000) : endEx;
 
+    // Zeittext
     let timeText = arg.timeText || '';
     if (isAllDay && start) {
-      const fmt = (d: Date) => d.toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', year:'numeric' });
-      timeText = endIn && start.toDateString() !== endIn.toDateString()
-        ? `${fmt(start)} – ${fmt(endIn)}`
-        : 'ganztägig';
+      const fmt = (d: Date) =>
+        d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      timeText =
+        endIn && start.toDateString() !== endIn.toDateString()
+          ? `${fmt(start)} – ${fmt(endIn)}`
+          : 'ganztägig';
     }
 
+    // Icon
     let icon = (ev.extendedProps && (ev.extendedProps as any).icon) || '';
     if (!icon) {
       const url: string | undefined = (ev as any).source?.url;
@@ -279,12 +515,37 @@ function CalendarModern({ events }: { events: any[] }) {
       else icon = '📅';
     }
 
+    // Progress-Bar nur für mehrtägige all-day Events und wenn "heute" innerhalb
+    let progressPct = 0;
+    if (isAllDay && start && endIn && start <= todayStart && todayStart <= endIn) {
+      const one = 86400000;
+      const totalDays = Math.max(1, Math.round((endIn.getTime() - start.getTime()) / one) + 1);
+      const elapsed = Math.min(
+        totalDays,
+        Math.max(0, Math.round((todayStart.getTime() - start.getTime()) / one) + 1)
+      );
+      progressPct = Math.round((elapsed / totalDays) * 100);
+    }
+
     return (
-      <div className="flex items-center gap-2 px-2 py-1 text-sm">
-        {timeText && <span className="opacity-70 whitespace-nowrap">{timeText}</span>}
-        <span className="opacity-40">·</span>
-        <span className="text-base leading-none">{icon}</span>
-        <span className="font-medium truncate">{ev.title}</span>
+      <div className="w-full">
+        <div className="flex items-center gap-2 px-2 py-1 text-sm">
+          {timeText && <span className="opacity-70 whitespace-nowrap">{timeText}</span>}
+          <span className="opacity-40">·</span>
+          <span className="text-base leading-none">{icon}</span>
+          <span className="font-medium truncate">{ev.title}</span>
+        </div>
+        {progressPct > 0 && (
+          <div className="px-2 pb-1">
+            <div className="h-1.5 w-full rounded-full bg-blue-500/15 overflow-hidden border border-blue-500/20">
+              <div
+                className="h-full rounded-full bg-blue-600"
+                style={{ width: `${progressPct}%` }}
+                aria-label={`Fortschritt ${progressPct}%`}
+              />
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -292,16 +553,15 @@ function CalendarModern({ events }: { events: any[] }) {
   return (
     <>
       <div className="flex flex-wrap items-center gap-2 mb-3">
-        {/* Steuerung */}
         <div className="inline-flex rounded-xl overflow-hidden border border-gray-200 dark:border-gray-800">
-          <button onClick={() => api()?.prev()} className="px-3 py-1.5 text-sm">←</button>
-          <button onClick={() => api()?.today()} className="px-3 py-1.5 text-sm border-l">heute</button>
-          <button onClick={() => api()?.next()} className="px-3 py-1.5 text-sm border-l">→</button>
+          <button onClick={() => api()?.prev()} className="px-3 py-1.5 text-sm bg-white dark:bg-white/10 hover:bg-gray-50 dark:hover:bg-white/20">←</button>
+          <button onClick={() => api()?.today()} className="px-3 py-1.5 text-sm bg-white dark:bg-white/10 hover:bg-gray-50 dark:hover:bg-white/20 border-l border-gray-200 dark:border-gray-800">heute</button>
+          <button onClick={() => api()?.next()} className="px-3 py-1.5 text-sm bg-white dark:bg-white/10 hover:bg-gray-50 dark:hover:bg-white/20 border-l border-gray-200 dark:border-gray-800">→</button>
         </div>
         <div className="text-base font-semibold mx-2">{title}</div>
         <div className="ml-auto inline-flex rounded-xl overflow-hidden border border-gray-200 dark:border-gray-800">
-          <button onClick={() => api()?.changeView('listUpcoming')} className="px-3 py-1.5 text-sm">Liste</button>
-          <button onClick={() => api()?.changeView('dayGridMonth')} className="px-3 py-1.5 text-sm border-l">Monat</button>
+          <button onClick={() => api()?.changeView('listUpcoming')} className="px-3 py-1.5 text-sm bg-white dark:bg-white/10 hover:bg-gray-50 dark:hover:bg-white/20">Liste</button>
+          <button onClick={() => api()?.changeView('dayGridMonth')} className="px-3 py-1.5 text-sm bg-white dark:bg-white/10 hover:bg-gray-50 dark:hover:bg-white/20 border-l border-gray-200 dark:border-gray-800">Monat</button>
         </div>
       </div>
 
@@ -323,7 +583,7 @@ function CalendarModern({ events }: { events: any[] }) {
         eventContent={renderEventContent}
         buttonText={{ today: 'Heute', month: 'Monat', list: 'Liste', week: 'Woche' }}
         noEventsText="Keine Termine im ausgewählten Zeitraum."
-        views={{ listUpcoming: { type: 'list', duration: { days: 60 } }, dayGridMonth: { type: 'dayGridMonth' } }}
+        views={{ listUpcoming: { type: 'list', duration: { days: 60 }, buttonText: 'Liste' }, dayGridMonth: { type: 'dayGridMonth' } }}
       />
     </>
   );
