@@ -26,7 +26,7 @@ function publicUrlFromPath(path?: string | null, bucket = 'uploads'): string {
   if (!path) return '';
   if (!SUPABASE_URL) return ''; // Fallback: kein Preview möglich, aber Speichern geht
   // https://<project>.supabase.co/storage/v1/object/public/<bucket>/<path>
-  return `${SUPABASE_URL.replace(/\/+$/,'')}/storage/v1/object/public/${bucket}/${path.replace(/^\/+/,'')}`;
+  return `${SUPABASE_URL.replace(/\/+$/,'')}/storage/v1/object/public/${bucket}/${String(path).replace(/^\/+/,'')}`;
 }
 
 // Public-URL → Bucket-Pfad extrahieren (falls Upload-API mal kein path liefert)
@@ -102,7 +102,7 @@ export default function NewsEditorClient() {
           url,
           path,
           caption: im.caption ?? im.title ?? '',
-          sort_order: Number.isFinite(im.sort_order) ? im.sort_order : i,
+          sort_order: Number.isFinite(Number(im.sort_order)) ? Number(im.sort_order) : i,
         };
       });
       setImages(norm);
@@ -222,7 +222,7 @@ export default function NewsEditorClient() {
     const imagesForDb = images.map((im, i) => ({
       path: im.path ?? guessPathFromUrl(im.url),                    // **Pfad** in Storage
       title: (im.caption ?? '').trim() || null,                     // DB-Spalte "title"
-      sort_order: Number.isFinite(im.sort_order) ? im.sort_order! : i,
+      sort_order: Number.isFinite(Number(im.sort_order)) ? Number(im.sort_order) : i,
     })).filter(x => !!x.path); // nur mit gültigem path speichern
 
     const payload: any = {

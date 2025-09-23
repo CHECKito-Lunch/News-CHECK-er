@@ -8,6 +8,16 @@ function normalizeIso(v: unknown): string | null {
   return isNaN(d.getTime()) ? null : d.toISOString();
 }
 
+function urlToPath(u?: unknown): string | null {
+  if (!u) return null;
+  try {
+    const x = new URL(String(u));
+    return x.pathname.replace(/^\/+/, '');
+  } catch {
+    return null;
+  }
+}
+
 export async function GET(req: NextRequest) {
   const s = supabaseAdmin();
 
@@ -35,7 +45,6 @@ export async function GET(req: NextRequest) {
   const { data, error, count } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  // Autorennamen auflösen
   const rows = data ?? [];
   const authorIds = Array.from(new Set(rows.map(r => r.author_id).filter((v): v is string => !!v)));
   let nameById = new Map<string, string>();
@@ -54,16 +63,13 @@ export async function GET(req: NextRequest) {
 
 /**
  * POST: neuen Post anlegen
- * Erwartet Body (aus deinem Editor):
+ * Body (Editor):
  * {
- *   post: {
- *     title, summary, content, slug, vendor_id, status,
- *     pinned_until, effective_from
- *   },
- *   categoryIds?: number[],
- *   badgeIds?: number[],
- *   sources?: { url: string; label: string|null; sort_order: number }[],
- *   images?:  { path: string; title: string|null; sort_order: number }[]
+ *   post: { title, summary, content, slug, vendor_id, status, pinned_until, effective_from },
+ *   categoryIds?: number[], badgeIds?: number[],
+ *   sources?: { url, label, sort_order }[],
+ *   images?:  // tolerant:
+ *     ({ path, title, sort_order } | { url, caption, sort_order })[]
  * }
  */
 export async function POST(req: NextRequest) {
@@ -74,10 +80,9 @@ export async function POST(req: NextRequest) {
   const badgeIds: number[] = Array.isArray(body?.badgeIds) ? body.badgeIds : [];
   const sources: Array<{ url: string; label: string | null; sort_order: number }> =
     Array.isArray(body?.sources) ? body.sources : [];
-  const images: Array<{ path?: string; title?: string | null; sort_order?: number }> =
-    Array.isArray(body?.images) ? body.images : [];
+  const imagesInput: any[] = Array.isArray(body?.images) ? body.images : [];
 
-  // 1) posts einfügen
+  // 1) posts
   const { data: postData, error: postErr } = await s
     .from('posts')
     .insert([{
@@ -99,21 +104,21 @@ export async function POST(req: NextRequest) {
 
   const postId = postData.id;
 
-  // 2) Kategorien (optional)
+  // 2) Kategorien
   if (categoryIds.length) {
     const rows = categoryIds.map((cid: number) => ({ post_id: postId, category_id: cid }));
     const { error } = await s.from('post_categories').insert(rows);
     if (error) console.error('[admin/posts POST] post_categories insert', error);
   }
 
-  // 3) Badges (optional)
+  // 3) Badges
   if (badgeIds.length) {
     const rows = badgeIds.map((bid: number) => ({ post_id: postId, badge_id: bid }));
     const { error } = await s.from('post_badges').insert(rows);
     if (error) console.error('[admin/posts POST] post_badges insert', error);
   }
 
-  // 4) Quellen (optional)
+  // 4) Quellen
   if (sources.length) {
     const rows = sources
       .filter(sx => typeof sx?.url === 'string' && sx.url.trim())
@@ -129,16 +134,21 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 5) Bilder → post_images (path, title, sort_order)
-  if (images.length) {
-    const rows = images
-      .map((im, i) => ({
-        post_id: postId,
-        path: (im.path ?? '').toString().trim(),             // Pfad im Bucket (z.B. "news/2025/09/foo.jpg")
-        title: (im.title ?? null) as string | null,          // optionale Bildunterschrift
-        sort_order: Number.isFinite(im.sort_order) ? Number(im.sort_order) : i,
-      }))
-      .filter(r => !!r.path);
+  // 5) Bilder (tolerant auf path/title ODER url/caption)
+  if (imagesInput.length) {
+    const rows = imagesInput.map((im: any, i: number) => {
+      const path =
+        (typeof im?.path === 'string' && im.path.trim())
+          ? im.path.trim()
+          : urlToPath(im?.url) ?? ''; // aus URL ableiten, falls nur url kam
+      const title =
+        typeof im?.title === 'string' ? im.title
+        : typeof im?.caption === 'string' ? im.caption
+        : null;
+      const sort = Number.isFinite(im?.sort_order) ? Number(im.sort_order) : i;
+
+      return { post_id: postId, path, title, sort_order: sort };
+    }).filter(r => !!r.path);
 
     if (rows.length) {
       const { error } = await s.from('post_images').insert(rows);
