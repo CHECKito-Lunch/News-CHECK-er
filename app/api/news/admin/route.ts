@@ -1,80 +1,119 @@
+// app/api/news/admin/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { getUserFromRequest } from '@/lib/getUserFromRequest';
-import { T } from '@/lib/tables';
 
-type Body = {
-  post: {
-    title: string;
-    summary: string | null;
-    content: string | null;
-    slug: string | null;
-    vendor_id: number | null;
-    status: 'draft'|'scheduled'|'published';
-    pinned_until: string | null;
-    effective_from: string | null;
-  };
-  categoryIds?: number[];
-  badgeIds?: number[];
-  sources?: { url: string; label?: string | null; sort_order?: number }[];
-};
+type ImagePayload = { path: string; title: string | null; sort_order: number | null };
+
+function safeDate(v: unknown): string | null {
+  if (!v) return null;
+  const d = new Date(String(v));
+  return Number.isFinite(d.getTime()) ? d.toISOString() : null;
+}
 
 export async function POST(req: NextRequest) {
   const s = supabaseAdmin();
-  const { post, categoryIds = [], badgeIds = [], sources = [] } = (await req.json()) as Body;
+  const body = await req.json().catch(() => ({} as any));
 
-  // Editor ermitteln
-  const user = await getUserFromRequest();
-  const editor_user_id = user?.id ?? null;
+  const post = body?.post ?? {};
+  const images: ImagePayload[] = Array.isArray(body?.images) ? body.images : [];
 
-  // 1) Post
-  const { data: created, error } = await s
-    .from(T.posts)
-    .insert({ ...post, author_id: editor_user_id })
+  // Status/Effektives Datum normalisieren
+  const insertPost = {
+    title:        String(post.title ?? '').trim(),
+    slug:         String(post.slug ?? '').trim(),
+    summary:      post.summary ?? null,
+    content:      post.content ?? null,          // HTML
+    vendor_id:    post.vendor_id ?? null,        // muss in vendors existieren oder null
+    status:       (post.status ?? 'published') as 'draft'|'scheduled'|'published',
+    pinned_until: safeDate(post.pinned_until),
+    effective_from: safeDate(post.effective_from),
+  };
+
+  if (!insertPost.title || !insertPost.slug) {
+    return NextResponse.json({ ok:false, error:'title_or_slug_missing' }, { status: 400 });
+  }
+
+  const { data: created, error: errPost } = await s
+    .from('posts')
+    .insert(insertPost)
     .select('id, slug')
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-  const post_id = created.id as number;
-
-  // 2) Joins
-  if (categoryIds.length) {
-    const rows = categoryIds.map((category_id) => ({ post_id, category_id }));
-    const { error: e1 } = await s.from(T.postCategories).insert(rows);
-    if (e1) return NextResponse.json({ error: e1.message }, { status: 500 });
-  }
-  if (badgeIds.length) {
-    const rows = badgeIds.map((badge_id) => ({ post_id, badge_id }));
-    const { error: e2 } = await s.from(T.postBadges).insert(rows);
-    if (e2) return NextResponse.json({ error: e2.message }, { status: 500 });
-  }
-  if (sources.length) {
-    const rows = sources
-      .filter((x) => x.url?.trim())
-      .map((x, i) => ({ post_id, url: x.url.trim(), label: x.label ?? null, sort_order: x.sort_order ?? i }));
-    const { error: e3 } = await s.from('post_sources').insert(rows);
-    if (e3) return NextResponse.json({ error: e3.message }, { status: 500 });
+  if (errPost || !created) {
+    return NextResponse.json({ ok:false, error: errPost?.message ?? 'insert_failed' }, { status: 500 });
   }
 
-  // 3) Revision „create“
-  const editorName =
-    editor_user_id
-      ? (await s.from(T.appUsers).select('name').eq('user_id', editor_user_id).maybeSingle()).data?.name ?? null
-      : null;
+  // --------- Galerie speichern ---------
+  if (images.length) {
+    const rows = images
+      .filter(im => typeof im?.path === 'string' && im.path.trim() !== '')
+      .map((im, i) => ({
+        post_id:   created.id,
+        path:      im.path.trim(),
+        title:     (im.title ?? null),
+        sort_order: Number.isFinite(im.sort_order as number) ? im.sort_order : i,
+      }));
 
-  await s.from('post_revisions').insert({
-    post_id,
-    editor_user_id,
-    editor_name: editorName,
-    action: 'create',
-    changes: {
-      fields: Object.entries(post).map(([key, val]) => ({ key, from: null, to: val })),
-      categories: { added: categoryIds, removed: [] },
-      badges: { added: badgeIds, removed: [] },
-      sources: { added: sources.map((s) => s.url), removed: [] },
-    },
-  });
+    if (rows.length) {
+      const { error: errImgs } = await s.from('post_images').insert(rows);
+      if (errImgs) {
+        // nicht hart abbrechen – aber melden
+        console.error('[post_images insert]', errImgs.message);
+      }
+    }
+  }
 
-  return NextResponse.json({ id: post_id, slug: created.slug ?? post.slug ?? null });
+  return NextResponse.json({ ok:true, id: created.id, slug: created.slug });
+}
+
+export async function PATCH(req: NextRequest) {
+  const s = supabaseAdmin();
+  const body = await req.json().catch(() => ({} as any));
+
+  const id = Number(req.nextUrl.pathname.split('/').pop()); // /api/news/admin/:id (oder passe an deine Route an)
+  if (!Number.isFinite(id)) {
+    return NextResponse.json({ ok:false, error:'invalid_id' }, { status: 400 });
+  }
+
+  const post = body?.post ?? {};
+  const images: ImagePayload[] = Array.isArray(body?.images) ? body.images : [];
+
+  const updatePost = {
+    title:          post.title ?? undefined,
+    slug:           post.slug ?? undefined,
+    summary:        post.summary ?? undefined,
+    content:        post.content ?? undefined,
+    vendor_id:      post.vendor_id ?? undefined,
+    status:         post.status ?? undefined,
+    pinned_until:   safeDate(post.pinned_until) ?? undefined,
+    effective_from: safeDate(post.effective_from) ?? undefined,
+  };
+
+  const { error: errUpd } = await s.from('posts').update(updatePost).eq('id', id);
+  if (errUpd) {
+    return NextResponse.json({ ok:false, error: errUpd.message }, { status: 500 });
+  }
+
+  // --------- Galerie neu setzen: löschen & neu einfügen ---------
+  // (alternativ: diff/UPSERT – hier simplest reliable)
+  const { error: errDel } = await s.from('post_images').delete().eq('post_id', id);
+  if (errDel) console.error('[post_images delete]', errDel.message);
+
+  if (images.length) {
+    const rows = images
+      .filter(im => typeof im?.path === 'string' && im.path.trim() !== '')
+      .map((im, i) => ({
+        post_id:   id,
+        path:      im.path.trim(),
+        title:     (im.title ?? null),
+        sort_order: Number.isFinite(im.sort_order as number) ? im.sort_order : i,
+      }));
+
+    if (rows.length) {
+      const { error: errIns } = await s.from('post_images').insert(rows);
+      if (errIns) console.error('[post_images insert]', errIns.message);
+    }
+  }
+
+  return NextResponse.json({ ok:true, id });
 }
