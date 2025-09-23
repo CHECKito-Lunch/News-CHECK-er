@@ -233,116 +233,111 @@ export default function HomePage() {
 
   return (
     <div className="container max-w-7xl mx-auto py-6 space-y-8">
-      {/* Grid: Feed + Sidebar */}
-      <div className="grid grid-cols-12 gap-6">
-        {/* FEED ---------------------------------------------------------- */}
-        <div className="col-span-12 lg:col-span-7 space-y-6">
-          <section className={card + ' p-4'}>
-            <div className={header}>
-              <h2 className="text-lg font-semibold">Was gibt&apos;s Neues?</h2>
-              <div className="flex items-center gap-3 text-sm">
-                <Link href="/events" className="text-blue-600 hover:underline">Alle Events →</Link>
-                <Link href="/news" className="text-blue-600 hover:underline">Alle News →</Link>
-              </div>
+      {/* OBERER BEREICH: Drei Kacheln (KPIs, Tools, Kalender) */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* KPIs */}
+        <section className={card + ' p-4'}>
+          <div className={header}><h2 className="text-lg font-semibold">Kennzahlen</h2></div>
+          {loadingSide ? (
+            <div className="grid grid-cols-2 gap-3 animate-pulse">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="h-16 rounded-xl bg-gray-50/70 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-800" />
+              ))}
             </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              {kpis.length === 0 && <div className="text-sm text-gray-500 col-span-2">Noch keine KPIs hinterlegt.</div>}
+              {kpis.slice(0, 6).map(k => (
+                <div key={k.id} className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/60 p-3">
+                  <div className="text-[12px] text-gray-500">{k.label}</div>
+                  <div className="mt-0.5 text-2xl font-semibold tracking-tight">
+                    {k.value}{k.unit && <span className="text-sm font-normal ml-1">{k.unit}</span>}
+                  </div>
+                  {k.trend && (
+                    <div className="text-xs mt-1" style={{ color: k.color || undefined }}>
+                      {k.trend === 'up' ? '▲' : k.trend === 'down' ? '▼' : '→'} Trend
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
 
-            {loadingFeed && (
-              <ul className="grid gap-3 animate-pulse">
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <li key={i} className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50/70 dark:bg-gray-800/50 h-20" />
-                ))}
-              </ul>
-            )}
+        {/* Tools */}
+        <section className={card + ' p-4'}>
+          <div className={header}><h2 className="text-lg font-semibold">Die wichtigsten Tools</h2></div>
+          {loadingSide ? (
+            <div className="grid grid-cols-2 gap-3 animate-pulse">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="h-12 rounded-xl bg-gray-50/70 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-800" />
+              ))}
+            </div>
+          ) : (
+            <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {tools.length === 0 && <li className="text-sm text-gray-500">Keine Tools gefunden.</li>}
+              {tools.map(tool => (
+                <li key={tool.id}>
+                  <Link
+                    href={tool.href}
+                    className="group flex items-center gap-2 rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/60 px-3 py-2 hover:bg-white/70 dark:hover:bg-white/10"
+                  >
+                    <span aria-hidden className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-white/10">
+                      {tool.icon}
+                    </span>
+                    <span className="truncate">{tool.title}</span>
+                    <svg className="ml-auto h-4 w-4 opacity-60 group-hover:opacity-100" viewBox="0 0 24 24">
+                      <path d="M7 17L17 7M9 7h8v8" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" />
+                    </svg>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
 
-            {!loadingFeed && unifiedFeed.length === 0 && (
-              <div className="text-sm text-gray-500 px-2 py-2">Keine Einträge.</div>
-            )}
+        {/* Kalender */}
+        <section className={card + ' p-4'}>
+          <div className={header}><h2 className="text-lg font-semibold">Termine, Ferien & Feiertage</h2></div>
+          <CalendarModern events={events} />
+        </section>
+      </div>
 
-            {!loadingFeed && unifiedFeed.length > 0 && (
-              <ul className="grid gap-3">
-                {unifiedFeed.map(entry => (
-                  <li key={entry.key} className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/60 p-4">
-                    {entry.kind === 'news'
-                      ? <NewsCard it={entry.data as Item} />
-                      : <EventCard ev={entry.data as EventFeedRow} />
-                    }
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
+      {/* MITTE: Was gibt's Neues? (volle Breite) */}
+      <section className={card + ' p-4'}>
+        <div className={header}>
+          <h2 className="text-lg font-semibold">Was gibt&apos;s Neues?</h2>
+          <div className="flex items-center gap-3 text-sm">
+            <Link href="/events" className="text-blue-600 hover:underline">Alle Events →</Link>
+            <Link href="/news" className="text-blue-600 hover:underline">Alle News →</Link>
+          </div>
         </div>
 
-        {/* SIDEBAR ------------------------------------------------------ */}
-        <aside className="col-span-12 lg:col-span-5 space-y-6 lg:sticky lg:top-24 self-start">
-          {/* KPIs */}
-          <section className={card + ' p-4'}>
-            <div className={header}><h2 className="text-lg font-semibold">Kennzahlen</h2></div>
-            {loadingSide ? (
-              <div className="grid grid-cols-2 gap-3 animate-pulse">
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <div key={i} className="h-16 rounded-xl bg-gray-50/70 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-800" />
-                ))}
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 gap-3">
-                {kpis.length === 0 && <div className="text-sm text-gray-500 col-span-2">Noch keine KPIs hinterlegt.</div>}
-                {kpis.slice(0, 6).map(k => (
-                  <div key={k.id} className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/60 p-3">
-                    <div className="text-[12px] text-gray-500">{k.label}</div>
-                    <div className="mt-0.5 text-2xl font-semibold tracking-tight">
-                      {k.value}{k.unit && <span className="text-sm font-normal ml-1">{k.unit}</span>}
-                    </div>
-                    {k.trend && (
-                      <div className="text-xs mt-1" style={{ color: k.color || undefined }}>
-                        {k.trend === 'up' ? '▲' : k.trend === 'down' ? '▼' : '→'} Trend
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
+        {loadingFeed && (
+          <ul className="grid gap-3 animate-pulse">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <li key={i} className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50/70 dark:bg-gray-800/50 h-20" />
+            ))}
+          </ul>
+        )}
 
-          {/* Tools */}
-          <section className={card + ' p-4'}>
-            <div className={header}><h2 className="text-lg font-semibold">Die wichtigsten Tools</h2></div>
-            {loadingSide ? (
-              <div className="grid grid-cols-2 gap-3 animate-pulse">
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <div key={i} className="h-12 rounded-xl bg-gray-50/70 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-800" />
-                ))}
-              </div>
-            ) : (
-              <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {tools.length === 0 && <li className="text-sm text-gray-500">Keine Tools gefunden.</li>}
-                {tools.map(tool => (
-                  <li key={tool.id}>
-                    <Link
-                      href={tool.href}
-                      className="group flex items-center gap-2 rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/60 px-3 py-2 hover:bg-white/70 dark:hover:bg-white/10"
-                    >
-                      <span aria-hidden className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-white/10">
-                        {tool.icon}
-                      </span>
-                      <span className="truncate">{tool.title}</span>
-                      <svg className="ml-auto h-4 w-4 opacity-60 group-hover:opacity-100" viewBox="0 0 24 24">
-                        <path d="M7 17L17 7M9 7h8v8" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" />
-                      </svg>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
+        {!loadingFeed && unifiedFeed.length === 0 && (
+          <div className="text-sm text-gray-500 px-2 py-2">Keine Einträge.</div>
+        )}
 
-          {/* Kalender */}
-          <section className={card + ' p-4'}>
-            <div className={header}><h2 className="text-lg font-semibold">Termine, Ferien & Feiertage</h2></div>
-            <CalendarModern events={events} />
-          </section>
-        </aside>
-      </div>
+        {!loadingFeed && unifiedFeed.length > 0 && (
+          <ul className="grid gap-3">
+            {unifiedFeed.map(entry => (
+              <li key={entry.key} className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/60 p-4">
+                {entry.kind === 'news'
+                  ? <NewsCard it={entry.data as Item} />
+                  : <EventCard ev={entry.data as EventFeedRow} />
+                }
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
       {/* TOURISTISCHE NEWS (am Seitenende) */}
       <section className={card + ' p-4'}>
