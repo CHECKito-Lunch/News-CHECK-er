@@ -587,7 +587,7 @@ function MarkdownEditor({
           {value.trim() ? (
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{value}</ReactMarkdown>
           ) : (
-            <div className="text-sm text-gray-500">Keine Inhalte.</div>
+            <div className="text-sm text-gray-500">Keine Inhalte</div>
           )}
         </div>
       )}
