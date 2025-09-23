@@ -1,89 +1,89 @@
-// app/api/events/[id]/rsvp/route.ts
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { supabaseServer } from '@/lib/supabase-server';
 import { getUserFromRequest } from '@/lib/getUserFromRequest';
 
-async function requireUser() {
+// GET: aktuellen RSVP-Status der eingeloggten Person holen
+export async function GET(_req: NextRequest, context: { params: { id: string } }) {
   const s = await supabaseServer();
   const u = await getUserFromRequest();
-  if (!u) return { s, user: null as null };
-  return { s, user: u };
-}
+  if (!u) return NextResponse.json({ ok: false, state: 'none' });
 
-export async function GET(_req: Request, { params }: any) {
-  const { s, user } = await requireUser();
-  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
-
-  const event_id = Number(params?.id);
-  if (!Number.isFinite(event_id)) {
-    return NextResponse.json({ error: 'bad_event_id' }, { status: 400 });
-  }
-
+  const event_id = Number(context.params.id);
   const { data, error } = await s
     .from('event_registrations')
-    .select('event_id,user_id,state,created_at,updated_at')
+    .select('state')
     .eq('event_id', event_id)
-    .eq('user_id', user.id)
+    .eq('user_id', u.id) // user_id ist in deiner Tabelle text, Supabase castet automatisch
     .maybeSingle();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ data }); // data = null wenn (noch) nicht registriert
+  if (error) return NextResponse.json({ ok: false, state: 'none' });
+  return NextResponse.json({ ok: true, state: (data?.state ?? 'none') });
 }
 
-export async function POST(req: Request, { params }: any) {
-  const { s, user } = await requireUser();
-  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+// POST: { action: 'join' | 'leave' }
+export async function POST(req: NextRequest, context: { params: { id: string } }) {
+  const s = await supabaseServer();
+  const u = await getUserFromRequest();
+  if (!u) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
 
-  const event_id = Number(params?.id);
-  if (!Number.isFinite(event_id)) {
-    return NextResponse.json({ error: 'bad_event_id' }, { status: 400 });
+  const { action } = await req.json().catch(() => ({}));
+  const event_id = Number(context.params.id);
+
+  if (action === 'leave') {
+    const { error } = await s
+      .from('event_registrations')
+      .delete()
+      .eq('event_id', event_id)
+      .eq('user_id', u.id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true, state: 'none' });
   }
 
-  // optional: state aus Body (default 'confirmed')
-  const body = await req.json().catch(() => ({}));
-  const state: 'confirmed' | 'waitlist' = ['confirmed', 'waitlist'].includes(body?.state)
-    ? body.state
-    : 'confirmed';
+  if (action !== 'join') {
+    return NextResponse.json({ error: 'bad_request' }, { status: 400 });
+  }
 
-  // versuche Update; wenn keine Zeile betroffen, Insert
-  const { data: upd, error: updErr } = await s
+  // 1) Event holen (Kapazität)
+  const { data: ev } = await s
+    .from('events')
+    .select('capacity')
+    .eq('id', event_id)
+    .maybeSingle();
+
+  // 2) Anzahl bestätigter Plätze zählen
+  const { count: confirmedCount } = await s
     .from('event_registrations')
-    .update({ state, updated_at: new Date().toISOString() })
+    .select('*', { count: 'exact', head: true })
     .eq('event_id', event_id)
-    .eq('user_id', user.id)
-    .select('id');
+    .eq('state', 'confirmed');
 
-  if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
+  const cap = ev?.capacity ?? null;
+  const shouldWaitlist = cap !== null && typeof confirmedCount === 'number' && confirmedCount >= cap;
 
-  if (!upd?.length) {
-    const { error: insErr } = await s.from('event_registrations').insert({
-      event_id,
-      user_id: user.id,
-      state,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    });
-    if (insErr) return NextResponse.json({ error: insErr.message }, { status: 500 });
+  // 3) Falls Warteliste: nächste Position berechnen
+  let position: number | null = null;
+  if (shouldWaitlist) {
+    const { data: posRow } = await s
+      .from('event_registrations')
+      .select('position')
+      .eq('event_id', event_id)
+      .order('position', { ascending: false, nullsFirst: false })
+      .limit(1)
+      .maybeSingle();
+    position = (posRow?.position ?? 0) + 1;
   }
 
-  return NextResponse.json({ ok: true, state });
-}
-
-export async function DELETE(_req: Request, { params }: any) {
-  const { s, user } = await requireUser();
-  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
-
-  const event_id = Number(params?.id);
-  if (!Number.isFinite(event_id)) {
-    return NextResponse.json({ error: 'bad_event_id' }, { status: 400 });
-  }
+  // 4) Upsert mit erlaubtem state
+  const state: 'confirmed' | 'waitlist' = shouldWaitlist ? 'waitlist' : 'confirmed';
 
   const { error } = await s
     .from('event_registrations')
-    .delete()
-    .eq('event_id', event_id)
-    .eq('user_id', user.id);
+    .upsert(
+      { event_id, user_id: u.id, state, position, updated_at: new Date().toISOString() },
+      { onConflict: 'event_id,user_id' }
+    );
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true });
+
+  return NextResponse.json({ ok: true, state });
 }
