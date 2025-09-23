@@ -5,6 +5,7 @@ export const revalidate = 0;
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { headers } from 'next/headers';
+import LightboxGallery from '@/app/components/LightboxGallery';
 
 type PostImage = { url: string; caption?: string | null; sort_order?: number | null };
 type ApiData = {
@@ -93,7 +94,7 @@ export default async function Page({ params }: { params?: Promise<any> }) {
         <p className="text-lg text-gray-700 dark:text-gray-300">{data.summary}</p>
       )}
 
-      {!!data.images?.length && <Gallery images={data.images} />}
+      {!!data.images?.length && <LightboxGallery images={data.images} />}
 
       {/* API liefert HTML → direkt rendern */}
       {data.content && (
