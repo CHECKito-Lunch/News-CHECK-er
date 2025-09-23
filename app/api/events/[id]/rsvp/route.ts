@@ -3,15 +3,18 @@ import { NextResponse } from 'next/server';
 import { supabaseServer } from '@/lib/supabase-server';
 import { getUserFromRequest } from '@/lib/getUserFromRequest';
 
-type RouteContext = { params: { id: string } };
-
 // GET: aktuellen RSVP-Status der eingeloggten Person holen
-export async function GET(_req: Request, context: RouteContext) {
+export async function GET(
+  _req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
   const s = await supabaseServer();
   const u = await getUserFromRequest();
   if (!u) return NextResponse.json({ ok: false, state: 'none' });
 
-  const event_id = Number(context.params.id);
+  const { id } = await params;
+  const event_id = Number(id);
+
   const { data, error } = await s
     .from('event_registrations')
     .select('state')
@@ -24,13 +27,17 @@ export async function GET(_req: Request, context: RouteContext) {
 }
 
 // POST: { action: 'join' | 'leave' }
-export async function POST(req: Request, context: RouteContext) {
+export async function POST(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
   const s = await supabaseServer();
   const u = await getUserFromRequest();
   if (!u) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
 
   const { action } = await req.json().catch(() => ({} as { action?: string }));
-  const event_id = Number(context.params.id);
+  const { id } = await params;
+  const event_id = Number(id);
 
   if (action === 'leave') {
     const { error } = await s
@@ -88,6 +95,5 @@ export async function POST(req: Request, context: RouteContext) {
     );
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
   return NextResponse.json({ ok: true, state });
 }
