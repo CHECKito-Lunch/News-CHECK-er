@@ -30,7 +30,12 @@ const btn   = 'px-3 py-2 rounded-lg text-sm border bg-white hover:bg-gray-50 dar
 const primary = 'px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white';
 
 // Kleine, schlanke Icon-Palette (Emoji) --------------------------------
-const ICONS = ['📌','🎓','🎉','🏖️','🏢','🗓️','🧪','🏆','📣','💡','🤝','🚀'];
+const ICONS = ['📌','🎓','🎉','🏖️','🏢','🗓️','🧪','🏆','📣','💡','🤝','🚀','🟢','🔵','🟡','🟣'];
+
+// Helfer zum Datumsformat (de) -----------------------------------------
+function fmtDate(d: Date) {
+  return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
 
 export default function AdminTerminePage() {
   const [rows, setRows] = useState<Termin[]>([]);
@@ -156,21 +161,59 @@ export default function AdminTerminePage() {
     ...rows.map(t => {
       const s = t.starts_at || t.start || t.date; // Fallback für alte Daten
       const e = t.ends_at || t.end || undefined;
-      const prefix = (t.icon || '📌') + ' ';
       return {
         id: String(t.id),
-        title: prefix + t.title,
+        title: t.title, // kein Icon im Title, Icon separat rendern
         start: s,
         end: e || undefined, // FullCalendar erwartet exclusive end
         allDay: true,
         backgroundColor: '#2563eb',
         textColor:'#fff',
-        extendedProps: { terminId: t.id },
+        extendedProps: { terminId: t.id, icon: t.icon || '📌', source: 'manual' },
       };
     }),
+    // ICS-Quellen (keine Icons, werden im Renderer generisch angezeigt)
     { url: 'https://feiertage-api.de/api/?bundesland=SN&out=ical', format:'ics' },
     { url: 'https://www.schulferien.org/iCal/Ferien/ical/Sachsen.ics', format:'ics' },
   ]), [rows]);
+
+  // Custom Event Renderer, der ZeitRANGE & Icon sauber zeigt ------------
+  function renderEventContent(arg: any) {
+    const ev = arg.event;
+    const isAllDay = ev.allDay;
+    const start: Date | null = ev.start ? new Date(ev.start) : null;
+    const endExclusive: Date | null = ev.end ? new Date(ev.end) : null;
+    // Bei Ganztägig ist end exklusiv → für Anzeige -1 Tag
+    const endInclusive = endExclusive && isAllDay ? new Date(endExclusive.getTime() - 86400000) : endExclusive;
+
+    // Zeittext: für Ganztägig entweder "ganztägig" oder "DD.MM.YYYY – DD.MM.YYYY"
+    let timeText = arg.timeText || '';
+    if (isAllDay && start) {
+      if (endInclusive && start.toDateString() !== endInclusive.toDateString()) {
+        timeText = `${fmtDate(start)} – ${fmtDate(endInclusive)}`;
+      } else {
+        timeText = 'ganztägig';
+      }
+    }
+
+    // Icon-Logik: manuelle Events → extendedProps.icon; ICS → generisch
+    let icon = (ev.extendedProps && (ev.extendedProps as any).icon) || '';
+    if (!icon) {
+      const url = (ev as any).source?.url as string | undefined;
+      if (url?.includes('schulferien')) icon = '🏖️';
+      else if (url?.includes('feiertage-api')) icon = '🎌';
+      else icon = '📅';
+    }
+
+    return (
+      <div className="flex items-center gap-2 px-2 py-1 text-sm">
+        {timeText && <span className="opacity-70 whitespace-nowrap">{timeText}</span>}
+        <span className="opacity-40">·</span>
+        <span className="text-base leading-none">{icon}</span>
+        <span className="font-medium truncate">{ev.title}</span>
+      </div>
+    );
+  }
 
   // --- Render --------------------------------------------------------
   return (
@@ -232,6 +275,7 @@ export default function AdminTerminePage() {
             setEndsAt(e ? e.toISOString().slice(0,10) : s);
           }}
           events={calendarEvents}
+          eventContent={renderEventContent}
           eventClick={(info) => {
             const id = (info.event.extendedProps as any)?.terminId || Number(info.event.id);
             const t = rows.find(x => x.id === Number(id));
@@ -264,8 +308,8 @@ export default function AdminTerminePage() {
                     <tr key={t.id} className="border-t border-gray-100 dark:border-gray-800">
                       <td className="px-3 py-2 text-xl">{t.icon || '📌'}</td>
                       <td className="px-3 py-2 font-medium">{t.title}</td>
-                      <td className="px-3 py-2">{von ? von.toLocaleDateString('de-DE') : '—'}</td>
-                      <td className="px-3 py-2">{bis ? bis.toLocaleDateString('de-DE') : '—'}</td>
+                      <td className="px-3 py-2">{von ? fmtDate(von) : '—'}</td>
+                      <td className="px-3 py-2">{bis ? fmtDate(bis) : '—'}</td>
                       <td className="px-3 py-2 text-right">
                         <div className="inline-flex gap-2">
                           <button className={btn} onClick={()=>openEditModal(t)}>Bearbeiten</button>
