@@ -367,7 +367,7 @@ export default function AdminEventsPage() {
           <h2 className="text-lg font-semibold">Liste</h2>
           <div className="flex gap-2">
             <input placeholder="Suche…" className={input + ' w-64'} value={q} onChange={e=>setQ(e.target.value)} />
-            <button className={btn} onClick={load}>Suchen</button>
+            <button className={btn} onClick={load}>Event suchen</button>
           </div>
         </div>
 
