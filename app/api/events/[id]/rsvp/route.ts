@@ -1,9 +1,12 @@
-import { NextRequest, NextResponse } from 'next/server';
+// app/api/events/[id]/rsvp/route.ts
+import { NextResponse } from 'next/server';
 import { supabaseServer } from '@/lib/supabase-server';
 import { getUserFromRequest } from '@/lib/getUserFromRequest';
 
+type RouteContext = { params: { id: string } };
+
 // GET: aktuellen RSVP-Status der eingeloggten Person holen
-export async function GET(_req: NextRequest, context: { params: { id: string } }) {
+export async function GET(_req: Request, context: RouteContext) {
   const s = await supabaseServer();
   const u = await getUserFromRequest();
   if (!u) return NextResponse.json({ ok: false, state: 'none' });
@@ -13,20 +16,20 @@ export async function GET(_req: NextRequest, context: { params: { id: string } }
     .from('event_registrations')
     .select('state')
     .eq('event_id', event_id)
-    .eq('user_id', u.id) // user_id ist in deiner Tabelle text, Supabase castet automatisch
+    .eq('user_id', u.id)
     .maybeSingle();
 
   if (error) return NextResponse.json({ ok: false, state: 'none' });
-  return NextResponse.json({ ok: true, state: (data?.state ?? 'none') });
+  return NextResponse.json({ ok: true, state: data?.state ?? 'none' });
 }
 
 // POST: { action: 'join' | 'leave' }
-export async function POST(req: NextRequest, context: { params: { id: string } }) {
+export async function POST(req: Request, context: RouteContext) {
   const s = await supabaseServer();
   const u = await getUserFromRequest();
   if (!u) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
 
-  const { action } = await req.json().catch(() => ({}));
+  const { action } = await req.json().catch(() => ({} as { action?: string }));
   const event_id = Number(context.params.id);
 
   if (action === 'leave') {
@@ -58,7 +61,8 @@ export async function POST(req: NextRequest, context: { params: { id: string } }
     .eq('state', 'confirmed');
 
   const cap = ev?.capacity ?? null;
-  const shouldWaitlist = cap !== null && typeof confirmedCount === 'number' && confirmedCount >= cap;
+  const shouldWaitlist =
+    cap !== null && typeof confirmedCount === 'number' && confirmedCount >= cap;
 
   // 3) Falls Warteliste: nächste Position berechnen
   let position: number | null = null;
@@ -67,7 +71,7 @@ export async function POST(req: NextRequest, context: { params: { id: string } }
       .from('event_registrations')
       .select('position')
       .eq('event_id', event_id)
-      .order('position', { ascending: false, nullsFirst: false })
+      .order('position', { ascending: false })
       .limit(1)
       .maybeSingle();
     position = (posRow?.position ?? 0) + 1;
