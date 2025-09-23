@@ -274,7 +274,7 @@ export default function AdminTerminePage() {
                 <button disabled={!canSaveEdit} onClick={saveEdit} className={primary} type="button">Speichern</button>
               </div>
             </div>
-            <p className="text-xs text-gray-500 mt-2">Wenn kein Ende gesetzt ist, wird der Termin als eintägig gespeichert.</p>
+            <p className="text-xs text-gray-500 mt-2">Wenn kein Ende gesetzt ist, wird der Termin als eintägig gespeichert!</p>
           </div>
         </div>
       )}
