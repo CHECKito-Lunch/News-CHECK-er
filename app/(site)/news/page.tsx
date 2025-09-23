@@ -7,6 +7,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useSearchParams } from 'next/navigation';
 import DOMPurify from 'isomorphic-dompurify';
+import LightboxGallery from '@/app/components/LightboxGallery';
 
 // Typen
 type Badge = { id: number; name: string; color: string; kind: string };
@@ -19,6 +20,8 @@ type Category = {
   badgesFilter?: boolean;
   searchFilter?: boolean;
 };
+
+type PostImage = { url: string; caption?: string | null; sort_order?: number | null };
 
 // Quellen des Beitrags
 type PostSource = { url: string; label: string | null; sort_order?: number };
@@ -36,6 +39,7 @@ type Item = {
   post_categories: { category: Category }[];
   post_badges: { badge: Badge }[];
   sources?: PostSource[];
+  images?: PostImage[];
   author_name?: string | null;
 };
 
@@ -337,30 +341,56 @@ export default function Page() {
                     </div>
 
                     {/* Aufklapp-Inhalt */}
-                    {isOpen && it.content && (
-                      <div id={`post-content-${it.id}`} role="region" aria-label="Beitragsinhalt" className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+{isOpen && (
+  <div
+    id={`post-content-${it.id}`}
+    role="region"
+    aria-label="Beitragsinhalt"
+    className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700"
+  >
+    {/* Galerie falls vorhanden */}
+    {!!it.images?.length && (
+      <div className="mb-4">
+        <LightboxGallery
+          images={[...(it.images ?? [])].sort(
+            (a, b) =>
+              (a.sort_order ?? Number.MAX_SAFE_INTEGER) -
+              (b.sort_order ?? Number.MAX_SAFE_INTEGER)
+          )}
+        />
+      </div>
+    )}
 
-                        {/* RICH TEXT: HTML ODER MARKDOWN */}
-                        <div className="prose dark:prose-invert max-w-none prose-p:my-3 prose-li:my-1">
-                          {isProbablyHTML(it.content) ? (
-                            <div
-                              dangerouslySetInnerHTML={{ __html: sanitize(it.content) }}
-                              className="[&_a]:underline [&_a]:break-words [&_a]:text-blue-700 dark:[&_a]:text-blue-400 [&_img]:max-w-full [&_img]:h-auto"
-                            />
-                          ) : (
-                            <ReactMarkdown
-                              remarkPlugins={[remarkGfm]}
-                              components={{
-                                a: (props) => (
-                                  <a {...props} target="_blank" rel="noopener noreferrer" className="text-blue-700 dark:text-blue-400 underline" />
-                                ),
-                                img: (props) => <img {...props} loading="lazy" className="max-w-full h-auto" />,
-                              }}
-                            >
-                              {it.content}
-                            </ReactMarkdown>
-                          )}
-                        </div>
+    {/* RICH TEXT: HTML ODER MARKDOWN */}
+    {it.content && (
+      <div className="prose dark:prose-invert max-w-none prose-p:my-3 prose-li:my-1">
+        {isProbablyHTML(it.content) ? (
+          <div
+            dangerouslySetInnerHTML={{ __html: sanitize(it.content) }}
+            className="[&_a]:underline [&_a]:break-words [&_a]:text-blue-700 dark:[&_a]:text-blue-400 [&_img]:max-w-full [&_img]:h-auto"
+          />
+        ) : (
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              a: (props) => (
+                <a
+                  {...props}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-700 dark:text-blue-400 underline"
+                />
+              ),
+              img: (props) => (
+                <img {...props} loading="lazy" className="max-w-full h-auto" />
+              ),
+            }}
+          >
+            {it.content}
+          </ReactMarkdown>
+        )}
+      </div>
+    )}
 
                         {/* Chips */}
                         <div className="flex flex-wrap gap-2 mt-4">
