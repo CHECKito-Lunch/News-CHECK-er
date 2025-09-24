@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useEditor, EditorContent } from '@tiptap/react';
+import { useEditor, EditorContent, ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Underline from '@tiptap/extension-underline';
 import Link from '@tiptap/extension-link';
@@ -21,7 +21,38 @@ type Props = {
   placeholder?: string;
 };
 
-// --- Poll Node (Leaf/Atom: kein Content-Hole, draggable) ---
+/* -------- Poll NodeView (Editor-Vorschau) -------- */
+function PollView({ node, selected }: any) {
+  const q = node.attrs.question as string;
+  const options = (node.attrs.options as string[]) ?? [];
+
+  return (
+    <NodeViewWrapper
+      as="div"
+      className={`rounded-xl border p-3 my-2 bg-white/60 dark:bg-white/5 border-gray-200 dark:border-gray-700 ${
+        selected ? 'ring-2 ring-blue-400' : ''
+      }`}
+      data-type="poll"
+    >
+      <div className="text-xs font-medium text-gray-500 mb-1">Abstimmung</div>
+      <div className="text-sm font-semibold mb-2">{q || '— Frage —'}</div>
+      <div className="flex flex-wrap gap-2">
+        {options.length ? (
+          options.map((o, i) => (
+            <span key={i} className="px-2 py-1 text-xs rounded-full border dark:border-gray-700">
+              {o}
+            </span>
+          ))
+        ) : (
+          <span className="text-xs text-gray-500">Keine Optionen</span>
+        )}
+      </div>
+      <div className="mt-2 text-[11px] text-gray-500">Wird als Datenblock gespeichert und im Frontend gerendert.</div>
+    </NodeViewWrapper>
+  );
+}
+
+/* -------- Poll Node (Leaf/Atom: kein Content-Hole) -------- */
 const Poll = Node.create({
   name: 'poll',
   group: 'block',
@@ -57,9 +88,13 @@ const Poll = Node.create({
     return [{ tag: 'div[data-type="poll"]' }];
   },
 
-  // ⚠️ KEIN `0` (kein Content-Hole) – Leaf darf keine Kinder haben
+  // Leaf: KEIN "0" → kein Content-Hole
   renderHTML({ HTMLAttributes }) {
     return ['div', mergeAttributes(HTMLAttributes, { 'data-type': 'poll' })];
+  },
+
+  addNodeView() {
+    return ReactNodeViewRenderer(PollView);
   },
 });
 
@@ -75,7 +110,7 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Schreib
       TableRow,
       TableHeader,
       TableCell,
-      Poll, // <-- nur einmal registrieren
+      Poll, // sichtbar im Editor via NodeView
     ],
     immediatelyRender: false,
     content: value || '<p></p>',

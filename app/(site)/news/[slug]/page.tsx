@@ -5,7 +5,14 @@ export const revalidate = 0;
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { headers } from 'next/headers';
+import nextDynamic from 'next/dynamic';   
 import LightboxGallery from '@/app/components/LightboxGallery';
+
+
+const PollsClient = nextDynamic(                   
+  () => import('@/app/components/PollsClient'),
+  { ssr: false }
+);
 
 type PostImage = { url: string; caption?: string | null; sort_order?: number | null };
 type ApiData = {
@@ -96,12 +103,19 @@ export default async function Page({ params }: { params?: Promise<any> }) {
 
       {!!data.images?.length && <LightboxGallery images={data.images} />}
 
-      {/* API liefert HTML → direkt rendern */}
+      {/* API liefert HTML → direkt rendern + Polls clientseitig hydratisieren */}
       {data.content && (
-        <article
-          className="prose dark:prose-invert max-w-none prose-p:my-3 prose-li:my-1"
-          dangerouslySetInnerHTML={{ __html: data.content }}
-        />
+        <>
+          <div id="article-root">
+            <article
+              className="prose dark:prose-invert max-w-none prose-p:my-3 prose-li:my-1"
+              dangerouslySetInnerHTML={{ __html: data.content }}
+            />
+          </div>
+
+          {/* Hydration der eingebetteten Poll-Blöcke */}
+          <PollsClient containerSelector="#article-root" postId={data.id} postSlug={data.slug} />
+        </>
       )}
 
       {!!data.post_categories?.length && (

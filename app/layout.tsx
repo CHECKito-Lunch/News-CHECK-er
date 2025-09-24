@@ -1,6 +1,7 @@
 import './globals.css';
 import type { ReactNode } from 'react';
 import type { Metadata } from 'next';
+import type { Viewport } from 'next';
 import 'react-calendar/dist/Calendar.css';
 
 // hier kannst du globale <meta>-Infos setzen:
@@ -11,8 +12,15 @@ export const metadata: Metadata = {
     capable: true, // bewirkt: <meta name="apple-mobile-web-app-capable" content="yes" />
     statusBarStyle: 'default', // Optionen: 'default' | 'black' | 'black-translucent'
   },
-  themeColor: '#2563eb', // z. B. dein Tailwind blue-600
 };
+
+export const viewport: Viewport = {
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#ffffff' },
+    { media: '(prefers-color-scheme: dark)',  color: '#111827' },
+  ],
+};
+
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
