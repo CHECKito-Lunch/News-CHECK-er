@@ -21,11 +21,11 @@ type Props = {
   placeholder?: string;
 };
 
-/** ---- Poll Node (ohne extend, keine Base-Config-Zugriffe) ---- */
+// --- Poll Node (Leaf/Atom → kein Content Hole!) ---
 const Poll = Node.create({
   name: 'poll',
   group: 'block',
-  atom: true,
+  atom: true,          // Leaf node
   selectable: true,
 
   addAttributes() {
@@ -56,7 +56,8 @@ const Poll = Node.create({
   },
 
   renderHTML({ HTMLAttributes }) {
-    return ['div', mergeAttributes(HTMLAttributes, { 'data-type': 'poll' }), 0];
+    // ⚠️ KEIN `0` als dritten Eintrag – sonst Content-Hole in Leaf-Node!
+    return ['div', mergeAttributes(HTMLAttributes, { 'data-type': 'poll' })];
   },
 });
 

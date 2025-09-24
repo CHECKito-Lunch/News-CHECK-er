@@ -7,9 +7,9 @@ import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { withModerator } from '@/lib/with-auth';
 
-const json = (d: any, s = 200) => NextResponse.json(d, { status: s });
+const json = (d: unknown, s = 200) => NextResponse.json(d, { status: s });
 
-// Hilfsfunktion: Next 14/15 kann params als Promise liefern
+// Next 14/15: params können ein Promise sein
 async function getParams(ctx: any) {
   const p = (ctx && ctx.params) || {};
   return typeof p?.then === 'function' ? await p : p;
@@ -19,14 +19,16 @@ async function getParams(ctx: any) {
 export const GET = withModerator(async (_req: NextRequest, ctx) => {
   const { id } = await getParams(ctx);
   const groupId = Number(Array.isArray(id) ? id[0] : id);
-  if (!Number.isFinite(groupId) || groupId <= 0) return json({ error: 'Ungültige groupId' }, 400);
+  if (!Number.isFinite(groupId) || groupId <= 0) {
+    return json({ error: 'Ungültige groupId' }, 400);
+  }
 
   type Row = {
     user_id: string;       // UUID
     app_user_id: number;   // int PK aus app_users (falls vorhanden)
     email: string | null;
     name: string | null;
-    role: string | null;
+    role: string | null;   // aus app_users
     active: boolean | null;
     joined_at: string | null;
   };
@@ -54,17 +56,20 @@ export const GET = withModerator(async (_req: NextRequest, ctx) => {
 export const PUT = withModerator(async (req: NextRequest, ctx) => {
   const { id } = await getParams(ctx);
   const groupId = Number(Array.isArray(id) ? id[0] : id);
-  if (!Number.isFinite(groupId) || groupId <= 0) return json({ error: 'Ungültige groupId' }, 400);
+  if (!Number.isFinite(groupId) || groupId <= 0) {
+    return json({ error: 'Ungültige groupId' }, 400);
+  }
 
-  const body = await req.json().catch(() => ({}));
-
+  const body: unknown = await req.json().catch(() => ({} as unknown));
   // 1) Rohdaten typneutral lesen
-  const inputRaw: unknown[] = Array.isArray(body?.userIds) ? (body.userIds as unknown[]) : [];
+  const inputRaw: unknown[] = Array.isArray((body as any)?.userIds)
+    ? ((body as any).userIds as unknown[])
+    : [];
 
-  // 2) Nur Strings erlauben (Type Guard) → string[]
-  const inputIds: string[] = inputRaw.filter((v): v is string => typeof v === 'string');
+  // 2) Nur Strings erlauben → string[]
+  const inputIds: string[] = inputRaw.filter((v: unknown): v is string => typeof v === 'string');
 
-  // 3) Normalisieren/trimmen + Duplikate raus → string[]
+  // 3) Normalisieren/trimmen + Duplikate raus
   const want: string[] = Array.from(
     new Set(
       inputIds
@@ -72,6 +77,11 @@ export const PUT = withModerator(async (req: NextRequest, ctx) => {
         .filter((v: string): v is string => v.length > 0)
     )
   );
+
+  // (optional) sehr leichter UUID-Check — lässt nur plausible UUIDs durch
+  const uuidish = (s: string) =>
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s);
+  const wantUuids: string[] = want.filter((v: string) => uuidish(v));
 
   // aktuelle Mitglieder holen
   const cur = await sql<{ user_id: string }[]>`
@@ -82,35 +92,42 @@ export const PUT = withModerator(async (req: NextRequest, ctx) => {
   const have = new Set<string>(cur.map((r: { user_id: string }) => r.user_id));
 
   // Differenzen bilden
-  const toAdd: string[] = want.filter((uuid: string) => !have.has(uuid));
-  const wantSet = new Set<string>(want);
+  const toAdd: string[] = wantUuids.filter((uuid: string) => !have.has(uuid));
+  const wantSet = new Set<string>(wantUuids);
   const toRemove: string[] = [...have].filter((uuid: string) => !wantSet.has(uuid));
 
-  // Einfügen (bulk)
+  // Einfügen (bulk) — Tuples mit sql.join(..., sql`, `) trennen
   if (toAdd.length > 0) {
     const tuples = toAdd.map((uuid: string) =>
-      sql`(${groupId}, ${uuid}::uuid, 'member', now())`
+      sql`(${groupId}, ${uuid}::uuid, ${'member'}, now())`
     );
+
     await sql`
       insert into public.group_members (group_id, user_id, role, joined_at)
-      values ${sql(tuples)}
+      values ${sql.join(tuples, sql`, `)}
       on conflict (group_id, user_id) do nothing
     `;
   }
 
-  // Löschen
+  // Löschen — Cast auf uuid, um Typmismatch zu vermeiden
   if (toRemove.length > 0) {
     await sql`
       delete from public.group_members
       where group_id = ${groupId}
-        and user_id in ${sql(toRemove)}
+        and user_id in (
+          select x::uuid from unnest(${toRemove}::text[]) as t(x)
+        )
     `;
   }
 
-  return json({ ok: true, added: toAdd.length, removed: toRemove.length });
+  return json({
+    ok: true,
+    added: toAdd.length,
+    removed: toRemove.length,
+    ignoredInvalid: want.length - wantUuids.length,
+  });
 });
 
-// Optional: explizites 405 verhindern Browser-GET auf falsche Methode
 export function POST() {
   return new Response('Method Not Allowed', { status: 405, headers: { Allow: 'GET, PUT' } });
 }
