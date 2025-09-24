@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { headers } from 'next/headers';
 import LightboxGallery from '@/app/components/LightboxGallery';
-import PollsClient from '@/app/components/PollsClient'; // ⬅️ direkt importieren (Client-Komponente hat "use client")
+import PollsClient from '@/app/components/PollsClient';
 
 type PostImage = { url: string; caption?: string | null; sort_order?: number | null };
 type ApiData = {
@@ -30,7 +30,7 @@ async function getParams(p?: Promise<any>) {
   return v ?? {};
 }
 
-// ⬇️ WICHTIG: headers() awaiten (liefert bei dir Promise<ReadonlyHeaders>)
+// ⬇️ In deinem Setup: headers() ist async → also hier awaiten
 async function getAbsoluteBaseUrl() {
   const h = await headers();
   const host = h.get('x-forwarded-host') ?? h.get('host');
@@ -55,7 +55,9 @@ export default async function Page({ params }: { params?: Promise<any> }) {
   if (!data) return notFound();
 
   const sources = (data.sources ?? []).slice().sort(
-    (a, b) => (a.sort_order ?? Number.MAX_SAFE_INTEGER) - (b.sort_order ?? Number.MAX_SAFE_INTEGER)
+    (a, b) =>
+      (a.sort_order ?? Number.MAX_SAFE_INTEGER) -
+      (b.sort_order ?? Number.MAX_SAFE_INTEGER)
   );
 
   return (
@@ -131,7 +133,7 @@ export default async function Page({ params }: { params?: Promise<any> }) {
         </div>
       )}
 
-      {!!sources.length && (
+      {!!(sources.length) && (
         <section className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
           <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-2">Quellen</h2>
           <ol className="list-decimal pl-5 space-y-1">
@@ -162,26 +164,4 @@ function prettySourceLabel(url: string, fallback?: string) {
   } catch {
     return url;
   }
-}
-
-function Gallery({ images }: { images: PostImage[] }) {
-  const sorted = images.slice().sort(
-    (a, b) => (a.sort_order ?? Number.MAX_SAFE_INTEGER) - (b.sort_order ?? Number.MAX_SAFE_INTEGER)
-  );
-  return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-      {sorted.map((im, idx) => (
-        <figure
-          key={`${im.url}-${idx}`}
-          className="rounded-xl overflow-hidden border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900">
-          <img src={im.url} alt={im.caption ?? ''} className="w-full h-40 object-cover" />
-          {im.caption && (
-            <figcaption className="px-2 py-1 text-[11px] text-gray-600 dark:text-gray-400">
-              {im.caption}
-            </figcaption>
-          )}
-        </figure>
-      ))}
-    </div>
-  );
 }

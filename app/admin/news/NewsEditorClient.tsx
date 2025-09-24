@@ -22,6 +22,7 @@ const EMOJI_CHOICES = ['📌','📅','🗓️','📣','📊','📝','🧑‍💻
 // ----- Helpers -----
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
 
+
 function publicUrlFromPath(path?: string | null, bucket = 'uploads'): string {
   if (!path) return '';
   if (!SUPABASE_URL) return ''; // Fallback: kein Preview möglich, aber Speichern geht

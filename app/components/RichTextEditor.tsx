@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useEditor, EditorContent, ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Underline from '@tiptap/extension-underline';
@@ -50,8 +50,8 @@ function PollPickerModal({
     if (!open) return;
     setLoading(true);
     fetch('/api/admin/polls', { credentials: 'same-origin' })
-      .then(r => r.json())
-      .then(j => setPolls(Array.isArray(j?.data) ? j.data : []))
+      .then((r) => r.json())
+      .then((j) => setPolls(Array.isArray(j?.data) ? j.data : []))
       .catch(() => setPolls([]))
       .finally(() => setLoading(false));
   }, [open]);
@@ -59,7 +59,7 @@ function PollPickerModal({
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
     if (!s) return polls;
-    return polls.filter(p => {
+    return polls.filter((p) => {
       const hay = `${p.id} ${p.question} ${(p.options || []).join(' ')}`.toLowerCase();
       return hay.includes(s);
     });
@@ -106,10 +106,13 @@ function PollPickerModal({
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <code className="px-1.5 py-0.5 text-[11px] rounded bg-gray-100 dark:bg-gray-800">{p.id}</code>
-                          <span className={`text-[11px] px-1.5 py-0.5 rounded-full border
-                            ${isClosed
-                              ? 'border-gray-300 text-gray-600 dark:border-gray-700 dark:text-gray-300'
-                              : 'border-green-300 text-green-700 dark:border-green-900 dark:text-green-300'}`}>
+                          <span
+                            className={`text-[11px] px-1.5 py-0.5 rounded-full border ${
+                              isClosed
+                                ? 'border-gray-300 text-gray-600 dark:border-gray-700 dark:text-gray-300'
+                                : 'border-green-300 text-green-700 dark:border-green-900 dark:text-green-300'
+                            }`}
+                          >
                             {isClosed ? 'geschlossen' : 'offen'}
                           </span>
                           {p.multi_choice ? (
@@ -201,21 +204,25 @@ const Poll = Node.create({
     return {
       id: {
         default: null,
-        parseHTML: el => el.getAttribute('data-id'),
-        renderHTML: attrs => ({ 'data-id': attrs.id }),
+        parseHTML: (el) => el.getAttribute('data-id'),
+        renderHTML: (attrs) => ({ 'data-id': attrs.id }),
       },
       question: {
         default: 'Wofür stimmst du?',
-        parseHTML: el => el.getAttribute('data-question') || 'Wofür stimmst du?',
-        renderHTML: attrs => ({ 'data-question': attrs.question }),
+        parseHTML: (el) => el.getAttribute('data-question') || 'Wofür stimmst du?',
+        renderHTML: (attrs) => ({ 'data-question': attrs.question }),
       },
       options: {
         default: ['Option A', 'Option B'],
-        parseHTML: el => {
+        parseHTML: (el) => {
           const raw = el.getAttribute('data-options') || '[]';
-          try { return JSON.parse(raw); } catch { return ['Option A', 'Option B']; }
+          try {
+            return JSON.parse(raw);
+          } catch {
+            return ['Option A', 'Option B'];
+          }
         },
-        renderHTML: attrs => ({ 'data-options': JSON.stringify(attrs.options ?? []) }),
+        renderHTML: (attrs) => ({ 'data-options': JSON.stringify(attrs.options ?? []) }),
       },
     };
   },
@@ -224,6 +231,7 @@ const Poll = Node.create({
     return [{ tag: 'div[data-type="poll"]' }];
   },
 
+  // Leaf: kein Content-Hole
   renderHTML({ HTMLAttributes }) {
     return ['div', mergeAttributes(HTMLAttributes, { 'data-type': 'poll' })];
   },
@@ -259,6 +267,17 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Schreib
     },
   });
 
+  // <<< Alignment-Helper JETZT innerhalb der Komponente >>>
+  const isAlign = useCallback(
+    (dir: 'left' | 'center' | 'right') => !!editor?.isActive({ textAlign: dir }),
+    [editor]
+  );
+  const setAlign = useCallback(
+    (dir: 'left' | 'center' | 'right') => editor?.chain().focus().setTextAlign(dir).run(),
+    [editor]
+  );
+  // =====================================================
+
   useEffect(() => {
     if (!editor) return;
     const current = editor.getHTML();
@@ -276,12 +295,13 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Schreib
 
   const can = (fn: () => boolean) => !!editor && fn();
 
-  const insertTable = () => editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
-  const addRow =       () => editor?.chain().focus().addRowAfter().run();
-  const addCol =       () => editor?.chain().focus().addColumnAfter().run();
-  const delRow =       () => editor?.chain().focus().deleteRow().run();
-  const delCol =       () => editor?.chain().focus().deleteColumn().run();
-  const delTable =     () => editor?.chain().focus().deleteTable().run();
+  const insertTable = () =>
+    editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
+  const addRow = () => editor?.chain().focus().addRowAfter().run();
+  const addCol = () => editor?.chain().focus().addColumnAfter().run();
+  const delRow = () => editor?.chain().focus().deleteRow().run();
+  const delCol = () => editor?.chain().focus().deleteColumn().run();
+  const delTable = () => editor?.chain().focus().deleteTable().run();
 
   // Ad-hoc neue Poll (Prompts)
   const insertPoll = () => {
@@ -289,76 +309,115 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Schreib
     const question = window.prompt('Frage der Abstimmung:', 'Wofür stimmst du?') ?? '';
     if (question === '') return;
     const raw = window.prompt('Optionen (kommagetrennt):', 'Option A, Option B') ?? '';
-    const options = raw.split(',').map(s => s.trim()).filter(Boolean);
+    const options = raw.split(',').map((s) => s.trim()).filter(Boolean);
     if (options.length === 0) return;
 
-    editor.chain().focus().insertContent({
-      type: 'poll',
-      attrs: { id: nanoid(8), question, options },
-    }).run();
+    editor
+      .chain()
+      .focus()
+      .insertContent({
+        type: 'poll',
+        attrs: { id: nanoid(8), question, options },
+      })
+      .run();
   };
 
   // Aus Picker verknüpfen
   const linkExistingPoll = (p: PollListItem) => {
     if (!editor) return;
-    editor.chain().focus().insertContent({
-      type: 'poll',
-      attrs: {
-        id: p.id,
-        // Frage/Optionen für die Editor-Vorschau mitschreiben
-        question: p.question ?? '',
-        options: Array.isArray(p.options) ? p.options : [],
-      },
-    }).run();
+    editor
+      .chain()
+      .focus()
+      .insertContent({
+        type: 'poll',
+        attrs: {
+          id: p.id,
+          question: p.question ?? '',
+          options: Array.isArray(p.options) ? p.options : [],
+        },
+      })
+      .run();
     setPickerOpen(false);
   };
 
   return (
     <div className="rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden">
       <div className="flex flex-wrap gap-2 p-2 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
-        <button className={btn(!!editor?.isActive('bold'))}
+        <button
+          className={btn(!!editor?.isActive('bold'))}
           onClick={() => editor?.chain().focus().toggleBold().run()}
           disabled={!editor}
-          type="button"><b>B</b></button>
+          type="button"
+        >
+          <b>B</b>
+        </button>
 
-        <button className={btn(!!editor?.isActive('italic'))}
+        <button
+          className={btn(!!editor?.isActive('italic'))}
           onClick={() => editor?.chain().focus().toggleItalic().run()}
           disabled={!editor}
-          type="button"><i>I</i></button>
+          type="button"
+        >
+          <i>I</i>
+        </button>
 
-        <button className={btn(!!editor?.isActive('underline'))}
+        <button
+          className={btn(!!editor?.isActive('underline'))}
           onClick={() => editor?.chain().focus().toggleUnderline().run()}
           disabled={!editor}
-          type="button"><u>U</u></button>
+          type="button"
+        >
+          <u>U</u>
+        </button>
 
         <span className="mx-1 opacity-40">|</span>
 
-        <button className={btn(!!editor?.isActive('heading', { level: 2 }))}
+        <button
+          className={btn(!!editor?.isActive('heading', { level: 2 }))}
           onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()}
           disabled={!editor}
-          type="button">H2</button>
+          type="button"
+        >
+          H2
+        </button>
 
-        <button className={btn(!!editor?.isActive('heading', { level: 3 }))}
+        <button
+          className={btn(!!editor?.isActive('heading', { level: 3 }))}
           onClick={() => editor?.chain().focus().toggleHeading({ level: 3 }).run()}
           disabled={!editor}
-          type="button">H3</button>
+          type="button"
+        >
+          H3
+        </button>
 
         <span className="mx-1 opacity-40">|</span>
 
-        <button className={btn(!!editor?.isActive('bulletList'))}
+        <button
+          className={btn(!!editor?.isActive('bulletList'))}
           onClick={() => editor?.chain().focus().toggleBulletList().run()}
           disabled={!editor}
-          type="button">• Liste</button>
+          type="button"
+        >
+          • Liste
+        </button>
 
-        <button className={btn(!!editor?.isActive('orderedList'))}
+        <button
+          className={btn(!!editor?.isActive('orderedList'))}
           onClick={() => editor?.chain().focus().toggleOrderedList().run()}
           disabled={!editor}
-          type="button">1. Liste</button>
+          type="button"
+        >
+          1. Liste
+        </button>
 
-        <button className={btn(!!editor?.isActive('blockquote'))}
+        <button
+          className={btn(!!editor?.isActive('blockquote'))}
           onClick={() => editor?.chain().focus().toggleBlockquote().run()}
           disabled={!editor}
-          type="button">„Zitat“</button>
+          type="button"
+        >
+          „Zitat“
+        </button>
 
         <span className="mx-1 opacity-40">|</span>
 
@@ -378,66 +437,108 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Schreib
           Link
         </button>
 
-        <button className={btn(false)}
+        <button
+          className={btn(false)}
           onClick={() => editor?.chain().focus().unsetAllMarks().clearNodes().run()}
           disabled={!editor}
-          type="button">Formatierung löschen</button>
+          type="button"
+        >
+          Formatierung löschen
+        </button>
 
         {/* Tabellen */}
         <span className="mx-1 opacity-40">|</span>
-        <button className={btn(!!editor?.isActive('table'))}
-          onClick={insertTable}
-          disabled={!editor}
-          type="button">Tabelle</button>
+        <button className={btn(!!editor?.isActive('table'))} onClick={insertTable} disabled={!editor} type="button">
+          Tabelle
+        </button>
 
-        <button className={btn(false)}
-          onClick={addRow}
-          disabled={!can(() => editor!.can().addRowAfter())}
-          type="button">+ Zeile</button>
+        <button className={btn(false)} onClick={addRow} disabled={!can(() => editor!.can().addRowAfter())} type="button">
+          + Zeile
+        </button>
 
-        <button className={btn(false)}
-          onClick={addCol}
-          disabled={!can(() => editor!.can().addColumnAfter())}
-          type="button">+ Spalte</button>
+        <button className={btn(false)} onClick={addCol} disabled={!can(() => editor!.can().addColumnAfter())} type="button">
+          + Spalte
+        </button>
 
-        <button className={btn(false)}
-          onClick={delRow}
-          disabled={!can(() => editor!.can().deleteRow())}
-          type="button">− Zeile</button>
+        <button className={btn(false)} onClick={delRow} disabled={!can(() => editor!.can().deleteRow())} type="button">
+          − Zeile
+        </button>
 
-        <button className={btn(false)}
-          onClick={delCol}
-          disabled={!can(() => editor!.can().deleteColumn())}
-          type="button">− Spalte</button>
+        <button className={btn(false)} onClick={delCol} disabled={!can(() => editor!.can().deleteColumn())} type="button">
+          − Spalte
+        </button>
 
-        <button className={btn(false)}
+        {/* --- TABLE: Header-Toggle + Alignment --- */}
+        <span className="mx-1 opacity-40">|</span>
+
+        <button
+          className={btn(false)}
+          onClick={() => editor?.chain().focus().toggleHeaderRow().run()}
+          disabled={!editor?.isActive('table')}
+          type="button"
+        >
+          Headerzeile
+        </button>
+
+        <button
+          className={btn(false)}
+          onClick={() => editor?.chain().focus().toggleHeaderColumn().run()}
+          disabled={!editor?.isActive('table')}
+          type="button"
+        >
+          Headerspalte
+        </button>
+
+        <button
+          className={btn(false)}
+          onClick={() => editor?.chain().focus().toggleHeaderCell().run()}
+          disabled={!editor?.isActive('table')}
+          type="button"
+        >
+          Headerzelle
+        </button>
+
+        <span className="mx-1 opacity-40">|</span>
+
+        <button className={btn(isAlign('left'))} onClick={() => setAlign('left')} disabled={!editor} type="button">
+          Links
+        </button>
+
+        <button className={btn(isAlign('center'))} onClick={() => setAlign('center')} disabled={!editor} type="button">
+          Zentriert
+        </button>
+
+        <button className={btn(isAlign('right'))} onClick={() => setAlign('right')} disabled={!editor} type="button">
+          Rechts
+        </button>
+
+        <button
+          className={btn(false)}
           onClick={delTable}
           disabled={!editor?.isActive('table')}
-          type="button">Tabelle löschen</button>
+          type="button"
+        >
+          Tabelle löschen
+        </button>
 
         {/* Polls */}
         <span className="mx-1 opacity-40">|</span>
-        <button className={btn(false)}
-          onClick={insertPoll}
-          disabled={!editor}
-          type="button">Abstimmung (neu)</button>
+        <button className={btn(false)} onClick={insertPoll} disabled={!editor} type="button">
+          Abstimmung (neu)
+        </button>
 
-        <button className={btn(false)}
-          onClick={() => setPickerOpen(true)}
-          disabled={!editor}
-          type="button">Poll verknüpfen</button>
-     </div>
+        <button className={btn(false)} onClick={() => setPickerOpen(true)} disabled={!editor} type="button">
+          Poll verknüpfen
+        </button>
+      </div>
 
       <div className="bg-white dark:bg-gray-900 px-4 py-3">
+        {/* TippTap Tabellen-Styling via .tiptap-Klasse */}
         <EditorContent editor={editor} />
       </div>
 
       {/* Modal mounten */}
-      <PollPickerModal
-        open={pickerOpen}
-        onClose={() => setPickerOpen(false)}
-        onPick={linkExistingPoll}
-      />
+      <PollPickerModal open={pickerOpen} onClose={() => setPickerOpen(false)} onPick={linkExistingPoll} />
     </div>
   );
 }
