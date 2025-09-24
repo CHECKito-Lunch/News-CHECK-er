@@ -11,6 +11,14 @@ import interactionPlugin from '@fullcalendar/interaction';
 import iCalendarPlugin from '@fullcalendar/icalendar';
 import listPlugin from '@fullcalendar/list';
 
+/* ➕ Recharts für Mini-Charts in KPI-Karten */
+import {
+  ResponsiveContainer,
+  BarChart, Bar,
+  LineChart, Line,
+  XAxis, YAxis, Tooltip,
+} from 'recharts';
+
 type Badge = { id: number; name: string; color: string; kind: string | null };
 type Vendor = { id: number; name: string };
 type Item = {
@@ -23,9 +31,15 @@ type Item = {
   images?: { url: string; caption?: string | null; sort_order?: number | null }[]; 
 };
 
+/* ➕ KPI-Typ erweitert um Vergleich & Verlauf */
 type KPI = {
   id: number; key: string; label: string; value: string; unit: string | null;
   trend: 'up' | 'down' | 'flat' | null; color: string | null;
+
+  compare_value?: number | null;
+  compare_label?: string | null;
+  chart_type?: 'bar' | 'line' | null;
+  history?: number[] | null;
 };
 
 type Tool = { id: number; title: string; icon: string; href: string };
@@ -34,10 +48,9 @@ type Tool = { id: number; title: string; icon: string; href: string };
 type Termin = {
   id: number;
   title: string;
-  starts_at: string;          // Pflicht in neuer API
-  ends_at?: string | null;    // optional (inklusiv in DB; FC bekommt exklusiv)
-  icon?: string | null;       // optional (z. B. "📌" | "🏖️")
-  // Legacy-Felder (Server liefert evtl. noch diese)
+  starts_at: string;
+  ends_at?: string | null;
+  icon?: string | null;
   date?: string; start?: string; end?: string | null;
 };
 
@@ -56,7 +69,7 @@ const card =
 const header =
   'flex items-center justify-between gap-3 mb-3 px-2';
 
-/* ---------- Helfer für Feed ---------- */
+/* ---------- Helpers ---------- */
 const isAgentNews = (it: Item) =>
   (it.post_badges || []).some(pb => {
     const n = (pb?.badge?.name || '').toLowerCase();
@@ -68,6 +81,60 @@ const uniqById = <T extends { id: number }>(arr: T[]) => {
   return arr.filter(x => (seen.has(x.id) ? false : (seen.add(x.id), true)));
 };
 
+/* ➕ Zahl aus String sicher parsen (entfernt z. B. „%“, „.“ als Tausender, usw.) */
+const parseNum = (s?: string | null) => {
+  if (!s) return NaN;
+  const norm = s.replace(/[^\d,.\-]/g, '').replace(/\./g, '').replace(',', '.');
+  return Number(norm);
+};
+
+/* ➕ Mini-Komponente: Chart im KPI-Kärtchen */
+function KPIChart({ k }: { k: KPI }) {
+  const primary = k.color || '#2563eb';
+
+  if (k.chart_type === 'bar') {
+    const a = parseNum(k.value);
+    const b = typeof k.compare_value === 'number' ? k.compare_value : NaN;
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+    const data = [
+      { name: k.label, value: a },
+      { name: k.compare_label || 'Vergleich', value: b },
+    ];
+    return (
+      <div className="mt-2 h-20">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={data}>
+            <XAxis dataKey="name" hide />
+            <YAxis hide />
+            <Tooltip />
+            <Bar dataKey="value" fill={primary} radius={4} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    );
+  }
+
+  if (k.chart_type === 'line') {
+    const hist = (k.history ?? []).filter(v => Number.isFinite(v));
+    if (!hist.length) return null;
+    const data = hist.map((v, i) => ({ idx: i + 1, value: v }));
+    return (
+      <div className="mt-2 h-20">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={data}>
+            <XAxis dataKey="idx" hide />
+            <YAxis hide />
+            <Tooltip />
+            <Line type="monotone" dataKey="value" stroke={primary} strokeWidth={2} dot={false} />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    );
+  }
+
+  return null;
+}
+
 export default function HomePage() {
   const [items, setItems] = useState<Item[]>([]);
   const [kpis, setKpis] = useState<KPI[]>([]);
@@ -76,8 +143,8 @@ export default function HomePage() {
   const [meta, setMeta] = useState<{ badges: Badge[] }>({ badges: [] });
 
   // Events aus DB
-  const [dbEvents, setDbEvents] = useState<any[]>([]);          // Kalender
-  const [feedEvents, setFeedEvents] = useState<EventFeedRow[]>([]); // FEED
+  const [dbEvents, setDbEvents] = useState<any[]>([]);
+  const [feedEvents, setFeedEvents] = useState<EventFeedRow[]>([]);
 
   // Agent-News (unten)
   const [tourNews, setTourNews] = useState<Item[]>([]);
@@ -152,7 +219,6 @@ export default function HomePage() {
         };
 
         const fetchRecentNews = async (): Promise<Item[]> => {
-          // bevorzugt spezieller Feed, sonst generisch
           let r = await fetch('/api/news?feed=1&page=1&pageSize=30');
           let j = await r.json().catch(() => ({}));
           if (r.ok && Array.isArray(j?.data)) return j.data as Item[];
@@ -218,12 +284,12 @@ export default function HomePage() {
     ...termine.map(t => ({
       id: String(t.id),
       title: t.title,
-      start: t.starts_at || t.start || t.date,              // Fallbacks für Legacy
-      end:   (t.ends_at || t.end) || undefined,             // FC erwartet exklusives end
+      start: t.starts_at || t.start || t.date,
+      end:   (t.ends_at || t.end) || undefined,
       allDay: true,
       backgroundColor: '#2563eb',
       textColor: '#fff',
-      extendedProps: { icon: t.icon || '📌' },              // Icon sauber übergeben
+      extendedProps: { icon: t.icon || '📌' },
     })),
     ...dbEvents,
     { url: 'https://feiertage-api.de/api/?bundesland=SN&out=ical', format: 'ics' as const },
@@ -274,6 +340,11 @@ export default function HomePage() {
                       {k.trend === 'up' ? '▲' : k.trend === 'down' ? '▼' : '→'} Trend
                     </div>
                   )}
+
+                  {/* ➕ Mini-Chart, falls Vergleich/Verlauf vorhanden */}
+                  {(k.compare_value != null && k.chart_type === 'bar') || (k.history?.length && k.chart_type === 'line') ? (
+                    <KPIChart k={k} />
+                  ) : null}
                 </div>
               ))}
             </div>
@@ -319,7 +390,7 @@ export default function HomePage() {
         </section>
       </div>
 
-      {/* MITTE: Was gibt's Neues? (volle Breite) */}
+      {/* MITTE: Was gibt's Neues? */}
       <section className={card + ' p-4'}>
         <div className={header}>
           <h2 className="text-lg font-semibold">Was gibt&apos;s Neues?</h2>
@@ -355,7 +426,7 @@ export default function HomePage() {
         )}
       </section>
 
-      {/* TOURISTISCHE NEWS (am Seitenende) */}
+      {/* TOURISTISCHE NEWS */}
       <section className={card + ' p-4'}>
         <div className={header}>
           <h2 className="text-lg font-semibold">Touristische News (automatisch)</h2>
@@ -486,20 +557,16 @@ function CalendarModern({ events }: { events: any[] }) {
   const todayStart = useMemo(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }, []);
   const api = () => calRef.current?.getApi();
 
-  // Helper
   const fmtDate = (d: Date) =>
     d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
 
-  // Fancy Renderer: Monat ≠ Liste
   function renderEventContent(arg: any) {
     const { event: ev, view, isStart } = arg;
     const isAllDay = ev.allDay;
     const start: Date | null = ev.start ? new Date(ev.start) : null;
     const endEx: Date | null = ev.end ? new Date(ev.end) : null;
-    // all-day: FullCalendar liefert end exklusiv → für Anzeige 1 Tag abziehen
     const endIn = endEx && isAllDay ? new Date(endEx.getTime() - 86400000) : endEx;
 
-    // Icon
     let icon = (ev.extendedProps && (ev.extendedProps as any).icon) || '';
     if (!icon) {
       const url: string | undefined = (ev as any).source?.url;
@@ -508,7 +575,6 @@ function CalendarModern({ events }: { events: any[] }) {
       else icon = '📅';
     }
 
-    // Fortschritt nur für laufende mehrtägige all-day Events
     let progressPct = 0;
     if (view.type === 'dayGridMonth' || view.type === 'listUpcoming') {
       if (isAllDay && start && endIn && start <= todayStart && todayStart <= endIn) {
@@ -522,17 +588,11 @@ function CalendarModern({ events }: { events: any[] }) {
       }
     }
 
-    // --- MONATSANSICHT ------------------------------------------------
     if (view.type === 'dayGridMonth') {
-      // In der Monatsansicht zeigen wir KEIN "ganztägig" – nur einen Balken;
-      // Icon + Titel nur am Starttag, damit es nicht jeden Tag wiederholt wird.
       return (
         <div className="w-full px-1 py-0.5">
           <div className="h-1.5 w-full rounded-full bg-blue-500/15 overflow-hidden border border-blue-500/20">
-            <div
-              className="h-full bg-blue-600"
-              style={{ width: '100%' }}
-            />
+            <div className="h-full bg-blue-600" style={{ width: '100%' }} />
           </div>
           {isStart && (
             <div className="mt-1 flex items-center gap-1 text-[11px] font-medium leading-none">
@@ -544,8 +604,6 @@ function CalendarModern({ events }: { events: any[] }) {
       );
     }
 
-    // --- LISTENANSICHT ------------------------------------------------
-    // Zeittext: „ganztägig“ oder „DD.MM.YYYY – DD.MM.YYYY“
     let timeText = arg.timeText || '';
     if (isAllDay && start) {
       timeText =
@@ -565,11 +623,7 @@ function CalendarModern({ events }: { events: any[] }) {
         {progressPct > 0 && (
           <div className="px-2 pb-1">
             <div className="h-1.5 w-full rounded-full bg-blue-500/15 overflow-hidden border border-blue-500/20">
-              <div
-                className="h-full rounded-full bg-blue-600"
-                style={{ width: `${progressPct}%` }}
-                aria-label={`Fortschritt ${progressPct}%`}
-              />
+              <div className="h-full rounded-full bg-blue-600" style={{ width: `${progressPct}%` }} aria-label={`Fortschritt ${progressPct}%`} />
             </div>
           </div>
         )}
@@ -605,10 +659,8 @@ function CalendarModern({ events }: { events: any[] }) {
         initialDate={todayStart}
         validRange={{ start: todayStart }}
         events={events}
-        // --- wichtige Tweaks ---
-        eventDisplay="block"                 // damit unser Block-Renderer in dayGrid sauber läuft
-        displayEventTime={false}             // kein „all-day“ in der Monatsansicht
-        // -----------------------
+        eventDisplay="block"
+        displayEventTime={false}
         datesSet={(arg) => setTitle(arg.view.title)}
         eventClassNames={() => 'rounded-lg border border-blue-500/20 bg-blue-500/10 text-blue-900 dark:text-blue-200'}
         eventContent={renderEventContent}
