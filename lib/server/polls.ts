@@ -12,8 +12,6 @@ export type PollRow = {
   max_choices: number;
   allow_change: boolean;
   closed_at: string | null;
-  created_at?: string | null;
-  updated_at?: string | null;
 };
 
 export type CountRow = { option_index: number; votes: number };
@@ -26,8 +24,8 @@ export type VoteRow = {
   post_id: number | null;
   post_slug: string | null;
   user_id: string | null;
-  created_at: string | null;
-  updated_at: string | null;
+  created_at?: string | null;   // optional: nur fürs Auslesen
+  updated_at?: string | null;   // optional: nur fürs Auslesen
 };
 
 export async function getSupabaseServer() {
@@ -36,12 +34,18 @@ export async function getSupabaseServer() {
 
 /** Stabiler Hash pro Gerät/Nutzer-Kontext (einfacher Ansatz, anti-spam light) */
 export async function voterHashFromRequest(req: NextRequest, pollId: string) {
-  const ip = req.headers.get('x-forwarded-for') || req.headers.get('cf-connecting-ip') || '0.0.0.0';
+  const ip =
+    req.headers.get('x-forwarded-for') ||
+    req.headers.get('cf-connecting-ip') ||
+    '0.0.0.0';
   const ua = req.headers.get('user-agent') || '';
   const jar = await cookies();
   const rid = jar.get('rid')?.value || ''; // optional: eigenes Request-ID-Cookie
   const salt = process.env.POLL_SALT || 'change-me';
-  return crypto.createHash('sha256').update(`${pollId}|${ip}|${ua}|${rid}|${salt}`).digest('hex');
+  return crypto
+    .createHash('sha256')
+    .update(`${pollId}|${ip}|${ua}|${rid}|${salt}`)
+    .digest('hex');
 }
 
 /* =========================
@@ -52,8 +56,8 @@ export async function listPolls(): Promise<PollRow[]> {
   const sb = await getSupabaseServer();
   const { data, error } = await sb
     .from('polls')
-    .select('id,question,options,multi_choice,max_choices,allow_change,closed_at,created_at,updated_at')
-    .order('updated_at', { ascending: false });
+    .select('id,question,options,multi_choice,max_choices,allow_change,closed_at') // keine created/updated selektieren
+    .order('id', { ascending: false }); // oder nach custom Feld
   if (error) throw error;
   return (data || []).map((x: any) => ({ ...x, options: x.options ?? [] }));
 }
@@ -62,7 +66,7 @@ export async function getPoll(id: string): Promise<PollRow | null> {
   const sb = await getSupabaseServer();
   const { data, error } = await sb
     .from('polls')
-    .select('id,question,options,multi_choice,max_choices,allow_change,closed_at,created_at,updated_at')
+    .select('id,question,options,multi_choice,max_choices,allow_change,closed_at')
     .eq('id', id)
     .maybeSingle();
   if (error) throw error;
@@ -76,11 +80,17 @@ export async function getCounts(pollId: string): Promise<CountRow[]> {
   return (data || []) as CountRow[];
 }
 
-export async function listVotes(pollId: string, limit = 100, offset = 0): Promise<VoteRow[]> {
+export async function listVotes(
+  pollId: string,
+  limit = 100,
+  offset = 0
+): Promise<VoteRow[]> {
   const sb = await getSupabaseServer();
   const { data, error } = await sb
     .from('poll_votes')
-    .select('id,poll_id,option_index,voter_hash,post_id,post_slug,user_id,created_at,updated_at')
+    .select(
+      'id,poll_id,option_index,voter_hash,post_id,post_slug,user_id,created_at,updated_at'
+    )
     .eq('poll_id', pollId)
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1);
@@ -94,23 +104,55 @@ export async function listVotes(pollId: string, limit = 100, offset = 0): Promis
 
 export async function upsertPoll(p: PollRow): Promise<PollRow> {
   const sb = await getSupabaseServer();
+
+  // Nur erlaubte Felder + Defaults
+  const row = {
+    id: p.id,
+    question: String(p.question ?? '').trim(),
+    options: Array.isArray(p.options) ? p.options : [],
+    multi_choice: !!p.multi_choice,
+    max_choices:
+      Number.isFinite(p.max_choices) && p.max_choices > 0 ? p.max_choices : 1,
+    allow_change: !!p.allow_change,
+    closed_at: p.closed_at ?? null,
+  };
+
   const { data, error } = await sb
     .from('polls')
-    .upsert([{ ...p }], { onConflict: 'id' })
-    .select()
+    .upsert(row, { onConflict: 'id' })
+    .select('id,question,options,multi_choice,max_choices,allow_change,closed_at')
     .single();
+
   if (error) throw error;
   return { ...(data as any), options: (data as any).options ?? [] } as PollRow;
 }
 
-export async function patchPoll(id: string, patch: Partial<PollRow>): Promise<PollRow> {
+export async function patchPoll(
+  id: string,
+  patch: Partial<PollRow>
+): Promise<PollRow> {
   const sb = await getSupabaseServer();
+
+  // Patch sanitizen (nur bekannte Felder zulassen)
+  const upd: Partial<PollRow> = {};
+  if (typeof patch.question === 'string') upd.question = patch.question;
+  if (Array.isArray(patch.options)) upd.options = patch.options;
+  if (typeof patch.multi_choice === 'boolean')
+    upd.multi_choice = patch.multi_choice;
+  if (typeof patch.max_choices === 'number')
+    upd.max_choices = patch.max_choices > 0 ? patch.max_choices : 1;
+  if (typeof patch.allow_change === 'boolean')
+    upd.allow_change = patch.allow_change;
+  if (patch.closed_at === null || typeof patch.closed_at === 'string')
+    upd.closed_at = patch.closed_at;
+
   const { data, error } = await sb
     .from('polls')
-    .update(patch)
+    .update(upd)
     .eq('id', id)
-    .select()
+    .select('id,question,options,multi_choice,max_choices,allow_change,closed_at')
     .single();
+
   if (error) throw error;
   return { ...(data as any), options: (data as any).options ?? [] } as PollRow;
 }
@@ -123,7 +165,10 @@ export async function deletePoll(id: string) {
   if (error) throw error;
 }
 
-export async function setClosedAt(id: string, closedAt: string | null): Promise<PollRow> {
+export async function setClosedAt(
+  id: string,
+  closedAt: string | null
+): Promise<PollRow> {
   return patchPoll(id, { closed_at: closedAt } as Partial<PollRow>);
 }
 
@@ -131,7 +176,11 @@ export async function setClosedAt(id: string, closedAt: string | null): Promise<
  * Public: Meta & Voting
  * =======================*/
 
-export async function upsertMeta(pollId: string, question?: string, options?: string[]) {
+export async function upsertMeta(
+  pollId: string,
+  question?: string,
+  options?: string[]
+) {
   if (!question || !Array.isArray(options)) return;
   const sb = await getSupabaseServer();
   await sb.rpc('poll_upsert_metadata', {
