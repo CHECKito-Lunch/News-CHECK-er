@@ -28,14 +28,13 @@ type Item = {
   post_badges: { badge: Badge }[];
   created_at?: string | null;
   published_at?: string | null;
-  images?: { url: string; caption?: string | null; sort_order?: number | null }[]; 
+  images?: { url: string; caption?: string | null; sort_order?: number | null }[];
 };
 
-/* ➕ KPI-Typ erweitert um Vergleich & Verlauf */
+/* ➕ KPI-Typ inkl. Vergleich / Verlauf */
 type KPI = {
   id: number; key: string; label: string; value: string; unit: string | null;
   trend: 'up' | 'down' | 'flat' | null; color: string | null;
-
   compare_value?: number | null;
   compare_label?: string | null;
   chart_type?: 'bar' | 'line' | null;
@@ -44,7 +43,6 @@ type KPI = {
 
 type Tool = { id: number; title: string; icon: string; href: string };
 
-// ⬇︎ Termin-Typ erweitert, mit Fallbacks für alte Daten
 type Termin = {
   id: number;
   title: string;
@@ -54,7 +52,6 @@ type Termin = {
   date?: string; start?: string; end?: string | null;
 };
 
-// FEED: events
 type EventFeedRow = {
   id: number; slug: string; title: string;
   summary: string | null;
@@ -66,8 +63,7 @@ const card =
   'rounded-2xl shadow-sm bg-white/80 backdrop-blur border border-gray-200 ' +
   'dark:bg-gray-900/70 dark:border-gray-800';
 
-const header =
-  'flex items-center justify-between gap-3 mb-3 px-2';
+const header = 'flex items-center justify-between gap-3 mb-3 px-2';
 
 /* ---------- Helpers ---------- */
 const isAgentNews = (it: Item) =>
@@ -81,14 +77,13 @@ const uniqById = <T extends { id: number }>(arr: T[]) => {
   return arr.filter(x => (seen.has(x.id) ? false : (seen.add(x.id), true)));
 };
 
-/* ➕ Zahl aus String sicher parsen (entfernt z. B. „%“, „.“ als Tausender, usw.) */
 const parseNum = (s?: string | null) => {
   if (!s) return NaN;
   const norm = s.replace(/[^\d,.\-]/g, '').replace(/\./g, '').replace(',', '.');
   return Number(norm);
 };
 
-/* ➕ Mini-Komponente: Chart im KPI-Kärtchen */
+/* ➕ Mini-Chart in KPI-Karte */
 function KPIChart({ k }: { k: KPI }) {
   const primary = k.color || '#2563eb';
 
@@ -131,7 +126,6 @@ function KPIChart({ k }: { k: KPI }) {
       </div>
     );
   }
-
   return null;
 }
 
@@ -146,7 +140,7 @@ export default function HomePage() {
   const [dbEvents, setDbEvents] = useState<any[]>([]);
   const [feedEvents, setFeedEvents] = useState<EventFeedRow[]>([]);
 
-  // Agent-News (unten)
+  // Agent-News unten
   const [tourNews, setTourNews] = useState<Item[]>([]);
   const [tourLoading, setTourLoading] = useState<boolean>(true);
   const [tourErr, setTourErr] = useState<string>('');
@@ -179,7 +173,7 @@ export default function HomePage() {
     })();
   }, []);
 
-  // KPIs/Tools/Termine + Events + News (Start + jüngste News)
+  // KPIs/Tools/Termine + Events + News
   useEffect(() => {
     (async () => {
       setLoadingSide(true);
@@ -229,13 +223,11 @@ export default function HomePage() {
 
         const [startNews, recentNews] = await Promise.all([fetchStartNews(), fetchRecentNews()]);
         const merged = uniqById([...startNews, ...recentNews].filter(n => !isAgentNews(n)));
-
         merged.sort((a, b) => {
           const da = new Date(a.published_at || a.created_at || 0).getTime();
           const db = new Date(b.published_at || b.created_at || 0).getTime();
           return db - da;
         });
-
         setItems(merged);
       } catch {
         setItems([]);
@@ -296,26 +288,16 @@ export default function HomePage() {
     { url: 'https://www.schulferien.org/iCal/Ferien/ical/Sachsen.ics', format: 'ics' as const },
   ]), [termine, dbEvents]);
 
-  // FEED: News + Events bündeln & sortieren
-  const unifiedFeed = useMemo(() => {
-    const news = items.map(it => ({
-      kind: 'news' as const,
-      key: `n-${it.id}`,
-      date: new Date((it.published_at || it.created_at || 0) as any).getTime() || 0,
-      data: it,
-    }));
-    const evs = feedEvents.map(ev => ({
-      kind: 'event' as const,
-      key: `e-${ev.id}`,
-      date: new Date(ev.starts_at).getTime(),
-      data: ev,
-    }));
-    return [...news, ...evs].sort((a, b) => b.date - a.date);
-  }, [items, feedEvents]);
+  /* ➕ getrennte Feeds statt „unifiedFeed“ */
+  const newsFeed = items;
+  const upcomingEvents = useMemo(
+    () => [...feedEvents].sort((a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime()),
+    [feedEvents]
+  );
 
   return (
     <div className="container max-w-7xl mx-auto py-6 space-y-8">
-      {/* OBERER BEREICH: Drei Kacheln (KPIs, Tools, Kalender) */}
+      {/* KPIs · Tools · Kalender */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* KPIs */}
         <section className={card + ' p-4'}>
@@ -340,8 +322,6 @@ export default function HomePage() {
                       {k.trend === 'up' ? '▲' : k.trend === 'down' ? '▼' : '→'} Trend
                     </div>
                   )}
-
-                  {/* ➕ Mini-Chart, falls Vergleich/Verlauf vorhanden */}
                   {(k.compare_value != null && k.chart_type === 'bar') || (k.history?.length && k.chart_type === 'line') ? (
                     <KPIChart k={k} />
                   ) : null}
@@ -390,41 +370,60 @@ export default function HomePage() {
         </section>
       </div>
 
-      {/* MITTE: Was gibt's Neues? */}
-      <section className={card + ' p-4'}>
-        <div className={header}>
-          <h2 className="text-lg font-semibold">Was gibt&apos;s Neues?</h2>
-          <div className="flex items-center gap-3 text-sm">
-            <Link href="/events" className="text-blue-600 hover:underline">Alle Events →</Link>
-            <Link href="/news" className="text-blue-600 hover:underline">Alle News →</Link>
+      {/* MITTE: Events (links) · Was gibt's Neues? (rechts) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Events-Feed */}
+        <section className={card + ' p-4'}>
+          <div className={header}>
+            <h2 className="text-lg font-semibold">Events demnächst</h2>
+            <Link href="/events" className="text-sm text-blue-600 hover:underline">Alle Events →</Link>
           </div>
-        </div>
 
-        {loadingFeed && (
-          <ul className="grid gap-3 animate-pulse">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <li key={i} className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50/70 dark:bg-gray-800/50 h-20" />
-            ))}
-          </ul>
-        )}
+          {loadingFeed ? (
+            <ul className="grid gap-3 animate-pulse">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <li key={i} className="h-20 rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50/70 dark:bg-gray-800/50" />
+              ))}
+            </ul>
+          ) : upcomingEvents.length === 0 ? (
+            <div className="text-sm text-gray-500 px-2">Keine Events gefunden.</div>
+          ) : (
+            <ul className="grid gap-3">
+              {upcomingEvents.map(ev => (
+                <li key={ev.id} className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/60 p-4">
+                  <EventCard ev={ev} />
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
 
-        {!loadingFeed && unifiedFeed.length === 0 && (
-          <div className="text-sm text-gray-500 px-2 py-2">Keine Einträge.</div>
-        )}
+        {/* News-Feed */}
+        <section className={card + ' p-4'}>
+          <div className={header}>
+            <h2 className="text-lg font-semibold">Was gibt&apos;s Neues?</h2>
+            <Link href="/news" className="text-sm text-blue-600 hover:underline">Alle News →</Link>
+          </div>
 
-        {!loadingFeed && unifiedFeed.length > 0 && (
-          <ul className="grid gap-3">
-            {unifiedFeed.map(entry => (
-              <li key={entry.key} className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/60 p-4">
-                {entry.kind === 'news'
-                  ? <NewsCard it={entry.data as Item} />
-                  : <EventCard ev={entry.data as EventFeedRow} />
-                }
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+          {loadingFeed ? (
+            <ul className="grid gap-3 animate-pulse">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <li key={i} className="h-20 rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50/70 dark:bg-gray-800/50" />
+              ))}
+            </ul>
+          ) : newsFeed.length === 0 ? (
+            <div className="text-sm text-gray-500 px-2">Keine News.</div>
+          ) : (
+            <ul className="grid gap-3">
+              {newsFeed.map(it => (
+                <li key={it.id} className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/60 p-4">
+                  <NewsCard it={it} />
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
 
       {/* TOURISTISCHE NEWS */}
       <section className={card + ' p-4'}>
@@ -530,6 +529,7 @@ function EventCard({ ev }: { ev: EventFeedRow }) {
   return (
     <div className="flex gap-3">
       {ev.hero_image_url && (
+        // eslint-disable-next-line @next/next/no-img-element
         <img src={ev.hero_image_url} alt="" className="h-16 w-24 object-cover rounded-lg border border-gray-200 dark:border-gray-700" />
       )}
       <div className="min-w-0">
