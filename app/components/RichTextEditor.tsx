@@ -21,12 +21,14 @@ type Props = {
   placeholder?: string;
 };
 
-// --- Poll Node (Leaf/Atom → kein Content Hole!) ---
+// --- Poll Node (Leaf/Atom: kein Content-Hole, draggable) ---
 const Poll = Node.create({
   name: 'poll',
   group: 'block',
   atom: true,          // Leaf node
   selectable: true,
+  draggable: true,
+  defining: true,
 
   addAttributes() {
     return {
@@ -55,8 +57,8 @@ const Poll = Node.create({
     return [{ tag: 'div[data-type="poll"]' }];
   },
 
+  // ⚠️ KEIN `0` (kein Content-Hole) – Leaf darf keine Kinder haben
   renderHTML({ HTMLAttributes }) {
-    // ⚠️ KEIN `0` als dritten Eintrag – sonst Content-Hole in Leaf-Node!
     return ['div', mergeAttributes(HTMLAttributes, { 'data-type': 'poll' })];
   },
 });
