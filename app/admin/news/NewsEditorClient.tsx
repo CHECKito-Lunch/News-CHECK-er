@@ -1,7 +1,7 @@
 // app/admin/news/NewsEditorClient.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import AdminTabs from '../shared/AdminTabs';
 import { useAdminAuth } from '../shared/auth';
@@ -11,39 +11,81 @@ import type { Option, SourceRow, PostRow } from '../shared/types';
 import RichTextEditor from '../../components/RichTextEditor';
 
 type ImageRow = {
-  url: string;                 // für Preview im Editor
-  path?: string | null;        // Pfad im Bucket (wird in DB gespeichert)
-  caption?: string | null;     // Editor-Label -> DB: title
+  url: string;
+  path?: string | null;
+  caption?: string | null;
   sort_order?: number | null;
 };
 
-const EMOJI_CHOICES = ['📌','📅','🗓️','📣','📊','📝','🧑‍💻','🤝','☕','🎉','🛠️','🧪'];
-
-// ----- Helpers -----
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
 
-
 function publicUrlFromPath(path?: string | null, bucket = 'uploads'): string {
-  if (!path) return '';
-  if (!SUPABASE_URL) return ''; // Fallback: kein Preview möglich, aber Speichern geht
-  // https://<project>.supabase.co/storage/v1/object/public/<bucket>/<path>
+  if (!path || !SUPABASE_URL) return '';
   return `${SUPABASE_URL.replace(/\/+$/,'')}/storage/v1/object/public/${bucket}/${String(path).replace(/^\/+/,'')}`;
 }
-
-// Public-URL → Bucket-Pfad extrahieren (falls Upload-API mal kein path liefert)
 function guessPathFromUrl(url: string): string | null {
-  // .../storage/v1/object/public/<bucket>/<path>
   const m = url.match(/\/storage\/v1\/object\/public\/[^/]+\/(.+)$/);
   return m?.[1] ?? null;
 }
 
+/* ───────────────────────── Fullscreen-Editor (Modal) ───────────────────────── */
+function FullscreenEditorModal({
+  open, value, onClose, onChange, onSave,
+}: {
+  open: boolean;
+  value: string;
+  onClose: () => void;
+  onChange: (html: string) => void;
+  onSave: () => void;
+}) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[100]">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="absolute inset-4 md:inset-8 rounded-2xl overflow-hidden border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-2xl flex flex-col">
+        <div className="flex items-center gap-2 p-3 border-b border-gray-200 dark:border-gray-800">
+          <div className="font-semibold">Editor im Vollbild</div>
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onSave}
+              className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              Speichern (⌘/Ctrl+S)
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-3 py-1.5 rounded-lg border bg-white hover:bg-gray-50 dark:bg-white/10 dark:hover:bg-white/20 dark:border-gray-700"
+            >
+              Schließen
+            </button>
+          </div>
+        </div>
+        <div className="flex-1 min-h-0 p-3 overflow-auto">
+          {/* Im Modal bekommt der Editor mehr Höhe */}
+          <div className="min-h-[60vh]">
+            <RichTextEditor value={value} onChange={onChange} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ───────────────────────────────────────────────────────────────────────────── */
+
+type OptionMeta = { categories: Option[]; badges: Option[]; vendors: Option[] };
+
 export default function NewsEditorClient() {
-  const { loading, sessionOK, isAdmin, authMsg, setAuthMsg, userEmail, setUserEmail, userPassword, setUserPassword, doLogin } = useAdminAuth();
+  const {
+    loading, sessionOK, isAdmin, authMsg, setAuthMsg, userEmail, setUserEmail, userPassword, setUserPassword, doLogin,
+  } = useAdminAuth();
   const search = useSearchParams();
   const router = useRouter();
   const editIdFromUrl = search.get('id');
 
-  const [meta, setMeta] = useState<{ categories: Option[]; badges: Option[]; vendors: Option[] }>({ categories: [], badges: [], vendors: [] });
+  const [meta, setMeta] = useState<OptionMeta>({ categories: [], badges: [], vendors: [] });
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [title, setTitle] = useState('');       const [slug, setSlug] = useState('');
@@ -55,13 +97,18 @@ export default function NewsEditorClient() {
   const [badgeIds, setBadgeIds] = useState<number[]>([]);
   const [sources, setSources] = useState<SourceRow[]>([{ url:'', label:'' }]);
 
-  // >>> Bilder / Galerie
   const [images, setImages] = useState<ImageRow[]>([]);
   const [uploadBusy, setUploadBusy] = useState(false);
 
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState('');
+  const [dirty, setDirty] = useState(false);
 
+  // UI niceties
+  const [editorOpen, setEditorOpen] = useState(false);         // fullscreen modal
+  const contentPaneRef = useRef<HTMLDivElement | null>(null);  // resizable wrapper
+
+  // Meta laden
   useEffect(() => {
     fetch('/api/meta', { credentials:'same-origin' })
       .then(r=>r.json())
@@ -70,10 +117,9 @@ export default function NewsEditorClient() {
   }, []);
   useEffect(() => { setSlug(slugify(title)); }, [title]);
 
-  // Falls ?id=… vorhanden: Post laden und ins Formular setzen
+  // Daten laden (Edit)
   useEffect(() => {
-    if (!sessionOK || !isAdmin) return;
-    if (!editIdFromUrl) return;
+    if (!sessionOK || !isAdmin || !editIdFromUrl) return;
     (async () => {
       const res = await fetch(`/api/admin/posts/${editIdFromUrl}`, { credentials:'same-origin' });
       const json = await res.json().catch(()=>({}));
@@ -82,19 +128,16 @@ export default function NewsEditorClient() {
 
       setEditingId(p.id);
       setTitle(p.title ?? ''); setSlug(p.slug ?? ''); setSummary(p.summary ?? ''); setContent(p.content ?? '');
-      // @ts-ignore vendor_id steckt in PostRow
+      // @ts-ignore
       setVendorId((p as any).vendor_id ?? null);
       setIsDraft(p.status === 'draft');
       setPinnedUntil(toLocalInput(p.pinned_until)); setEffectiveFrom(toLocalInput(p.effective_from));
-      // @ts-ignore categories/badges im Admin-Detail
+      // @ts-ignore
       setCategoryIds((p as any).categories?.map((c:any)=>c.id) ?? []);
       // @ts-ignore
       setBadgeIds((p as any).badges?.map((b:any)=>b.id) ?? []);
       setSources(((p as any).sources ?? []).map((s:any) => ({ url:s.url, label:s.label ?? '' })) || [{ url:'', label:'' }]);
 
-      // Bilder aus Admin-Detail: robust auf beiden Formaten
-      // Variante A (API liefert url/caption/sort_order)
-      // Variante B (API liefert path/title/sort_order)
       const imgs = Array.isArray((p as any).images) ? (p as any).images : [];
       const norm: ImageRow[] = imgs.map((im: any, i: number) => {
         const path = (im.path ?? null) as string | null;
@@ -108,8 +151,36 @@ export default function NewsEditorClient() {
       });
       setImages(norm);
       setResult('');
+      setDirty(false);
     })();
   }, [editIdFromUrl, sessionOK, isAdmin]);
+
+  // Unsaved guard (Tab schließen/Reload)
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (!dirty) return;
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [dirty]);
+
+  // Ctrl/Cmd+S -> save
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const isSave = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's';
+      if (isSave) {
+        e.preventDefault();
+        if (!saving) void save();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [saving, title, content, summary, isDraft, pinnedUntil, effectiveFrom, categoryIds, badgeIds, sources, vendorId]);
+
+  // dirty tracking
+  useEffect(() => { setDirty(true); }, [title, slug, summary, content, vendorId, isDraft, pinnedUntil, effectiveFrom, categoryIds, badgeIds, JSON.stringify(sources), JSON.stringify(images)]);
 
   const canSave = useMemo(() => title.trim().length>0, [title]);
 
@@ -129,30 +200,22 @@ export default function NewsEditorClient() {
   function resetForm() {
     setEditingId(null); setTitle(''); setSlug(''); setSummary(''); setContent(''); setVendorId(null);
     setIsDraft(false); setPinnedUntil(''); setEffectiveFrom(''); setCategoryIds([]); setBadgeIds([]);
-    setSources([{ url:'', label:'' }]); setImages([]); setResult('');
+    setSources([{ url:'', label:'' }]); setImages([]); setResult(''); setDirty(false);
     if (editIdFromUrl) router.replace('/admin/news');
   }
 
-  // ---------- Upload Helfer ----------
+  // Upload-Helfer
   async function uploadToApi(fd: FormData) {
-    // 1) bevorzugt /api/uploads, 2) Fallback /api/admin/upload
     let res = await fetch('/api/uploads?bucket=uploads', { method:'POST', body: fd, credentials:'same-origin' });
-    if (!res.ok) {
-      res = await fetch('/api/admin/upload?bucket=uploads', { method:'POST', body: fd, credentials:'same-origin' });
-    }
+    if (!res.ok) res = await fetch('/api/admin/upload?bucket=uploads', { method:'POST', body: fd, credentials:'same-origin' });
     if (!res.ok) throw new Error((await res.json().catch(()=>({}))).error || 'Upload fehlgeschlagen');
     return res.json() as Promise<{ url:string; path?:string }>;
   }
-
   async function deleteFromApi(pathOrUrl: string) {
     const qs = new URLSearchParams({ bucket:'uploads', path:pathOrUrl }).toString();
     let res = await fetch(`/api/uploads?${qs}`, { method:'DELETE', credentials:'same-origin' });
-    if (!res.ok) {
-      res = await fetch(`/api/admin/upload?${qs}`, { method:'DELETE', credentials:'same-origin' });
-    }
-    // Best-effort: Fehler hier nicht hochwerfen
+    if (!res.ok) res = await fetch(`/api/admin/upload?${qs}`, { method:'DELETE', credentials:'same-origin' });
   }
-
   async function handleFiles(files: FileList | File[]) {
     if (!files || !files.length) return;
     setUploadBusy(true);
@@ -161,70 +224,50 @@ export default function NewsEditorClient() {
       for (const f of Array.from(files)) {
         const fd = new FormData();
         fd.append('file', f);
-        // Optional: Unterordner news/YYYY/MM
         const now = new Date();
         const folder = `news/${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}`;
         fd.append('folder', folder);
-        // -> Upload
-        const j = await uploadToApi(fd); // { url, path? }
+        const j = await uploadToApi(fd);
         const path = j.path ?? guessPathFromUrl(j.url) ?? null;
-        next.push({
-          url: j.url,
-          path,
-          caption: '',
-          sort_order: images.length + next.length - 1,
-        });
+        next.push({ url: j.url, path, caption: '', sort_order: images.length + next.length - 1 });
       }
-      setImages(prev => {
-        const merged = [...prev, ...next].map((im, i) => ({ ...im, sort_order: i }));
-        return merged;
-      });
-    } finally {
-      setUploadBusy(false);
-    }
+      setImages(prev => [...prev, ...next].map((im, i) => ({ ...im, sort_order: i })));
+    } finally { setUploadBusy(false); }
   }
-
   function moveImage(index: number, dir: -1 | 1) {
     setImages(prev => {
       const arr = [...prev];
       const ni = index + dir;
       if (ni < 0 || ni >= arr.length) return prev;
-      const tmp = arr[index];
-      arr[index] = arr[ni];
-      arr[ni] = tmp;
+      [arr[index], arr[ni]] = [arr[ni], arr[index]];
       return arr.map((im, i) => ({ ...im, sort_order: i }));
     });
   }
-
   async function removeImage(index: number) {
     setImages(prev => {
       const target = prev[index];
-      // Best-effort löschen (nicht blockierend)
       if (target?.path) deleteFromApi(target.path).catch(()=>{});
-      const next = prev.filter((_, i) => i !== index).map((im, i) => ({ ...im, sort_order: i }));
-      return next;
+      return prev.filter((_, i) => i !== index).map((im, i) => ({ ...im, sort_order: i }));
     });
   }
 
-  // ---------- SAVE ----------
+  // SAVE
   async function save() {
     if (!sessionOK || !isAdmin) { setResult('Kein Zugriff. Bitte als Admin anmelden.'); return; }
     setSaving(true); setResult('');
 
     const now = new Date();
     const effIso = effectiveFrom ? fromLocalInput(effectiveFrom) : null;
-    const finalStatus: PostRow['status'] = isDraft
-      ? 'draft'
-      : (effIso && new Date(effIso).getTime() > now.getTime())
-        ? 'scheduled'
-        : 'published';
+    const finalStatus: PostRow['status'] =
+      isDraft ? 'draft' : (effIso && new Date(effIso).getTime() > now.getTime()) ? 'scheduled' : 'published';
 
-    // Für DB: { path, title, sort_order }
-    const imagesForDb = images.map((im, i) => ({
-      path: im.path ?? guessPathFromUrl(im.url),                    // **Pfad** in Storage
-      title: (im.caption ?? '').trim() || null,                     // DB-Spalte "title"
-      sort_order: Number.isFinite(Number(im.sort_order)) ? Number(im.sort_order) : i,
-    })).filter(x => !!x.path); // nur mit gültigem path speichern
+    const imagesForDb = images
+      .map((im, i) => ({
+        path: im.path ?? guessPathFromUrl(im.url),
+        title: (im.caption ?? '').trim() || null,
+        sort_order: Number.isFinite(Number(im.sort_order)) ? Number(im.sort_order) : i,
+      }))
+      .filter(x => !!x.path);
 
     const payload: any = {
       post: {
@@ -236,10 +279,7 @@ export default function NewsEditorClient() {
       },
       categoryIds,
       badgeIds,
-      sources: sources
-        .map((s,i)=>({ url:s.url.trim(), label:s.label?.trim() || null, sort_order:i }))
-        .filter(s=>s.url),
-      // >>> Bilder an API übergeben – für post_images
+      sources: sources.map((s,i)=>({ url:s.url.trim(), label:s.label?.trim() || null, sort_order:i })).filter(s=>s.url),
       images: imagesForDb,
     };
 
@@ -261,17 +301,19 @@ export default function NewsEditorClient() {
           finalStatus === 'scheduled' ? 'geplant (sichtbar ab „gültig ab …“).' :
                                         'veröffentlicht.';
         setResult(`${editingId ? 'Aktualisiert' : 'Gespeichert'} – ${statusMsg} ${json.id ? `ID: ${json.id}` : ''}${json.slug ? `, /news/${json.slug}` : ''}`);
+        setDirty(false);
         if (!editingId) resetForm();
       }
     } finally { setSaving(false); }
   }
 
-  // ---------- RENDER ----------
+  /* ───────────────────────────── Render ───────────────────────────── */
   return (
-    <div className="container max-w-15xl mx-auto py-6 space-y-5">
+    <div className="container max-w-7xl mx-auto py-6 space-y-5">
       <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">Admin · News</h1>
       <AdminTabs />
 
+      {/* Login/Role gates */}
       {!loading && !sessionOK && (
         <div className={cardClass + ' space-y-3'}>
           <h2 className="text-lg font-semibold">Login</h2>
@@ -294,6 +336,7 @@ export default function NewsEditorClient() {
       {sessionOK && isAdmin && (
         <>
           <div className="grid md:grid-cols-2 gap-4">
+            {/* Linke Spalte */}
             <div className={cardClass + ' space-y-3'}>
               <div>
                 <label className="form-label">Titel</label>
@@ -331,58 +374,73 @@ export default function NewsEditorClient() {
               </div>
             </div>
 
+            {/* Rechte Spalte */}
             <div className={cardClass + ' space-y-3'}>
               <div>
                 <label className="form-label">Kurzbeschreibung</label>
-                <textarea value={summary} onChange={(e)=>setSummary(e.target.value)} className={inputClass + ' min-h-[80px]'} placeholder="Kurz und knackig…" />
+                <textarea
+                  value={summary}
+                  onChange={(e)=>setSummary(e.target.value)}
+                  className={inputClass + ' min-h-[120px] resize-y'}
+                  placeholder="Kurz und knackig…"
+                />
               </div>
+
               <div>
-                <label className="form-label">Inhalt</label>
-                <RichTextEditor value={content} onChange={setContent} />
+                <div className="flex items-center justify-between">
+                  <label className="form-label">Inhalt</label>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={()=>setEditorOpen(true)}
+                      className="px-2 py-1.5 rounded-lg border text-sm dark:border-gray-700"
+                    >
+                      Editor im Vollbild
+                    </button>
+                  </div>
+                </div>
+
+                {/* Resizable Editor-Pane */}
+                <div
+                  ref={contentPaneRef}
+                  className="rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden resize-y min-h-[360px] max-h-[80vh]"
+                >
+                  <RichTextEditor value={content} onChange={setContent} />
+                </div>
+                <p className="text-[11px] text-gray-500 mt-1">Tipp: Ecke unten rechts ziehen, um die Höhe anzupassen.</p>
               </div>
             </div>
           </div>
 
-          {/* --------- Bilder / Galerie --------- */}
+          {/* Bilder / Galerie */}
           <div className={cardClass + ' space-y-3'}>
             <div className="flex items-center justify-between">
               <h3 className="text-base font-semibold">Bilder / Galerie</h3>
               <label className="inline-flex items-center gap-2 text-sm">
                 <input
-                  type="file"
-                  accept="image/*"
-                  multiple
+                  type="file" accept="image/*" multiple
                   onChange={(e)=>{ if (e.target.files) handleFiles(e.target.files); e.currentTarget.value=''; }}
                   disabled={uploadBusy}
-                  className="hidden"
-                  id="news-image-input"
+                  className="hidden" id="news-image-input"
                 />
-                <button
-                  type="button"
-                  onClick={()=>document.getElementById('news-image-input')?.click()}
-                  className="px-3 py-1.5 rounded bg-blue-600 text-white text-sm disabled:opacity-50"
-                  disabled={uploadBusy}
-                >
+                <button type="button" onClick={()=>document.getElementById('news-image-input')?.click()}
+                        className="px-3 py-1.5 rounded bg-blue-600 text-white text-sm disabled:opacity-50"
+                        disabled={uploadBusy}>
                   {uploadBusy ? 'Lade hoch…' : '+ Bilder hochladen'}
                 </button>
               </label>
             </div>
 
-            {images.length === 0 && (
-              <p className="text-sm text-gray-500">Noch keine Bilder hinzugefügt.</p>
-            )}
+            {images.length === 0 && <p className="text-sm text-gray-500">Noch keine Bilder hinzugefügt.</p>}
 
             {images.length > 0 && (
               <ul className="grid gap-3">
                 {images.map((im, i) => (
                   <li key={`${im.url}-${i}`} className="grid grid-cols-[96px_1fr_auto] gap-3 items-start rounded-xl border border-gray-200 dark:border-gray-700 p-3">
-                    {/* Preview */}
                     <div className="w-24 h-20 overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700 bg-white/50 dark:bg-white/10">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={im.url || publicUrlFromPath(im.path)} alt="" className="w-full h-full object-cover" />
                     </div>
-
-                    {/* Caption */}
                     <div>
                       <label className="block text-sm text-gray-600 dark:text-gray-300 mb-1">Bildunterschrift (optional)</label>
                       <input
@@ -392,8 +450,6 @@ export default function NewsEditorClient() {
                         placeholder="z. B. „Eindrücke vom Event 2025“"
                       />
                     </div>
-
-                    {/* Actions */}
                     <div className="flex flex-col gap-2">
                       <button type="button" onClick={()=>moveImage(i,-1)} className="px-3 py-1.5 rounded border dark:border-gray-700 disabled:opacity-50" disabled={i===0}>↑</button>
                       <button type="button" onClick={()=>moveImage(i, 1)} className="px-3 py-1.5 rounded border dark:border-gray-700 disabled:opacity-50" disabled={i===images.length-1}>↓</button>
@@ -405,7 +461,7 @@ export default function NewsEditorClient() {
             )}
           </div>
 
-          {/* --------- Quellen --------- */}
+          {/* Quellen */}
           <div className={cardClass + ' space-y-3'}>
             <div className="flex items-center justify-between">
               <h3 className="text-base font-semibold">Quellen (am Beitragsende)</h3>
@@ -425,6 +481,7 @@ export default function NewsEditorClient() {
             </div>
           </div>
 
+          {/* Kategorien/Badges */}
           <div className={cardClass}>
             <div className="grid md:grid-cols-2 gap-4">
               <div>
@@ -466,13 +523,27 @@ export default function NewsEditorClient() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <button disabled={!canSave || saving} onClick={save} type="button" className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50">{saving ? 'Speichern…' : 'Speichern'}</button>
-            <button type="button" className="px-4 py-2 rounded-xl border dark:border-gray-700" onClick={resetForm}>Neu</button>
-            {result && <div className="text-sm text-gray-700 dark:text-gray-300">{result}</div>}
+          {/* Sticky Bottom Action Bar */}
+          <div className="sticky bottom-4 z-10">
+            <div className="mx-auto max-w-7xl rounded-2xl border border-gray-200 dark:border-gray-800 bg-white/90 dark:bg-gray-900/80 backdrop-blur px-3 py-2 flex items-center gap-3 shadow-sm">
+              <button disabled={!canSave || saving} onClick={save} type="button" className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50">{saving ? 'Speichern…' : 'Speichern'}</button>
+              <button type="button" className="px-4 py-2 rounded-xl border dark:border-gray-700" onClick={resetForm}>Neu</button>
+              {result && <div className="text-sm text-gray-700 dark:text-gray-300 truncate">{result}</div>}
+              {dirty && <span className="ml-auto text-xs text-amber-600">Nicht gespeicherte Änderungen</span>}
+            </div>
           </div>
         </>
       )}
+
+      {/* Vollbild-Editor Modal */}
+      <FullscreenEditorModal
+        open={editorOpen}
+        value={content}
+        onClose={()=>setEditorOpen(false)}
+        onChange={setContent}
+        onSave={save}
+      />
     </div>
   );
 }
+  
