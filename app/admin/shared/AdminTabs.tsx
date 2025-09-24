@@ -7,6 +7,7 @@ import { usePathname } from 'next/navigation';
 const tabs = [
   { href: '/admin/news',          label: 'Beitrag anlegen' },
   { href: '/admin/posts-list',    label: 'Beiträge' },
+  { href: '/admin/polls',         label: 'Abstimmungen' },
   { href: '/admin/vendors',       label: 'Veranstalter' },
   { href: '/admin/categories',    label: 'Kategorien' },
   { href: '/admin/badges',        label: 'Badges' },
