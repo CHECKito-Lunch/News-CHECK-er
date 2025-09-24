@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useEditor, EditorContent, ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Underline from '@tiptap/extension-underline';
@@ -21,6 +21,142 @@ type Props = {
   placeholder?: string;
 };
 
+type PollListItem = {
+  id: string;
+  question: string;
+  options: string[];
+  multi_choice?: boolean;
+  max_choices?: number;
+  allow_change?: boolean;
+  closed_at?: string | null;
+  updated_at?: string | null;
+};
+
+/* ---------------- Poll Picker Modal ---------------- */
+function PollPickerModal({
+  open,
+  onClose,
+  onPick,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onPick: (p: PollListItem) => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [polls, setPolls] = useState<PollListItem[]>([]);
+  const [q, setQ] = useState('');
+
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    fetch('/api/admin/polls', { credentials: 'same-origin' })
+      .then(r => r.json())
+      .then(j => setPolls(Array.isArray(j?.data) ? j.data : []))
+      .catch(() => setPolls([]))
+      .finally(() => setLoading(false));
+  }, [open]);
+
+  const filtered = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    if (!s) return polls;
+    return polls.filter(p => {
+      const hay = `${p.id} ${p.question} ${(p.options || []).join(' ')}`.toLowerCase();
+      return hay.includes(s);
+    });
+  }, [polls, q]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="absolute inset-x-0 top-10 mx-auto max-w-3xl rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-xl">
+        <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+          <div className="text-lg font-semibold">Abstimmung verknüpfen</div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-3 py-1.5 rounded-lg border bg-white hover:bg-gray-50 dark:bg-white/10 dark:hover:bg-white/20 dark:border-gray-700"
+          >
+            Schließen
+          </button>
+        </div>
+
+        <div className="p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <input
+              className="w-full rounded-lg px-3 py-2 bg-white text-gray-900 placeholder-gray-500 border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-white/10 dark:text-white dark:placeholder-gray-400 dark:border-white/10"
+              placeholder="Suche nach Frage, Option oder ID…"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+          </div>
+
+          {loading ? (
+            <div className="text-sm text-gray-500">lädt…</div>
+          ) : filtered.length === 0 ? (
+            <div className="text-sm text-gray-500">Keine Abstimmungen gefunden.</div>
+          ) : (
+            <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+              {filtered.map((p) => {
+                const isClosed = !!p.closed_at;
+                return (
+                  <li key={p.id} className="py-3">
+                    <div className="flex items-start gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <code className="px-1.5 py-0.5 text-[11px] rounded bg-gray-100 dark:bg-gray-800">{p.id}</code>
+                          <span className={`text-[11px] px-1.5 py-0.5 rounded-full border
+                            ${isClosed
+                              ? 'border-gray-300 text-gray-600 dark:border-gray-700 dark:text-gray-300'
+                              : 'border-green-300 text-green-700 dark:border-green-900 dark:text-green-300'}`}>
+                            {isClosed ? 'geschlossen' : 'offen'}
+                          </span>
+                          {p.multi_choice ? (
+                            <span className="text-[11px] px-1.5 py-0.5 rounded-full border border-blue-300 text-blue-700 dark:border-blue-900 dark:text-blue-300">
+                              Mehrfach{p.max_choices ? ` (max ${p.max_choices})` : ''}
+                            </span>
+                          ) : (
+                            <span className="text-[11px] px-1.5 py-0.5 rounded-full border border-amber-300 text-amber-700 dark:border-amber-900 dark:text-amber-300">
+                              Einfach
+                            </span>
+                          )}
+                          {p.allow_change === false && (
+                            <span className="text-[11px] px-1.5 py-0.5 rounded-full border border-gray-300 text-gray-600 dark:border-gray-700 dark:text-gray-300">
+                              Änderung gesperrt
+                            </span>
+                          )}
+                        </div>
+                        <div className="font-medium mt-1">{p.question}</div>
+                        <div className="mt-1 flex flex-wrap gap-1.5">
+                          {(p.options || []).map((o, i) => (
+                            <span key={i} className="text-[11px] px-2 py-0.5 rounded-full border dark:border-gray-700">
+                              {o}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => onPick(p)}
+                          className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white"
+                        >
+                          Verknüpfen
+                        </button>
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* -------- Poll NodeView (Editor-Vorschau) -------- */
 function PollView({ node, selected }: any) {
   const q = node.attrs.question as string;
@@ -38,7 +174,7 @@ function PollView({ node, selected }: any) {
       <div className="text-sm font-semibold mb-2">{q || '— Frage —'}</div>
       <div className="flex flex-wrap gap-2">
         {options.length ? (
-          options.map((o, i) => (
+          options.map((o: string, i: number) => (
             <span key={i} className="px-2 py-1 text-xs rounded-full border dark:border-gray-700">
               {o}
             </span>
@@ -56,7 +192,7 @@ function PollView({ node, selected }: any) {
 const Poll = Node.create({
   name: 'poll',
   group: 'block',
-  atom: true,          // Leaf node
+  atom: true,
   selectable: true,
   draggable: true,
   defining: true,
@@ -88,7 +224,6 @@ const Poll = Node.create({
     return [{ tag: 'div[data-type="poll"]' }];
   },
 
-  // Leaf: KEIN "0" → kein Content-Hole
   renderHTML({ HTMLAttributes }) {
     return ['div', mergeAttributes(HTMLAttributes, { 'data-type': 'poll' })];
   },
@@ -99,6 +234,8 @@ const Poll = Node.create({
 });
 
 export default function RichTextEditor({ value, onChange, placeholder = 'Schreibe den Beitrag …' }: Props) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ codeBlock: false, heading: { levels: [2, 3] } }),
@@ -110,7 +247,7 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Schreib
       TableRow,
       TableHeader,
       TableCell,
-      Poll, // sichtbar im Editor via NodeView
+      Poll,
     ],
     immediatelyRender: false,
     content: value || '<p></p>',
@@ -146,6 +283,7 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Schreib
   const delCol =       () => editor?.chain().focus().deleteColumn().run();
   const delTable =     () => editor?.chain().focus().deleteTable().run();
 
+  // Ad-hoc neue Poll (Prompts)
   const insertPoll = () => {
     if (!editor) return;
     const question = window.prompt('Frage der Abstimmung:', 'Wofür stimmst du?') ?? '';
@@ -158,6 +296,21 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Schreib
       type: 'poll',
       attrs: { id: nanoid(8), question, options },
     }).run();
+  };
+
+  // Aus Picker verknüpfen
+  const linkExistingPoll = (p: PollListItem) => {
+    if (!editor) return;
+    editor.chain().focus().insertContent({
+      type: 'poll',
+      attrs: {
+        id: p.id,
+        // Frage/Optionen für die Editor-Vorschau mitschreiben
+        question: p.question ?? '',
+        options: Array.isArray(p.options) ? p.options : [],
+      },
+    }).run();
+    setPickerOpen(false);
   };
 
   return (
@@ -262,17 +415,29 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Schreib
           disabled={!editor?.isActive('table')}
           type="button">Tabelle löschen</button>
 
-        {/* Poll */}
+        {/* Polls */}
         <span className="mx-1 opacity-40">|</span>
         <button className={btn(false)}
           onClick={insertPoll}
           disabled={!editor}
-          type="button">Abstimmung</button>
+          type="button">Abstimmung (neu)</button>
+
+        <button className={btn(false)}
+          onClick={() => setPickerOpen(true)}
+          disabled={!editor}
+          type="button">Poll verknüpfen</button>
      </div>
 
       <div className="bg-white dark:bg-gray-900 px-4 py-3">
         <EditorContent editor={editor} />
       </div>
+
+      {/* Modal mounten */}
+      <PollPickerModal
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onPick={linkExistingPoll}
+      />
     </div>
   );
 }
