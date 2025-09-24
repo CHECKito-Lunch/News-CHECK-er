@@ -43,6 +43,101 @@
   .form-label  { @apply block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1; }
 }
 
+
+/* ---------- Tiptap Tables – nicer look ---------- */
+.tiptap table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid hsl(210 20% 90%);
+  border-radius: 12px;         /* runde Ecken */
+  overflow: hidden;            /* rounded header/edges sichtbar */
+  background: #fff;
+}
+
+.dark .tiptap table {
+  border-color: hsl(220 13% 18%);
+  background: hsl(220 13% 12%);
+}
+
+.tiptap thead th {
+  background: hsl(210 20% 98%);
+  color: hsl(215 25% 20%);
+  font-weight: 600;
+  text-align: left;
+  border-bottom: 1px solid hsl(210 20% 90%);
+  padding: 10px 12px;
+  vertical-align: middle;
+}
+
+.dark .tiptap thead th {
+  background: hsl(220 13% 16%);
+  color: hsl(210 40% 90%);
+  border-bottom-color: hsl(220 13% 18%);
+}
+
+.tiptap tbody td {
+  padding: 10px 12px;
+  vertical-align: top;
+  border-bottom: 1px solid hsl(210 20% 90%);
+}
+
+.dark .tiptap tbody td {
+  border-bottom-color: hsl(220 13% 18%);
+}
+
+/* Zebra-Streifen + Hover */
+.tiptap tbody tr:nth-child(odd) td {
+  background: hsl(210 20% 99%);
+}
+.dark .tiptap tbody tr:nth-child(odd) td {
+  background: hsl(220 13% 14%);
+}
+
+.tiptap tbody tr:hover td {
+  background: hsl(210 20% 97%);
+}
+.dark .tiptap tbody tr:hover td {
+  background: hsl(220 13% 16%);
+}
+
+/* Zellränder links/rechts weicher machen */
+.tiptap td + td,
+.tiptap th + th {
+  border-left: 1px solid hsl(210 20% 90%);
+}
+.dark .tiptap td + td,
+.dark .tiptap th + th {
+  border-left-color: hsl(220 13% 18%);
+}
+
+/* Spalten-Resize-Handle (wenn Table.configure({ resizable: true })) */
+.tiptap .column-resize-handle {
+  position: absolute;
+  right: -2px;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: hsl(215 85% 55%);
+  opacity: 0.25;
+  pointer-events: none;
+}
+.tiptap .resize-cursor {
+  cursor: col-resize;
+}
+
+/* Optional: kleine Caption-Optik (falls du mal <caption> nutzt) */
+.tiptap table caption {
+  caption-side: bottom;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: hsl(215 15% 40%);
+}
+.dark .tiptap table caption {
+  color: hsl(210 10% 70%);
+}
+
+
 /* === Color Theme Variables === */
 :root {
   --background: #f7faff;     /* CHECK24-hellblau */

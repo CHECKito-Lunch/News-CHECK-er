@@ -255,7 +255,7 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Schreib
       onChange(editor.getHTML());
     },
     editorProps: {
-      attributes: { class: 'prose dark:prose-invert max-w-none min-h-[220px] focus:outline-none' },
+      attributes: { class: 'tiptap prose dark:prose-invert max-w-none min-h-[220px] focus:outline-none' },
     },
   });
 
