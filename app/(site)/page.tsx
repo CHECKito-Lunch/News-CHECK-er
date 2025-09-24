@@ -68,6 +68,19 @@ const uniqById = <T extends { id: number }>(arr: T[]) => {
   return arr.filter(x => (seen.has(x.id) ? false : (seen.add(x.id), true)));
 };
 
+// --- Dates: FullCalendar mag YYYY-MM-DD und exklusives end für all-day ---
+const toYMD = (iso: string) => {
+  const d = new Date(iso + 'T00:00:00');
+  return d.toISOString().slice(0, 10);
+};
+const addDays = (iso: string, days: number) => {
+  const d = new Date(iso + 'T00:00:00');
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+};
+
+
+
 export default function HomePage() {
   const [items, setItems] = useState<Item[]>([]);
   const [kpis, setKpis] = useState<KPI[]>([]);
@@ -214,21 +227,35 @@ export default function HomePage() {
   }, []);
 
   // Kalender-Events (Termine + DB-Events + ICS)
-  const events = useMemo(() => ([
-    ...termine.map(t => ({
+const events = useMemo(() => {
+  const mappedTermine = termine.map(t => {
+    // Start (Pflicht in neuer API) + Fallbacks für Legacy
+    const startSrc = t.starts_at || t.start || t.date;
+    const endIncl = t.ends_at ?? t.end ?? null;
+
+    // Für all-day ist end EXKLUSIV → inklusives Ende aus DB um +1 Tag erhöhen
+    const start = startSrc ? toYMD(startSrc) : undefined;
+    const end = endIncl ? addDays(endIncl, 1) : undefined;
+
+    return {
       id: String(t.id),
       title: t.title,
-      start: t.starts_at || t.start || t.date,              // Fallbacks für Legacy
-      end:   (t.ends_at || t.end) || undefined,             // FC erwartet exklusives end
+      start,
+      end,
       allDay: true,
       backgroundColor: '#2563eb',
       textColor: '#fff',
-      extendedProps: { icon: t.icon || '📌' },              // Icon sauber übergeben
-    })),
+      extendedProps: { icon: t.icon || '📌' },
+    };
+  });
+
+  return [
+    ...mappedTermine,
     ...dbEvents,
     { url: 'https://feiertage-api.de/api/?bundesland=SN&out=ical', format: 'ics' as const },
     { url: 'https://www.schulferien.org/iCal/Ferien/ical/Sachsen.ics', format: 'ics' as const },
-  ]), [termine, dbEvents]);
+  ];
+}, [termine, dbEvents]);
 
   // FEED: News + Events bündeln & sortieren
   const unifiedFeed = useMemo(() => {
