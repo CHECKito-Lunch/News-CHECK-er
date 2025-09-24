@@ -5,14 +5,8 @@ export const revalidate = 0;
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { headers } from 'next/headers';
-import nextDynamic from 'next/dynamic';   
 import LightboxGallery from '@/app/components/LightboxGallery';
-
-
-const PollsClient = nextDynamic(                   
-  () => import('@/app/components/PollsClient'),
-  { ssr: false }
-);
+import PollsClient from '@/app/components/PollsClient'; // ⬅️ direkt importieren (Client-Komponente hat "use client")
 
 type PostImage = { url: string; caption?: string | null; sort_order?: number | null };
 type ApiData = {
