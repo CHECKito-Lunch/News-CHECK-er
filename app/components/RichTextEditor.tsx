@@ -16,12 +16,12 @@ import { TableHeader } from '@tiptap/extension-table-header';
 import { nanoid } from 'nanoid';
 
 type Props = {
-  value: string;                   // gespeichertes HTML
+  value: string;
   onChange: (html: string) => void;
   placeholder?: string;
 };
 
-/** --- Poll Node (ohne NodeView, speichert reine HTML-Attribute) --- */
+/** ---- Poll Node (ohne extend, keine Base-Config-Zugriffe) ---- */
 const Poll = Node.create({
   name: 'poll',
   group: 'block',
@@ -30,7 +30,11 @@ const Poll = Node.create({
 
   addAttributes() {
     return {
-      id: { default: null },
+      id: {
+        default: null,
+        parseHTML: el => el.getAttribute('data-id'),
+        renderHTML: attrs => ({ 'data-id': attrs.id }),
+      },
       question: {
         default: 'Wofür stimmst du?',
         parseHTML: el => el.getAttribute('data-question') || 'Wofür stimmst du?',
@@ -52,54 +56,34 @@ const Poll = Node.create({
   },
 
   renderHTML({ HTMLAttributes }) {
-    // wichtig: data-type, data-id, data-question, data-options
     return ['div', mergeAttributes(HTMLAttributes, { 'data-type': 'poll' }), 0];
   },
 });
 
 export default function RichTextEditor({ value, onChange, placeholder = 'Schreibe den Beitrag …' }: Props) {
-  // ⚠️ KEIN Early return vor useEditor!
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({ codeBlock: false, heading: { levels: [2,3] } }),
+      StarterKit.configure({ codeBlock: false, heading: { levels: [2, 3] } }),
       Underline,
       Link.configure({ openOnClick: false }),
       Placeholder.configure({ placeholder }),
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
-      // Tabellen
       Table.configure({ resizable: true }),
       TableRow,
       TableHeader,
       TableCell,
-      // Poll
-      Poll.extend({
-        addAttributes() {
-          const base = (Poll as any).prototype.config.addAttributes();
-          return {
-            ...base,
-            id: {
-              default: null,
-              parseHTML: (el: HTMLElement) => el.getAttribute('data-id'),
-              renderHTML: (attrs: any) => ({ 'data-id': attrs.id }),
-            },
-          };
-        },
-      }),
+      Poll, // <-- nur einmal registrieren
     ],
-    immediatelyRender: false,                 // vermeidet SSR/Hydration-Mismatch
+    immediatelyRender: false,
     content: value || '<p></p>',
     onUpdate({ editor }) {
       onChange(editor.getHTML());
     },
     editorProps: {
-      attributes: {
-        class:
-          'prose dark:prose-invert max-w-none min-h-[220px] focus:outline-none',
-      },
+      attributes: { class: 'prose dark:prose-invert max-w-none min-h-[220px] focus:outline-none' },
     },
   });
 
-  // externes value → Editor synchronisieren, ohne Hooks neu zu ordnen
   useEffect(() => {
     if (!editor) return;
     const current = editor.getHTML();
@@ -109,15 +93,14 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Schreib
   }, [value, editor]);
 
   const btn = (active: boolean) =>
-    `px-2 py-1 rounded border text-sm transition
-     ${active
+    `px-2 py-1 rounded border text-sm transition ${
+      active
         ? 'bg-blue-600 text-white border-blue-600'
-        : 'bg-white text-gray-700 hover:bg-gray-50 border-gray-200 ' +
-          'dark:bg-transparent dark:text-gray-200 dark:hover:bg-gray-800 dark:border-gray-700'}`;
+        : 'bg-white text-gray-700 hover:bg-gray-50 border-gray-200 dark:bg-transparent dark:text-gray-200 dark:hover:bg-gray-800 dark:border-gray-700'
+    }`;
 
   const can = (fn: () => boolean) => !!editor && fn();
 
-  // --- Toolbar Actions ---
   const insertTable = () => editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
   const addRow =       () => editor?.chain().focus().addRowAfter().run();
   const addCol =       () => editor?.chain().focus().addColumnAfter().run();
@@ -133,14 +116,10 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Schreib
     const options = raw.split(',').map(s => s.trim()).filter(Boolean);
     if (options.length === 0) return;
 
-    editor
-      .chain()
-      .focus()
-      .insertContent({
-        type: 'poll',
-        attrs: { id: nanoid(8), question, options },
-      })
-      .run();
+    editor.chain().focus().insertContent({
+      type: 'poll',
+      attrs: { id: nanoid(8), question, options },
+    }).run();
   };
 
   return (
@@ -213,7 +192,7 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Schreib
           disabled={!editor}
           type="button">Formatierung löschen</button>
 
-        {/* --- Tabellen --- */}
+        {/* Tabellen */}
         <span className="mx-1 opacity-40">|</span>
         <button className={btn(!!editor?.isActive('table'))}
           onClick={insertTable}
@@ -245,7 +224,7 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Schreib
           disabled={!editor?.isActive('table')}
           type="button">Tabelle löschen</button>
 
-        {/* --- Poll --- */}
+        {/* Poll */}
         <span className="mx-1 opacity-40">|</span>
         <button className={btn(false)}
           onClick={insertPoll}
