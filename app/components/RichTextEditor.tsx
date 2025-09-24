@@ -8,21 +8,83 @@ import Link from '@tiptap/extension-link';
 import Placeholder from '@tiptap/extension-placeholder';
 import TextAlign from '@tiptap/extension-text-align';
 
+import { Node, mergeAttributes } from '@tiptap/core';
+import { Table } from '@tiptap/extension-table';
+import { TableRow } from '@tiptap/extension-table-row';
+import { TableCell } from '@tiptap/extension-table-cell';
+import { TableHeader } from '@tiptap/extension-table-header';
+import { nanoid } from 'nanoid';
+
 type Props = {
   value: string;                   // gespeichertes HTML
   onChange: (html: string) => void;
   placeholder?: string;
 };
 
+/** --- Poll Node (ohne NodeView, speichert reine HTML-Attribute) --- */
+const Poll = Node.create({
+  name: 'poll',
+  group: 'block',
+  atom: true,
+  selectable: true,
+
+  addAttributes() {
+    return {
+      id: { default: null },
+      question: {
+        default: 'Wofür stimmst du?',
+        parseHTML: el => el.getAttribute('data-question') || 'Wofür stimmst du?',
+        renderHTML: attrs => ({ 'data-question': attrs.question }),
+      },
+      options: {
+        default: ['Option A', 'Option B'],
+        parseHTML: el => {
+          const raw = el.getAttribute('data-options') || '[]';
+          try { return JSON.parse(raw); } catch { return ['Option A', 'Option B']; }
+        },
+        renderHTML: attrs => ({ 'data-options': JSON.stringify(attrs.options ?? []) }),
+      },
+    };
+  },
+
+  parseHTML() {
+    return [{ tag: 'div[data-type="poll"]' }];
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    // wichtig: data-type, data-id, data-question, data-options
+    return ['div', mergeAttributes(HTMLAttributes, { 'data-type': 'poll' }), 0];
+  },
+});
+
 export default function RichTextEditor({ value, onChange, placeholder = 'Schreibe den Beitrag …' }: Props) {
   // ⚠️ KEIN Early return vor useEditor!
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({ codeBlock: false }),
+      StarterKit.configure({ codeBlock: false, heading: { levels: [2,3] } }),
       Underline,
       Link.configure({ openOnClick: false }),
       Placeholder.configure({ placeholder }),
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
+      // Tabellen
+      Table.configure({ resizable: true }),
+      TableRow,
+      TableHeader,
+      TableCell,
+      // Poll
+      Poll.extend({
+        addAttributes() {
+          const base = (Poll as any).prototype.config.addAttributes();
+          return {
+            ...base,
+            id: {
+              default: null,
+              parseHTML: (el: HTMLElement) => el.getAttribute('data-id'),
+              renderHTML: (attrs: any) => ({ 'data-id': attrs.id }),
+            },
+          };
+        },
+      }),
     ],
     immediatelyRender: false,                 // vermeidet SSR/Hydration-Mismatch
     content: value || '<p></p>',
@@ -52,6 +114,34 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Schreib
         ? 'bg-blue-600 text-white border-blue-600'
         : 'bg-white text-gray-700 hover:bg-gray-50 border-gray-200 ' +
           'dark:bg-transparent dark:text-gray-200 dark:hover:bg-gray-800 dark:border-gray-700'}`;
+
+  const can = (fn: () => boolean) => !!editor && fn();
+
+  // --- Toolbar Actions ---
+  const insertTable = () => editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
+  const addRow =       () => editor?.chain().focus().addRowAfter().run();
+  const addCol =       () => editor?.chain().focus().addColumnAfter().run();
+  const delRow =       () => editor?.chain().focus().deleteRow().run();
+  const delCol =       () => editor?.chain().focus().deleteColumn().run();
+  const delTable =     () => editor?.chain().focus().deleteTable().run();
+
+  const insertPoll = () => {
+    if (!editor) return;
+    const question = window.prompt('Frage der Abstimmung:', 'Wofür stimmst du?') ?? '';
+    if (question === '') return;
+    const raw = window.prompt('Optionen (kommagetrennt):', 'Option A, Option B') ?? '';
+    const options = raw.split(',').map(s => s.trim()).filter(Boolean);
+    if (options.length === 0) return;
+
+    editor
+      .chain()
+      .focus()
+      .insertContent({
+        type: 'poll',
+        attrs: { id: nanoid(8), question, options },
+      })
+      .run();
+  };
 
   return (
     <div className="rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden">
@@ -122,6 +212,45 @@ export default function RichTextEditor({ value, onChange, placeholder = 'Schreib
           onClick={() => editor?.chain().focus().unsetAllMarks().clearNodes().run()}
           disabled={!editor}
           type="button">Formatierung löschen</button>
+
+        {/* --- Tabellen --- */}
+        <span className="mx-1 opacity-40">|</span>
+        <button className={btn(!!editor?.isActive('table'))}
+          onClick={insertTable}
+          disabled={!editor}
+          type="button">Tabelle</button>
+
+        <button className={btn(false)}
+          onClick={addRow}
+          disabled={!can(() => editor!.can().addRowAfter())}
+          type="button">+ Zeile</button>
+
+        <button className={btn(false)}
+          onClick={addCol}
+          disabled={!can(() => editor!.can().addColumnAfter())}
+          type="button">+ Spalte</button>
+
+        <button className={btn(false)}
+          onClick={delRow}
+          disabled={!can(() => editor!.can().deleteRow())}
+          type="button">− Zeile</button>
+
+        <button className={btn(false)}
+          onClick={delCol}
+          disabled={!can(() => editor!.can().deleteColumn())}
+          type="button">− Spalte</button>
+
+        <button className={btn(false)}
+          onClick={delTable}
+          disabled={!editor?.isActive('table')}
+          type="button">Tabelle löschen</button>
+
+        {/* --- Poll --- */}
+        <span className="mx-1 opacity-40">|</span>
+        <button className={btn(false)}
+          onClick={insertPoll}
+          disabled={!editor}
+          type="button">Abstimmung</button>
      </div>
 
       <div className="bg-white dark:bg-gray-900 px-4 py-3">
