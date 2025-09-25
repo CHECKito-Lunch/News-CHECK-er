@@ -25,18 +25,51 @@ const tiles = [
 ];
 
 async function absoluteUrl(path: string) {
-  const h = await nextHeaders(); // ⬅️ await!
+  if (/^https?:\/\//i.test(path)) return path;
+  const h = await nextHeaders();
   const host = h.get('x-forwarded-host') ?? h.get('host');
   const proto = h.get('x-forwarded-proto') ?? 'http';
   if (!host) throw new Error('Missing host header');
   return new URL(path.startsWith('/') ? path : `/${path}`, `${proto}://${host}`).toString();
 }
 
+type StatsResponse = {
+  auth?: any;
+  content?: any;
+  dauTrend?: Array<{ day: string; value: number }>;
+  postsTrend?: Array<{ day: string; value: number }>;
+  auth_disabled?: boolean;
+  error?: string;
+};
+
 async function getStats() {
-  const url = await absoluteUrl('/api/admin/stats'); // ⬅️ await!
-  const res = await fetch(url, { cache: 'no-store' });
-  if (!res.ok) return null;
-  return res.json();
+  try {
+    const h = await nextHeaders();
+    const host = h.get('x-forwarded-host') ?? h.get('host');
+    const proto = h.get('x-forwarded-proto') ?? 'http';
+    if (!host) return null;
+
+    const url = new URL('/api/admin/stats', `${proto}://${host}`).toString();
+
+    // 👉 Cookies/Session an die API durchreichen
+    const res = await fetch(url, {
+      cache: 'no-store',
+      headers: {
+        cookie: h.get('cookie') ?? '',
+        // optional passthrough headers, falls dein auth darauf schaut:
+        'x-forwarded-host': host,
+        'x-forwarded-proto': proto,
+      },
+    });
+
+    if (!res.ok) return null;
+    const ct = (res.headers.get('content-type') || '').toLowerCase();
+    if (!ct.includes('application/json')) return null;
+
+    return await res.json();
+  } catch {
+    return null;
+  }
 }
 
 export default async function AdminHome() {

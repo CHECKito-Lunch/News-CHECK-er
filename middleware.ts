@@ -13,6 +13,8 @@ const PUBLIC_PATHS = new Set([
   '/api/unread',      // dito
   '/api/profile',     // Profil lesen/ändern prüft im Handler Bearer
   '/api/upload',      // wenn öffentlich gewollt
+  '/api/admin/stats',
+  
 ]);
 
 function isPublic(pathname: string) {
