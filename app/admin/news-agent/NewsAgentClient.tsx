@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState, useMemo } from 'react';
-import AdminTabs from '../shared/AdminTabs';
 import { useAdminAuth } from '../shared/auth';
 import { inputClass, cardClass } from '../shared/ui';
 import type { AgentConfig, AgentLog, Option } from '../shared/types';
@@ -151,7 +150,6 @@ jobs:
   return (
     <div className="container max-w-15xl mx-auto py-6 space-y-5">
       <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">Admin · News-Agent</h1>
-      <AdminTabs />
 
       {!loading && !sessionOK && (
         <div className={cardClass + ' space-y-3'}>

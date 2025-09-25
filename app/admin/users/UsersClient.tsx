@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import AdminTabs from '../shared/AdminTabs';
 import { authedFetch } from '@/lib/fetchWithSupabase';
 
 type Role = 'admin' | 'moderator' | 'user';
@@ -574,7 +573,6 @@ export default function UsersAdminPage() {
     <div className="container max-w-15xl mx-auto py-6 space-y-5">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Benutzerverwaltung</h1>
-        <AdminTabs />
       </div>
 
       {/* ---------- Benutzer-Formular ---------- */}

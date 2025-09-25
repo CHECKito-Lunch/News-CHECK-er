@@ -1,9 +1,9 @@
 // app/admin/layout.tsx
 import { ReactNode } from 'react';
 import { cookies } from 'next/headers';
-import Link from 'next/link';
 import { verifyToken, AUTH_COOKIE, type Role } from '@/lib/auth';
 import AdminHeader from '../components/AdminHeader';
+import AdminTabs from './shared/AdminTabs';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -19,21 +19,22 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   }
 
   return (
-    <div className="min-h-screen">
-      {/* Neuer Header (Burger links mit Badge, Logo zentriert, blurry Menü) */}
-      <AdminHeader initialRole={role} />
+  <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex flex-col">
+  <AdminHeader initialRole={role} />
 
-      {/* Optional: Zusätzlicher „Zur Startseite“-Link unterhalb, falls du ihn trotzdem separat möchtest */}
-      {/* <div className="container max-w-15xl mx-auto py-2">
-        <Link href="/" className="inline-flex items-center gap-2 text-sm text-blue-600 hover:underline">
-          <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden className="shrink-0">
-            <path d="M15 18l-6-6 6-6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-          Zur Startseite
-        </Link>
-      </div> */}
+  <div className="flex flex-1 gap-6">   {/* <— GAP sorgt für Luft rechts neben der Linie */}
+    {/* Sidebar: KEINE Border im Layout, Breite kommt aus AdminTabs */}
+    <AdminTabs />
 
-      <main className="container max-w-7xl mx-auto py-6">{children}</main>
-    </div>
+    {/* Main */}
+    <main className="flex-1 px-4 sm:px-8 py-6">
+      <div className="mx-auto max-w-[1400px]">
+        <div className="rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 p-6 shadow-sm">
+          {children}
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
   );
 }

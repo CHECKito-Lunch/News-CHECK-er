@@ -3,7 +3,6 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import AdminTabs from '../shared/AdminTabs';
 import { useAdminAuth } from '../shared/auth';
 import { inputClass, cardClass } from '../shared/ui';
 import { slugify, toLocalInput, fromLocalInput } from '../shared/helpers';
@@ -311,7 +310,6 @@ export default function NewsEditorClient() {
   return (
     <div className="container max-w-7xl mx-auto py-6 space-y-5">
       <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">Admin · News</h1>
-      <AdminTabs />
 
       {/* Login/Role gates */}
       {!loading && !sessionOK && (

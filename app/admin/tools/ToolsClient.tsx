@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import AdminTabs from '../shared/AdminTabs';
 
 type Tool = { id:number; title:string; icon:string|null; href:string; sort:number };
 
@@ -79,7 +78,6 @@ export default function AdminToolsPage() {
   return (
     <div className="container max-w-15xl mx-auto py-6 space-y-5">
       <h1 className="text-2xl font-bold">Tools verwalten</h1>
-       <AdminTabs />
 
       <div className={card + ' space-y-3'}>
         <h2 className="text-lg font-semibold">{editId ? `Bearbeiten (ID ${editId})` : 'Neues Tool anlegen'}</h2>

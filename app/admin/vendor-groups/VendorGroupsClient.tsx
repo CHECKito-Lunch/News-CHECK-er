@@ -1,6 +1,5 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
-import AdminTabs from '../shared/AdminTabs';
 
 type Vendor = { id:number; name:string };
 type Group = { id:number; name:string; members?: number[] };
@@ -86,7 +85,6 @@ export default function VendorGroups() {
     <div className="card p-4 space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold">Veranstalter-Gruppen</h1>
-         <AdminTabs />
         {loading && <span className="text-sm text-gray-500">lädt…</span>}
       </div>
 

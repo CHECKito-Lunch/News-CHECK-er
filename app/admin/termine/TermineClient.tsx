@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import AdminTabs from '../shared/AdminTabs';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import listPlugin from '@fullcalendar/list';
@@ -219,7 +218,6 @@ export default function AdminTerminePage() {
   return (
     <div className="container max-w-7xl mx-auto py-6 space-y-6">
       <h1 className="text-2xl font-bold">Termine verwalten</h1>
-      <AdminTabs />
 
       {/* Create (schlank) */}
       <div className={card + ' space-y-3'}>

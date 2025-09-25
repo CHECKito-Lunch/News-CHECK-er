@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import AdminTabs from '../shared/AdminTabs';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -239,7 +238,6 @@ export default function AdminEventsPage() {
     <div className="container max-w-15xl mx-auto py-6 space-y-5">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Events</h1>
-        <AdminTabs />
       </div>
 
       {/* Formular */}

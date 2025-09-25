@@ -1,45 +1,137 @@
-// app/admin/_shared/AdminTabs.tsx
+// app/admin/shared/AdminTabs.tsx
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  Newspaper, ListChecks, Vote, Store, Tags, Award, Users2,
+  Wrench, CalendarDays, Bot, Activity, UserCircle2, Ticket, ChevronLeft
+} from 'lucide-react';
 
-const tabs = [
-  { href: '/admin/news',          label: 'Beitrag anlegen' },
-  { href: '/admin/posts-list',    label: 'Beiträge' },
-  { href: '/admin/polls',         label: 'Abstimmungen' },
-  { href: '/admin/vendors',       label: 'Veranstalter' },
-  { href: '/admin/categories',    label: 'Kategorien' },
-  { href: '/admin/badges',        label: 'Badges' },
-  { href: '/admin/vendor-groups', label: 'Veranstalter-Gruppen' },
-  { href: '/admin/tools',         label: 'Tools' },
-  { href: '/admin/termine',       label: 'Termine' },
-  { href: '/admin/news-agent',    label: 'News-Agent' },
-  { href: '/admin/kpis',          label: 'KPIs' },
-  { href: '/admin/users',         label: 'Benutzer' },
-  { href: '/admin/events',         label: 'Events' },
+type Item = { href: string; label: string; icon?: React.ComponentType<{ className?: string }> };
+type Group = { title: string; items: Item[] };
 
+const NAV: Group[] = [
+  { title: 'Inhalte', items: [
+    { href: '/admin/news', label: 'Beitrag anlegen', icon: Newspaper },
+    { href: '/admin/posts-list', label: 'Beiträge', icon: ListChecks },
+    { href: '/admin/polls', label: 'Abstimmungen', icon: Vote },
+    { href: '/admin/categories', label: 'Kategorien', icon: Tags },
+    { href: '/admin/badges', label: 'Badges', icon: Award },
+    { href: '/admin/termine', label: 'Termine', icon: CalendarDays },
+    { href: '/admin/events', label: 'Events', icon: Ticket },
+  ]},
+  { title: 'Veranstalter', items: [
+    { href: '/admin/vendors', label: 'Veranstalter', icon: Store },
+    { href: '/admin/vendor-groups', label: 'Veranstalter-Gruppen', icon: Users2 },
+  
+  ]},
+  { title: 'System', items: [
+    { href: '/admin/tools', label: 'Tools', icon: Wrench },
+    { href: '/admin/news-agent', label: 'News-Agent', icon: Bot },
+    { href: '/admin/kpis', label: 'KPIs', icon: Activity },
+    { href: '/admin/users', label: 'Benutzer', icon: UserCircle2 },
+  ]},
 ];
 
 export default function AdminTabs() {
   const pathname = usePathname();
+  const router = useRouter();
+
+  const flatItems = useMemo(() => NAV.flatMap(g => g.items), []);
+  const current = flatItems.find(i => pathname === i.href || pathname.startsWith(i.href + '/')) ?? flatItems[0];
+
+  // --- Collapsed state (persist to localStorage)
+  const [collapsed, setCollapsed] = useState(false);
+  useEffect(() => {
+    const v = localStorage.getItem('adminSidebarCollapsed');
+    if (v) setCollapsed(v === '1');
+  }, []);
+  useEffect(() => {
+    localStorage.setItem('adminSidebarCollapsed', collapsed ? '1' : '0');
+  }, [collapsed]);
+
   return (
-    <div className="flex gap-2 border-b border-gray-200 dark:border-gray-800">
-      {tabs.map(t => {
-        const active = pathname === t.href;
-        return (
-          <Link
-            key={t.href}
-            href={t.href}
-            className={`px-3 py-2 rounded-t-lg text-sm font-medium
-              ${active
-                ? 'bg-white text-gray-900 border border-b-0 border-gray-200 dark:bg-gray-900 dark:text-white dark:border-gray-700'
-                : 'text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-800/40'}`}
+    <>
+      {/* Mobile: Select */}
+      <div className="md:hidden mb-4">
+        <label htmlFor="admin-nav" className="sr-only">Bereich wählen</label>
+        <select
+          id="admin-nav"
+          className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm dark:bg-gray-900 dark:border-gray-700"
+          value={current.href}
+          onChange={(e) => router.push(e.target.value)}
+        >
+          {NAV.map(group => (
+            <optgroup key={group.title} label={group.title}>
+              {group.items.map(item => (
+                <option key={item.href} value={item.href}>{item.label}</option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+      </div>
+
+      {/* Desktop: Sidebar – eine (!) Border rechts */}
+      <div className={`hidden md:block ${collapsed ? 'w-16' : 'w-72'} shrink-0`}>
+        <aside
+          className="
+            h-[calc(100dvh-4rem)]  /* unter dem Header */
+            sticky top-16          /* je nach Headerhöhe anpassen */
+            border-r border-gray-200 dark:border-gray-800
+            bg-transparent
+            overflow-y-auto
+            pt-6                   /* spacing oben */
+            pr-3
+          "
+          aria-label="Admin Navigation"
+        >
+          {/* Collapse Toggle */}
+          <button
+            onClick={() => setCollapsed(v => !v)}
+            className="mb-4 ml-2 inline-flex items-center justify-center rounded-md border border-gray-200 dark:border-gray-700 px-2 py-1 text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+            title={collapsed ? 'Sidebar ausklappen' : 'Sidebar einklappen'}
           >
-            {t.label}
-          </Link>
-        );
-      })}
-    </div>
+            <ChevronLeft className={`h-4 w-4 transition-transform ${collapsed ? 'rotate-180' : ''}`} />
+          </button>
+
+          {NAV.map(group => (
+            <nav key={group.title} className="mb-6">
+              {!collapsed && (
+                <h3 className="px-2 mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  {group.title}
+                </h3>
+              )}
+              <ul className="space-y-1">
+                {group.items.map(item => {
+                  const active = pathname === item.href || pathname.startsWith(item.href + '/');
+                  const Icon = item.icon ?? Newspaper;
+                  return (
+                    <li key={item.href}>
+                      <Link
+                        href={item.href}
+                        aria-current={active ? 'page' : undefined}
+                        title={collapsed ? item.label : undefined}
+                        className={[
+                          'group flex items-center gap-2 rounded-lg px-2 py-2 text-sm',
+                          active
+                            ? 'bg-gray-100 text-gray-900 dark:bg-gray-800 dark:text-white'
+                            : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-800/60',
+                          collapsed ? 'justify-center' : ''
+                        ].join(' ')}
+                      >
+                        <Icon className="h-4 w-4 opacity-80" />
+                        {!collapsed && <span className="truncate">{item.label}</span>}
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </nav>
+          ))}
+        </aside>
+      </div>
+    </>
   );
 }

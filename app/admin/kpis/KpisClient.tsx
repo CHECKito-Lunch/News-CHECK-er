@@ -2,7 +2,6 @@
 
 // app/admin/kpis/KpisClient.tsx
 import { useEffect, useMemo, useState } from 'react';
-import AdminTabs from '../shared/AdminTabs';
 
 type Trend = 'up' | 'down' | 'flat' | null;
 type ChartType = 'none' | 'bar' | 'line';
@@ -232,7 +231,6 @@ export default function KPIsAdminPage() {
   return (
     <div className="container max-w-15xl mx-auto py-6 space-y-5">
       <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">KPIs</h1>
-      <AdminTabs />
 
       {/* ======= Formular ======= */}
       <div className={card + ' space-y-3'}>
