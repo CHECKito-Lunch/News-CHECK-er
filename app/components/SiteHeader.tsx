@@ -8,11 +8,29 @@ import { AnimatePresence, motion } from 'framer-motion';
 type Role = 'admin' | 'moderator' | 'user';
 type Me = { user: { sub: string; role: Role; name?: string } | null };
 
+type UnreadRes = {
+  ok: boolean;
+  unread: number;
+  breakdown?: {
+    invites?: number;   // -> Profil
+    groups?: number;    // -> Gruppen (group_posts)
+    news?: number;      // -> News (posts)
+    events?: number;    // -> Events (termine)
+  };
+};
+
 export default function SiteHeader() {
   const pathname = usePathname();
   const [me, setMe] = useState<Me['user']>(null);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [unread, setUnread] = useState<number>(0);
+
+  const [counts, setCounts] = useState({
+    total: 0,
+    invites: 0,
+    groups: 0,
+    news: 0,
+    events: 0,
+  });
 
   // ---- User laden / auf Auth-Events hören
   useEffect(() => {
@@ -38,7 +56,7 @@ export default function SiteHeader() {
 
   // ---- Unread laden / Polling / auf unread-changed reagieren
   useEffect(() => {
-    if (!me) { setUnread(0); return; }
+    if (!me) { setCounts({ total: 0, invites: 0, groups: 0, news: 0, events: 0 }); return; }
 
     let stop = false;
     let timer: number | undefined;
@@ -52,9 +70,16 @@ export default function SiteHeader() {
           credentials: 'include',
         });
         if (!r.ok) return;
-        const j = await r.json().catch(() => null);
-        const cnt = (j && typeof j.unread === 'number') ? j.unread : 0;
-        if (!stop) setUnread(Math.max(0, cnt));
+        const j: UnreadRes = await r.json().catch(() => ({ ok:false, unread:0 }));
+        const b = j.breakdown || {};
+        const next = {
+          total: Math.max(0, Number(j.unread || 0)),
+          invites: Math.max(0, Number(b.invites || 0)),
+          groups: Math.max(0, Number(b.groups || 0)),
+          news:   Math.max(0, Number(b.news   || 0)),
+          events: Math.max(0, Number(b.events || 0)),
+        };
+        if (!stop) setCounts(next);
       } catch {}
     };
 
@@ -62,7 +87,7 @@ export default function SiteHeader() {
     timer = window.setInterval(loadUnread, 60_000);
 
     const onAuth = () => loadUnread();
-    const onUnread = () => loadUnread();           // ⇐ reagiert auf window.dispatchEvent(new Event('unread-changed'))
+    const onUnread = () => loadUnread(); // z.B. nach POST /api/unread/seen
     window.addEventListener('auth-changed', onAuth);
     window.addEventListener('unread-changed', onUnread);
 
@@ -105,6 +130,15 @@ export default function SiteHeader() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  // Hilfsfunktion: per Link den korrekten Badge-Wert liefern
+  function countForLink(href: string) {
+    if (href === '/profile') return counts.invites;                // nur Einladungen
+    if (href === '/groups')  return counts.groups;                 // nur Gruppennews
+    if (href === '/news')    return counts.news + counts.events;   // News + Events
+    // /events kriegt keinen eigenen Badge (ist Teil von /news)
+    return 0;
+  }
+
   return (
     <header className="sticky top-0 z-30 border-b border-gray-200 bg-white/70 dark:bg-gray-900/70 backdrop-blur">
       <div className="container max-w-15xl mx-auto flex items-center justify-between py-3">
@@ -119,7 +153,7 @@ export default function SiteHeader() {
             <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden>
               <path d="M4 6h16M4 12h16M4 18h16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
             </svg>
-            {me && unread > 0 && <Badge count={unread} />}
+            {me && counts.total > 0 && <Badge count={counts.total} />}
           </button>
         </div>
 
@@ -142,10 +176,8 @@ export default function SiteHeader() {
           >
             <nav className="container max-w-5xl mx-auto px-4 py-4 grid gap-2">
               {links.map((n) => {
-                const isProfile = n.href === '/profile';
-                const isNews = n.href === '/news';
-                const isGroups = n.href === '/groups'; // ⇐ Badge optional auch hier
                 const active = pathname === n.href || (n.href !== '/' && pathname?.startsWith(n.href));
+                const c = countForLink(n.href);
                 return (
                   <Link
                     key={n.href}
@@ -159,7 +191,7 @@ export default function SiteHeader() {
                   >
                     <span>{n.label}</span>
                     <span className="relative inline-block w-6 h-6">
-                      {(me && unread > 0 && (isProfile || isNews || isGroups)) && <Badge count={unread} />}
+                      {me && c > 0 && <Badge count={c} />}
                     </span>
                   </Link>
                 );
