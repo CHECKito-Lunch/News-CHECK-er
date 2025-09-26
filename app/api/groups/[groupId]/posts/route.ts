@@ -10,9 +10,9 @@ function bad(msg: string, code = 400) {
 }
 
 /** GET: Liste von Posts einer Gruppe (paged) */
-export async function GET(req: Request, ctx: any) {
+export async function GET(req: Request, { params }: any) {
   try {
-    const gid = Number(ctx?.params?.groupId);
+    const gid = Number(params.groupId);
     if (!Number.isFinite(gid) || gid <= 0) return bad('Ungültige Gruppen-ID', 400);
 
     const me = await getUserFromRequest(req);
@@ -31,17 +31,19 @@ export async function GET(req: Request, ctx: any) {
       slug: string | null;
       title: string;
       summary: string | null;
+      content: string | null;
       created_at: string;
       hero_image_url: string | null;
     }>`
-      select p.id, p.slug, p.title, p.summary, p.created_at, p.hero_image_url
+      select p.id, p.slug, p.title, p.summary, p.content, p.created_at, p.hero_image_url
       from group_posts p
       where p.group_id = ${gid}
       order by p.created_at desc
       limit ${pageSize} offset ${offset}
     `;
 
-    return NextResponse.json({ ok: true, items, page, pageSize });
+    // sowohl items als auch data für Kompatibilität
+    return NextResponse.json({ ok: true, items, data: items, page, pageSize });
   } catch (err) {
     console.error('[groups/:id/posts] GET error', err);
     return bad('Interner Fehler', 500);
@@ -49,9 +51,9 @@ export async function GET(req: Request, ctx: any) {
 }
 
 /** POST: neuen Post in der Gruppe erstellen */
-export async function POST(req: Request, ctx: any) {
+export async function POST(req: Request, { params }: any) {
   try {
-    const gid = Number(ctx?.params?.groupId);
+    const gid = Number(params.groupId);
     if (!Number.isFinite(gid) || gid <= 0) return bad('Ungültige Gruppen-ID', 400);
 
     const me = await getUserFromRequest(req);
@@ -65,7 +67,7 @@ export async function POST(req: Request, ctx: any) {
     if (!title) return bad('Titel fehlt', 400);
 
     const summary        = body?.summary ?? null;
-    const content        = body?.content ?? null;          // Markdown
+    const content        = body?.content ?? null;
     const hero_image_url = body?.hero_image_url ?? null;
 
     const rows = await query<{ id: number; slug: string }>`

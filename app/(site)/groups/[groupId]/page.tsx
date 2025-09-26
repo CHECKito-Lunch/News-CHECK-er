@@ -1,13 +1,19 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import DOMPurify from 'isomorphic-dompurify';
 import { useParams } from 'next/navigation';
 import { authedFetch } from '@/lib/fetchWithSupabase';
 
-type Post = { id: number; title: string; summary?: string|null; content?: string|null; effective_from?: string|null };
+type Post = {
+  id: number;
+  title: string;
+  summary?: string | null;
+  content?: string | null;           // wichtig fürs Rendering
+  effective_from?: string | null;
+};
 type Comment = { id:number; user_name?:string|null; content:string; created_at:string };
 
 function isProbablyHTML(s?: string|null){ return !!s && /<\/?[a-z][\s\S]*>/i.test(s); }
@@ -25,9 +31,13 @@ export default function GroupRoom() {
   async function load() {
     setLoading(true); setError('');
     const r = await authedFetch(`/api/groups/${groupId}/posts?page=1&pageSize=20`);
-    if (!r.ok) { setError(r.status === 403 ? 'Kein Zugriff (nur für Mitglieder).' : 'Konnte Beiträge nicht laden.'); setPosts([]); setLoading(false); return; }
-    const j = await r.json().catch(()=>({ data: [] }));
-    setPosts(j.data || []);
+    if (!r.ok) {
+      setError(r.status === 403 ? 'Kein Zugriff (nur für Mitglieder).' : 'Konnte Beiträge nicht laden.');
+      setPosts([]); setLoading(false); return;
+    }
+    const j = await r.json().catch(()=>({}));
+    const arr = Array.isArray(j?.items) ? j.items : Array.isArray(j?.data) ? j.data : [];
+    setPosts(arr);
     setLoading(false);
   }
   useEffect(()=>{ load(); },[groupId]);
@@ -36,7 +46,8 @@ export default function GroupRoom() {
     e.preventDefault();
     if (!title.trim() || !content.trim()) return;
     const r = await authedFetch(`/api/groups/${groupId}/posts`, {
-      method:'POST', headers:{'Content-Type':'application/json'},
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ title: title.trim(), content: content.trim(), summary: null }),
     });
     if (!r.ok) { alert('Konnte Beitrag nicht erstellen.'); return; }
@@ -93,7 +104,6 @@ export default function GroupRoom() {
                   )}
                 </div>
               )}
-
               <Comments postId={p.id} />
             </li>
           ))}
@@ -117,7 +127,6 @@ function Comments({ postId }: { postId: number }) {
     const content = val.trim();
     if (!content) return;
     setVal('');
-    // optimistic
     const temp: Comment = { id: Math.random(), user_name: 'Ich', content, created_at: new Date().toISOString() } as any;
     setItems(prev => [...prev, temp]);
     const r = await authedFetch(`/api/group-posts/${postId}/comments`, {
@@ -134,7 +143,6 @@ function Comments({ postId }: { postId: number }) {
     <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-800">
       <div className="text-sm font-semibold mb-2">Kommentare</div>
       {items.length === 0 && <div className="text-sm text-gray-500 mb-2">Noch keine Kommentare.</div>}
-
       <ul className="space-y-2">
         {items.map(c => (
           <li key={c.id} className="text-sm">
@@ -146,7 +154,6 @@ function Comments({ postId }: { postId: number }) {
           </li>
         ))}
       </ul>
-
       <form onSubmit={send} className="mt-3 flex items-start gap-2">
         <textarea
           value={val}
