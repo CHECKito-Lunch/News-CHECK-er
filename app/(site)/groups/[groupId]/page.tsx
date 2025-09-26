@@ -473,7 +473,7 @@ function RichTextEditor({
 }
 
 /* ===========================
-   GroupRoom – mit Gruppennamen, aufklappbarem Composer,
+   GroupRoom – mit Gruppennamen, Suche, aufklappbarem Composer,
    Cover-Upload, Quellenformular, RichText & Polls
 =========================== */
 export default function GroupRoom() {
@@ -487,6 +487,14 @@ export default function GroupRoom() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
+  // Suche
+  const [q, setQ] = useState('');
+  const [debouncedQ, setDebouncedQ] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQ(q.trim()), 250);
+    return () => clearTimeout(t);
+  }, [q]);
+
   // Composer-State
   const [title, setTitle] = useState('');
   const [contentHtml, setContentHtml] = useState(''); // TipTap liefert HTML
@@ -499,43 +507,53 @@ export default function GroupRoom() {
   const [srcUrl, setSrcUrl] = useState('');
   const [srcLabel, setSrcLabel] = useState('');
 
+  // ---- Helper: Gruppennamen sicherstellen (Fallback über /api/groups)
+  async function ensureGroupName(current?: string) {
+    if (current && current.trim()) return current;
+    try {
+      const r2 = await authedFetch('/api/groups');
+      if (r2.ok) {
+        const j2 = await r2.json().catch(()=> ({}));
+        const list: Array<{id:number; name:string}> = Array.isArray(j2?.data) ? j2.data : [];
+        const hit = list.find(g => g.id === groupId);
+        if (hit?.name) return hit.name;
+      }
+    } catch {}
+    return '';
+  }
+
   // -------- Laden
   async function load() {
     setLoading(true); setError('');
-    // Posts
-    const r = await authedFetch(`/api/groups/${groupId}/posts?page=1&pageSize=20`);
+    const r = await authedFetch(`/api/groups/${groupId}/posts?` + new URLSearchParams({
+      page: '1', pageSize: '20', q: debouncedQ || '',
+    }));
     const j = await r.json().catch(()=>({}));
     if (!('ok' in (j||{})) && !Array.isArray(j?.items) && !Array.isArray(j?.data)) {
       setError('Konnte Beiträge nicht laden.'); setPosts([]); setLoading(false);
     } else {
       const arr = Array.isArray(j?.items) ? j.items : Array.isArray(j?.data) ? j.data : [];
       setPosts(arr);
-      // optional: Gruppennamen aus Response nehmen
-      const n = j?.group_name || j?.meta?.group_name;
-      if (typeof n === 'string' && n.trim()) setGroupName(n);
+      const n = (j?.group_name || j?.meta?.group_name) as string | undefined;
       setLoading(false);
-    }
-
-    // Gruppennamen separat (falls nicht vorhanden)
-    if (!groupName) {
-      try {
-        const gr = await authedFetch(`/api/groups/${groupId}`);
-        const gj = await gr.json().catch(()=> ({}));
-        const name = gj?.group?.name ?? gj?.name;
-        if (typeof name === 'string' && name.trim()) setGroupName(name);
-      } catch {}
+      setGroupName(await ensureGroupName(n));
     }
   }
-  useEffect(()=>{ load(); /* eslint-disable-next-line */ },[groupId]);
+  useEffect(()=>{ load(); /* eslint-disable-next-line */ },[groupId, debouncedQ]);
+
+  // Clientseitiger Fallback für Suche
+  const visiblePosts = useMemo(() => {
+    const s = debouncedQ.toLowerCase();
+    if (!s) return posts;
+    return posts.filter(p => {
+      const hay = `${p.title||''} ${p.summary||''} ${p.content||''}`.toLowerCase();
+      return hay.includes(s);
+    });
+  }, [posts, debouncedQ]);
 
   // -------- Speichern
   function buildContentWithSources(): string {
     if (sources.length === 0 || contentHasOwnSources(contentHtml)) return contentHtml;
-    const list = sources
-      .filter(s => s.url && s.url.trim())
-      .map(s => `1. <a href="${s.url}" target="_blank" rel="noopener noreferrer">${prettySourceLabel(s.url, s.label)}</a>`)
-      .join('\n');
-    // als HTML-Block anhängen (Markdown wäre möglich, aber wir bleiben bei HTML)
     const htmlSuffix = `
       <h3>Quellen</h3>
       <ol>
@@ -564,7 +582,6 @@ export default function GroupRoom() {
       body: JSON.stringify(body),
     });
     if (!r.ok) { alert('Konnte Beitrag nicht erstellen.'); return; }
-    // Reset
     setTitle(''); setSummary(''); setContentHtml(''); setHeroUrl(''); setSources([]);
     setComposerOpen(false);
     await load();
@@ -585,7 +602,32 @@ export default function GroupRoom() {
 
   return (
     <div className="container max-w-5xl mx-auto py-8 space-y-6">
-      <h1 className="text-2xl font-semibold">{groupName ? groupName : `Gruppe #${groupId}`}</h1>
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold">{groupName ? groupName : `Gruppe #${groupId}`}</h1>
+        {/* Suche */}
+        <div className="flex items-center gap-2">
+          <label htmlFor="group-search" className="text-sm text-gray-500 dark:text-gray-400">Suche:</label>
+          <input
+            id="group-search"
+            value={q}
+            onChange={(e)=>setQ(e.target.value)}
+            placeholder="Titel, Inhalt, …"
+            className="rounded-xl px-3 py-2 w-[min(420px,70vw)] bg-white text-gray-900 placeholder-gray-500 border border-gray-300 shadow-sm
+                       focus:outline-none focus:ring-2 focus:ring-blue-500
+                       dark:bg-white/10 dark:text-white dark:placeholder-gray-400 dark:border-white/10"
+          />
+          {q && (
+            <button
+              type="button"
+              onClick={()=>setQ('')}
+              className="px-3 py-2 rounded-xl text-sm border bg-white hover:bg-gray-50
+                         dark:bg-white/10 dark:hover:bg-white/20 dark:border-gray-700"
+            >
+              Löschen
+            </button>
+          )}
+        </div>
+      </div>
 
       {/* Composer (aufklappbar) */}
       <section className="rounded-xl border bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-800 overflow-hidden">
@@ -678,12 +720,12 @@ export default function GroupRoom() {
       {/* Feed */}
       {loading && <div>Lade…</div>}
       {!loading && error && <div className="text-amber-700 dark:text-amber-400">{error}</div>}
-      {!loading && !error && posts.length === 0 && (
-        <div className="p-8 rounded-xl border border-dashed text-center text-gray-600 dark:text-gray-300">Noch keine Beiträge.</div>
+      {!loading && !error && visiblePosts.length === 0 && (
+        <div className="p-8 rounded-xl border border-dashed text-center text-gray-600 dark:text-gray-300">Keine Beiträge gefunden.</div>
       )}
-      {!loading && !error && posts.length > 0 && (
+      {!loading && !error && visiblePosts.length > 0 && (
         <ul className="grid gap-4">
-          {posts.map(p => {
+          {visiblePosts.map(p => {
             const isHtml = isProbablyHTML(p.content);
             const containerId = `post-content-${p.id}`;
             return (
