@@ -55,12 +55,20 @@ function ensure(): Sql<{}> {
 type Tag = <T = any>(strings: TemplateStringsArray, ...values: any[]) => Promise<T[]>;
 const tag: Tag = (strings, ...values) => (ensure() as any)(strings, ...values);
 
-// Helfer-Methoden durchreichen
+// Helfer-Methoden durchreichen (an tag)
 (tag as any).begin  = (fn: any) => (ensure() as any).begin(fn);
 (tag as any).unsafe = (text: any, params?: any) => (ensure() as any).unsafe(text, params);
 (tag as any).end    = () => (ensure() as any).end();
 
 // Exporte
-export const sql: any = ((...a:any[]) => (ensure() as any)(...a));
+// Funktions-export mit durchgereichten Helfern (WICHTIG: unsafe/begin/end/json auch hier!)
+export const sql: any = ((...a: any[]) => (ensure() as any)(...a)) as any;
+
+// ⬇️ Diese vier Zeilen fehlten – sie beheben "unsafe is not a function"
+(sql as any).begin  = (fn: any) => (ensure() as any).begin(fn);
+(sql as any).unsafe = (text: any, params?: any) => (ensure() as any).unsafe(text, params);
+(sql as any).end    = () => (ensure() as any).end();
+(sql as any).json   = (v: any) => (ensure() as any).json(v);
+
 // Nur json brauchen wir aktuell – array/file bitte weglassen (nicht alle Versionen haben das)
 export const sqlJson = (v: any) => (ensure() as any).json(v);
