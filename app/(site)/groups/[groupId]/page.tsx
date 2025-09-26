@@ -1,3 +1,4 @@
+// app/groups/[groupId]/page.tsx
 'use client';
 
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
@@ -33,6 +34,7 @@ type Post = {
   content?: string | null;           // HTML (TipTap) ODER Markdown – wir erkennen’s
   effective_from?: string | null;
   slug?: string | null;
+  hero_image_url?: string | null;
 };
 type Comment = { id:number; user_name?:string|null; content:string; created_at:string };
 
@@ -52,6 +54,16 @@ type PollListItem = {
 =========================== */
 function isProbablyHTML(s?: string|null){ return !!s && /<\/?[a-z][\s\S]*>/i.test(s); }
 function sanitize(html:string){ return DOMPurify.sanitize(html, { ADD_ATTR: ['target','rel'] }); }
+
+function contentHasOwnSources(content?: string | null) {
+  if (!content) return false;
+  return /\n?#{2,3}\s*Quellen\b/i.test(content);
+}
+function prettySourceLabel(url: string, fallback?: string | null) {
+  if (fallback && fallback.trim()) return fallback.trim();
+  try { const u = new URL(url); return u.host.replace(/^www\./,'') + (u.pathname !== '/' ? u.pathname : ''); }
+  catch { return url; }
+}
 
 /* ===========================
    PollsClient – rendert/verknüpft Poll-Blöcke im veröffentlichten HTML
@@ -159,23 +171,16 @@ const Poll = Node.create({
   defining: true,
   addAttributes() {
     return {
-      id: {
-        default: null,
-        parseHTML: (el) => el.getAttribute('data-id'),
-        renderHTML: (attrs) => ({ 'data-id': attrs.id }),
-      },
+      id: { default: null, parseHTML: el => el.getAttribute('data-id'), renderHTML: attrs => ({ 'data-id': attrs.id }) },
       question: {
         default: 'Wofür stimmst du?',
-        parseHTML: (el) => el.getAttribute('data-question') || 'Wofür stimmst du?',
-        renderHTML: (attrs) => ({ 'data-question': attrs.question }),
+        parseHTML: el => el.getAttribute('data-question') || 'Wofür stimmst du?',
+        renderHTML: attrs => ({ 'data-question': attrs.question }),
       },
       options: {
         default: ['Option A', 'Option B'],
-        parseHTML: (el) => {
-          const raw = el.getAttribute('data-options') || '[]';
-          try { return JSON.parse(raw); } catch { return ['Option A', 'Option B']; }
-        },
-        renderHTML: (attrs) => ({ 'data-options': JSON.stringify(attrs.options ?? []) }),
+        parseHTML: el => { try { return JSON.parse(el.getAttribute('data-options') || '[]'); } catch { return ['Option A','Option B']; } },
+        renderHTML: attrs => ({ 'data-options': JSON.stringify(attrs.options ?? []) }),
       },
     };
   },
@@ -183,6 +188,40 @@ const Poll = Node.create({
   renderHTML({ HTMLAttributes }) { return ['div', mergeAttributes(HTMLAttributes, { 'data-type': 'poll' })]; },
   addNodeView() { return ReactNodeViewRenderer(PollView); },
 });
+
+/* ===========================
+   UploadButton (Cover oder Inline)
+=========================== */
+function UploadButton({
+  onUploaded, multiple = true, children,
+}: { onUploaded: (urls: string[]) => void; multiple?: boolean; children: React.ReactNode }) {
+  const ref = useRef<HTMLInputElement | null>(null);
+  return (
+    <>
+      <input
+        ref={ref}
+        type="file"
+        accept="image/*"
+        multiple={multiple}
+        hidden
+        onChange={async (e) => {
+          const files = Array.from(e.target.files ?? []);
+          if (!files.length) return;
+          const fd = new FormData();
+          files.forEach(f => fd.append('files', f));
+          const r = await fetch('/api/upload', { method: 'POST', body: fd, credentials: 'include' });
+          const j = await r.json().catch(()=> ({}));
+          if (r.ok && j.ok && Array.isArray(j.urls)) onUploaded(j.urls);
+          else alert(j.error || 'Upload fehlgeschlagen');
+          if (ref.current) ref.current.value = '';
+        }}
+      />
+      <button type="button" className="px-3 py-2 rounded-lg border bg-white dark:bg-white/10 hover:bg-gray-50 dark:hover:bg-white/20 border-gray-300 dark:border-gray-700" onClick={()=>ref.current?.click()}>
+        {children}
+      </button>
+    </>
+  );
+}
 
 /* ===========================
    RichTextEditor (TipTap + Toolbar + Poll Picker)
@@ -289,7 +328,8 @@ function RichTextEditor({
   value,
   onChange,
   placeholder = 'Schreibe den Beitrag …',
-}: { value: string; onChange: (html: string) => void; placeholder?: string }) {
+  onInsertImages,
+}: { value: string; onChange: (html: string) => void; placeholder?: string; onInsertImages?: (urls: string[]) => void }) {
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const editor = useEditor({
@@ -353,6 +393,14 @@ function RichTextEditor({
     setPickerOpen(false);
   };
 
+  // Bilder ins Dokument einfügen
+  const insertImages = (urls: string[]) => {
+    if (!editor || urls.length === 0) return;
+    const html = urls.map(u => `<figure><img src="${u}" alt="" /></figure>`).join('');
+    editor.chain().focus().insertContent(html).run();
+    onInsertImages?.(urls);
+  };
+
   return (
     <div className="rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden">
       <div className="flex flex-wrap gap-2 p-2 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
@@ -385,6 +433,9 @@ function RichTextEditor({
           }}
           type="button"
         >Link</button>
+
+        <span className="mx-1 opacity-40">|</span>
+        <UploadButton multiple onUploaded={insertImages}>Bilder einfügen…</UploadButton>
 
         <button className={btn(false)} onClick={() => editor?.chain().focus().unsetAllMarks().clearNodes().run()} type="button">Formatierung löschen</button>
 
@@ -422,30 +473,77 @@ function RichTextEditor({
 }
 
 /* ===========================
-   GroupRoom – jetzt mit RichTextEditor & PollsClient
+   GroupRoom – mit Gruppennamen, aufklappbarem Composer,
+   Cover-Upload, Quellenformular, RichText & Polls
 =========================== */
 export default function GroupRoom() {
   const params = useParams<{ groupId: string }>();
   const groupId = Number(params.groupId);
+
+  const [groupName, setGroupName] = useState<string>('');
+  const [composerOpen, setComposerOpen] = useState<boolean>(false);
+
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
-  const [title, setTitle] = useState('');
-  const [contentHtml, setContentHtml] = useState(''); // <- TipTap liefert HTML
   const [error, setError] = useState('');
 
+  // Composer-State
+  const [title, setTitle] = useState('');
+  const [contentHtml, setContentHtml] = useState(''); // TipTap liefert HTML
+  const [summary, setSummary] = useState<string>('');
+  const [heroUrl, setHeroUrl] = useState<string>('');
+
+  // Quellen
+  type Source = { url: string; label?: string };
+  const [sources, setSources] = useState<Source[]>([]);
+  const [srcUrl, setSrcUrl] = useState('');
+  const [srcLabel, setSrcLabel] = useState('');
+
+  // -------- Laden
   async function load() {
     setLoading(true); setError('');
+    // Posts
     const r = await authedFetch(`/api/groups/${groupId}/posts?page=1&pageSize=20`);
-    if (!r.ok) {
-      setError(r.status === 403 ? 'Kein Zugriff (nur für Mitglieder).' : 'Konnte Beiträge nicht laden.');
-      setPosts([]); setLoading(false); return;
-    }
     const j = await r.json().catch(()=>({}));
-    const arr = Array.isArray(j?.items) ? j.items : Array.isArray(j?.data) ? j.data : [];
-    setPosts(arr);
-    setLoading(false);
+    if (!('ok' in (j||{})) && !Array.isArray(j?.items) && !Array.isArray(j?.data)) {
+      setError('Konnte Beiträge nicht laden.'); setPosts([]); setLoading(false);
+    } else {
+      const arr = Array.isArray(j?.items) ? j.items : Array.isArray(j?.data) ? j.data : [];
+      setPosts(arr);
+      // optional: Gruppennamen aus Response nehmen
+      const n = j?.group_name || j?.meta?.group_name;
+      if (typeof n === 'string' && n.trim()) setGroupName(n);
+      setLoading(false);
+    }
+
+    // Gruppennamen separat (falls nicht vorhanden)
+    if (!groupName) {
+      try {
+        const gr = await authedFetch(`/api/groups/${groupId}`);
+        const gj = await gr.json().catch(()=> ({}));
+        const name = gj?.group?.name ?? gj?.name;
+        if (typeof name === 'string' && name.trim()) setGroupName(name);
+      } catch {}
+    }
   }
-  useEffect(()=>{ load(); },[groupId]);
+  useEffect(()=>{ load(); /* eslint-disable-next-line */ },[groupId]);
+
+  // -------- Speichern
+  function buildContentWithSources(): string {
+    if (sources.length === 0 || contentHasOwnSources(contentHtml)) return contentHtml;
+    const list = sources
+      .filter(s => s.url && s.url.trim())
+      .map(s => `1. <a href="${s.url}" target="_blank" rel="noopener noreferrer">${prettySourceLabel(s.url, s.label)}</a>`)
+      .join('\n');
+    // als HTML-Block anhängen (Markdown wäre möglich, aber wir bleiben bei HTML)
+    const htmlSuffix = `
+      <h3>Quellen</h3>
+      <ol>
+        ${sources.map(s => `<li><a href="${s.url}" target="_blank" rel="noopener noreferrer">${prettySourceLabel(s.url, s.label)}</a></li>`).join('')}
+      </ol>
+    `;
+    return (contentHtml || '') + htmlSuffix;
+  }
 
   async function createPost(e: React.FormEvent) {
     e.preventDefault();
@@ -453,38 +551,128 @@ export default function GroupRoom() {
     const contentTrim = (contentHtml || '').trim();
     if (!titleTrim || !contentTrim) return;
 
+    const body = {
+      title: titleTrim,
+      content: buildContentWithSources(), // ggf. mit „Quellen“ appended
+      summary: summary.trim() || null,
+      hero_image_url: heroUrl || null,
+    };
+
     const r = await authedFetch(`/api/groups/${groupId}/posts`, {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({
-        title: titleTrim,
-        // wir speichern den TipTap-HTML-Output; der Reader erkennt Polls & rendert sie
-        content: contentTrim,
-        summary: null,
-      }),
+      body: JSON.stringify(body),
     });
     if (!r.ok) { alert('Konnte Beitrag nicht erstellen.'); return; }
-    setTitle(''); setContentHtml(''); await load();
+    // Reset
+    setTitle(''); setSummary(''); setContentHtml(''); setHeroUrl(''); setSources([]);
+    setComposerOpen(false);
+    await load();
   }
+
+  // Quellen-UI
+  function addSource() {
+    const url = srcUrl.trim();
+    if (!url) return;
+    setSources(prev => {
+      const set = new Set(prev.map(s => s.url.trim()));
+      if (set.has(url)) return prev;
+      return [...prev, { url, label: srcLabel.trim() || undefined }];
+    });
+    setSrcUrl(''); setSrcLabel('');
+  }
+  function removeSource(url: string) { setSources(prev => prev.filter(s => s.url !== url)); }
 
   return (
     <div className="container max-w-5xl mx-auto py-8 space-y-6">
-      <h1 className="text-2xl font-semibold">Gruppe #{groupId}</h1>
+      <h1 className="text-2xl font-semibold">{groupName ? groupName : `Gruppe #${groupId}`}</h1>
 
-      {/* Composer */}
-      <section className="p-4 rounded-xl border bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-800">
-        <form onSubmit={createPost} className="grid gap-3">
-          <input
-            placeholder="Titel"
-            value={title}
-            onChange={e=>setTitle(e.target.value)}
-            className="px-3 py-2 rounded-lg border bg-white dark:bg-white/10 border-gray-300 dark:border-gray-700"
-          />
-          <RichTextEditor value={contentHtml} onChange={setContentHtml} />
-          <div className="flex justify-end">
-            <button className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white">Beitrag veröffentlichen</button>
-          </div>
-        </form>
+      {/* Composer (aufklappbar) */}
+      <section className="rounded-xl border bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-800 overflow-hidden">
+        <button
+          type="button"
+          onClick={()=> setComposerOpen(o => !o)}
+          className="w-full flex items-center justify-between px-4 py-3 text-left"
+          aria-expanded={composerOpen}
+        >
+          <span className="font-medium">Beitrag anlegen</span>
+          <svg className={`h-4 w-4 transition-transform ${composerOpen ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor" aria-hidden>
+            <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z" clipRule="evenodd"/>
+          </svg>
+        </button>
+
+        {composerOpen && (
+          <form onSubmit={createPost} className="grid gap-3 px-4 pb-4">
+            {/* Cover */}
+            <div className="grid md:grid-cols-[1fr_auto] gap-2 items-center">
+              <input
+                placeholder="Titel"
+                value={title}
+                onChange={e=>setTitle(e.target.value)}
+                className="px-3 py-2 rounded-lg border bg-white dark:bg-white/10 border-gray-300 dark:border-gray-700"
+                required
+              />
+              <UploadButton multiple={false} onUploaded={(urls)=> setHeroUrl(urls[0] || '')}>Cover hochladen…</UploadButton>
+            </div>
+            {heroUrl && (
+              <div className="flex items-center gap-2">
+                <img src={heroUrl} alt="Cover" className="h-20 rounded-xl object-cover border border-gray-200 dark:border-gray-800" />
+                <button type="button" className="px-3 py-2 rounded-lg border bg-white dark:bg-white/10" onClick={()=>setHeroUrl('')}>Cover entfernen</button>
+              </div>
+            )}
+
+            <textarea
+              placeholder="Kurzbeschreibung (optional)"
+              value={summary}
+              onChange={e=>setSummary(e.target.value)}
+              rows={2}
+              className="px-3 py-2 rounded-lg border bg-white dark:bg-white/10 border-gray-300 dark:border-gray-700"
+            />
+
+            <RichTextEditor value={contentHtml} onChange={setContentHtml} onInsertImages={()=>{}} />
+
+            {/* Quellenformular */}
+            <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-3">
+              <div className="text-sm font-semibold mb-2">Quellen</div>
+              <div className="flex flex-wrap gap-2 mb-2">
+                <input
+                  value={srcUrl}
+                  onChange={e=>setSrcUrl(e.target.value)}
+                  placeholder="https://…"
+                  className="flex-1 min-w-[16rem] px-3 py-2 rounded-lg border bg-white dark:bg-white/10 border-gray-300 dark:border-gray-700"
+                />
+                <input
+                  value={srcLabel}
+                  onChange={e=>setSrcLabel(e.target.value)}
+                  placeholder="Label (optional)"
+                  className="flex-1 min-w-[12rem] px-3 py-2 rounded-lg border bg-white dark:bg-white/10 border-gray-300 dark:border-gray-700"
+                />
+                <button type="button" onClick={addSource} className="px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white">Quelle hinzufügen</button>
+              </div>
+              {sources.length > 0 && (
+                <ol className="list-decimal pl-5 space-y-1">
+                  {sources.map(s => (
+                    <li key={s.url} className="flex items-center gap-2 break-words">
+                      <span className="flex-1">
+                        <a href={s.url} target="_blank" rel="noopener noreferrer" className="underline text-blue-700 dark:text-blue-400">
+                          {prettySourceLabel(s.url, s.label)}
+                        </a>
+                      </span>
+                      <button type="button" className="px-2 py-1 rounded border text-xs" onClick={()=>removeSource(s.url)}>Entfernen</button>
+                    </li>
+                  ))}
+                </ol>
+              )}
+              <div className="mt-2 text-xs text-gray-500">
+                Wird beim Speichern als Abschnitt „Quellen“ ans Ende des Inhalts angehängt (sofern nicht bereits vorhanden).
+              </div>
+            </div>
+
+            <div className="flex justify-end">
+              <button className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white">Beitrag veröffentlichen</button>
+            </div>
+          </form>
+        )}
       </section>
 
       {/* Feed */}
@@ -500,8 +688,15 @@ export default function GroupRoom() {
             const containerId = `post-content-${p.id}`;
             return (
               <li key={p.id} className="p-5 rounded-2xl border bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-800">
-                <div className="text-xl font-semibold">{p.title}</div>
-                {p.summary && <p className="mt-1 text-gray-700 dark:text-gray-300">{p.summary}</p>}
+                <div className="flex items-start gap-3">
+                  {p.hero_image_url && (
+                    <img src={p.hero_image_url} alt="" className="h-16 w-16 rounded-lg object-cover border border-gray-200 dark:border-gray-700" />
+                  )}
+                  <div className="min-w-0">
+                    <div className="text-xl font-semibold">{p.title}</div>
+                    {p.summary && <p className="mt-1 text-gray-700 dark:text-gray-300">{p.summary}</p>}
+                  </div>
+                </div>
 
                 {p.content && (
                   <div className="prose dark:prose-invert max-w-none mt-3" id={containerId}>
@@ -509,9 +704,8 @@ export default function GroupRoom() {
                       <>
                         <div
                           dangerouslySetInnerHTML={{ __html: sanitize(p.content!) }}
-                          className="[&_a]:underline [&_img]:max-w-full"
+                          className="[&_a]:underline [&_a]:break-words [&_img]:max-w-full [&_img]:h-auto"
                         />
-                        {/* Poll-Blöcke im HTML erkennen & mit Client-Interaktivität versehen */}
                         <PollsClient containerSelector={`#${containerId}`} postId={p.id} postSlug={p.slug ?? null} />
                       </>
                     ) : (
@@ -587,4 +781,3 @@ function Comments({ postId }: { postId: number }) {
     </div>
   );
 }
-    
