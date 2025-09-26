@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
       return json({ ok: true, unread: 0, breakdown: { posts: 0, invites: 0 }, preview: [] });
     }
 
-    // ✅ last_seen sicher ermitteln (liefert immer genau 1 Zeile)
+    // last_seen aus user_states (fallback epoch)
     const [{ last_seen }] = await sql<{ last_seen: string }[]>`
       select coalesce(
         (select us.last_seen_at from public.user_states us where us.user_id = ${me.sub}::text),
@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
       ) as last_seen
     `;
 
-    // 🔔 offene Einladungen
+    // offene Einladungen
     const [{ invites }] = await sql<{ invites: number }[]>`
       select count(*)::int as invites
       from public.group_invitations gi
@@ -33,10 +33,7 @@ export async function GET(req: NextRequest) {
         and gi.revoked_at is null
     `;
 
-    // 🆕 neue Posts in Gruppen, in denen der User Mitglied ist (Tabelle: public.group_members)
-    // Tabellen: group_members(user_id uuid, group_id int, ...),
-    //           group_posts(id, group_id, title, created_at, effective_from, hero_image_url),
-    //           groups(id, name, description, is_private)
+    // neue Posts in Mitgliedsgruppen seit last_seen (nur created_at)
     const rows = await sql<any[]>`
       with cursor as (
         select ${last_seen}::timestamptz as last_seen
@@ -52,10 +49,10 @@ export async function GET(req: NextRequest) {
           gp.group_id,
           gp.title,
           gp.hero_image_url,
-          coalesce(gp.effective_from, gp.created_at) as ts
+          gp.created_at as ts
         from public.group_posts gp
         join m on m.group_id = gp.group_id
-        join cursor c on coalesce(gp.effective_from, gp.created_at) > c.last_seen
+        join cursor c on gp.created_at > c.last_seen
       )
       select
         p.id,
@@ -63,7 +60,7 @@ export async function GET(req: NextRequest) {
         p.title,
         p.ts as created_at,
         p.hero_image_url,
-        g.name  as group_name,
+        g.name as group_name,
         g.description as group_description,
         g.is_private
       from p
@@ -84,11 +81,7 @@ export async function GET(req: NextRequest) {
         title: r.title,
         created_at: r.created_at,
         hero_image_url: r.hero_image_url,
-        group: {
-          id: r.group_id,
-          name: r.group_name,
-          is_private: !!r.is_private,
-        },
+        group: { id: r.group_id, name: r.group_name, is_private: !!r.is_private }
       })),
     });
   } catch (e) {
