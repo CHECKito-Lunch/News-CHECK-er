@@ -518,25 +518,41 @@ else
         <ul className="flex flex-wrap gap-2">
           {filtered.map(g => {
             const active = isMember(g.id);
+
+            const commonInner = (
+              <>
+                <span className="font-medium">{g.name}</span>
+                {typeof g.memberCount === 'number' && (
+                  <span
+                    className={`text-xs inline-flex items-center justify-center min-w-[1.5rem] h-5 rounded-full
+                      ${active ? 'bg-white/20 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300'}`}
+                  >
+                    {g.memberCount}
+                  </span>
+                )}
+              </>
+            );
+
             return (
-              <li key={g.id}>
-                <button
-                  onClick={() => toggleMembership(g.id, !active)}
-                  className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm border shadow-sm
-                    ${active
-                      ? 'bg-blue-600 text-white border-blue-600'
-                      : 'bg-white dark:bg-white/10 text-gray-700 dark:text-gray-100 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-white/20'
-                    }`}
-                  title={g.description ?? ''}
-                >
-                  <span className="font-medium">{g.name}</span>
-                  {typeof g.memberCount === 'number' && (
-                    <span className={`text-xs inline-flex items-center justify-center min-w-[1.5rem] h-5 rounded-full
-                      ${active ? 'bg-white/20 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300'}`}>
-                      {g.memberCount}
-                    </span>
-                  )}
-                </button>
+              <li key={g.id} title={g.description ?? ''}>
+                {active ? (
+                  <Link
+                    href={`/groups/${g.id}`}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm border shadow-sm
+                      bg-blue-600 text-white border-blue-600 hover:bg-blue-700"
+                  >
+                    {commonInner}
+                  </Link>
+                ) : (
+                  <button
+                    onClick={() => toggleMembership(g.id, true)}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm border shadow-sm
+                      bg-white dark:bg-white/10 text-gray-700 dark:text-gray-100 border-gray-200 dark:border-gray-700
+                      hover:bg-gray-50 dark:hover:bg-white/20"
+                  >
+                    {commonInner}
+                  </button>
+                )}
               </li>
             );
           })}

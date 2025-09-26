@@ -74,7 +74,8 @@ export default function SiteHeader() {
     const arr: { href: string; label: string }[] = [
       { href: '/', label: 'Start' },
       { href: '/news', label: 'News' },
-      { href: '/events', label: 'Events' }, // ← hinzugefügt
+      { href: '/groups', label: 'Gruppen' }, // ← hinzugefügt
+      { href: '/events', label: 'Events' },  // ← hinzugefügt (war schon markiert)
     ];
     if (me) arr.push({ href: '/profile', label: 'Profil' });
     if (me && (me.role === 'admin' || me.role === 'moderator')) {
@@ -136,6 +137,7 @@ export default function SiteHeader() {
             <nav className="container max-w-5xl mx-auto px-4 py-4 grid gap-2">
               {links.map((n) => {
                 const isProfile = n.href === '/profile';
+                const isNews = n.href === '/news';
                 const active = pathname === n.href || (n.href !== '/' && pathname?.startsWith(n.href));
                 return (
                   <Link
@@ -150,7 +152,7 @@ export default function SiteHeader() {
                   >
                     <span>{n.label}</span>
                     <span className="relative inline-block w-6 h-6">
-                      {isProfile && me && unread > 0 && <Badge count={unread} />}
+                      {(me && unread > 0 && (isProfile || isNews)) && <Badge count={unread} />}
                     </span>
                   </Link>
                 );
