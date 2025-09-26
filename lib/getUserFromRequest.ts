@@ -1,29 +1,28 @@
 // lib/getUserFromRequest.ts
 import 'server-only';
-import type { NextRequest } from 'next/server';
+import { cookies, headers } from 'next/headers';
 
-export type Role = 'admin' | 'moderator' | 'user';
-export type User = { id: string; role?: Role; name?: string; email?: string };
+export async function getUserFromRequest(req?: Request): Promise<{ id: string } | null> {
+  try {
+    // 1) Cookie aus Request oder Next cookies()
+    const cookieHeader =
+      req?.headers.get('cookie') ??
+      cookies().toString(); // serialisiert alle Cookies
 
-/**
- * Best-effort User-Erkennung aus Request:
- * - Cookie "user_id"
- * - Header "x-user-id" (dev)
- * - Authorization: Bearer <userId> (dev)
- */
-export async function getUserFromRequest(req: NextRequest): Promise<User | null> {
-  // 1) Cookie
-  const uidCookie = req.cookies.get('user_id')?.value?.trim();
-  if (uidCookie) return { id: uidCookie };
+    const m = cookieHeader?.match(/(?:^|;\s*)user_id=([^;]+)/);
+    if (m?.[1]) return { id: decodeURIComponent(m[1]) };
 
-  // 2) Dev-Header
-  const hdr = req.headers.get('x-user-id')?.trim();
-  if (hdr) return { id: hdr };
+    // 2) Authorization aus Request oder Next headers()
+    const auth =
+      req?.headers.get('authorization') ??
+      (await headers()).get('authorization') ??
+      '';
 
-  // 3) Dev-Bearer
-  const auth = req.headers.get('authorization') || '';
-  const m = auth.match(/^Bearer\s+(.+)$/i);
-  if (m?.[1]) return { id: m[1].trim() };
+    const bearer = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+    if (bearer) return { id: bearer };
 
-  return null;
+    return null;
+  } catch {
+    return null;
+  }
 }
