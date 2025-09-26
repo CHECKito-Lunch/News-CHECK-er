@@ -11,14 +11,15 @@ type Group = {
   isMember?: boolean;
 };
 type PostPreview = { id:number; title:string; created_at?:string; hero_image_url?:string|null };
-type Pair = [number, PostPreview[]];
 
 type UnreadRes = {
   ok: boolean;
-  total: number;
-  unread?: number;
-  preview?: any[];
+  unread: number;
+  breakdown?: { posts?: number; invites?: number };
+  preview?: Array<{ id:number; title:string; created_at:string; hero_image_url?:string|null; group:{id:number; name:string} }>;
 };
+
+type PreviewItem = { group: Group; posts: PostPreview[] };
 
 const inputClass =
   'rounded-xl px-3 py-2 w-full bg-white text-gray-900 placeholder-gray-500 border border-gray-300 ' +
@@ -33,25 +34,36 @@ export default function GroupsHub() {
   const [items, setItems] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState('');
-  const [previews, setPreviews] = useState<Record<number, PostPreview[]>>({});
   const [loadingPreviews, setLoadingPreviews] = useState(false);
   const [unreadCount, setUnreadCount] = useState<number>(0);
+  const [previewItems, setPreviewItems] = useState<PreviewItem[]>([]);
+  const [marking, setMarking] = useState(false);
 
-  // 0) Unread (kleiner Badge im Header)
-  useEffect(() => {
-    (async () => {
-      try {
-        const r = await authedFetch('/api/unread');
-        const j: UnreadRes = await r.json().catch(() => ({ ok:false, total:0 }));
-        const c = typeof j?.unread === 'number' ? j.unread : (typeof j?.total === 'number' ? j.total : 0);
-        setUnreadCount(Math.max(0, c || 0));
-      } catch {
-        setUnreadCount(0);
-      }
-    })();
-  }, []);
+  // helpers
+  async function fetchUnread() {
+    try {
+      const r = await authedFetch('/api/unread');
+      const j: UnreadRes = await r.json().catch(() => ({ ok:false, unread:0 }));
+      setUnreadCount(Math.max(0, Number(j?.unread || 0)));
+    } catch {
+      setUnreadCount(0);
+    }
+  }
+  async function fetchPreviews() {
+    setLoadingPreviews(true);
+    try {
+      const r = await authedFetch('/api/groups/previews?groups=6&perGroup=2');
+      const j = await r.json().catch(() => ({ ok:false, items: [] }));
+      const arr: PreviewItem[] = Array.isArray(j?.items) ? j.items : [];
+      setPreviewItems(arr);
+    } finally {
+      setLoadingPreviews(false);
+    }
+  }
 
-  // 1) Gruppen & Mitgliedschaften laden
+  // 0) Unread-Badge
+  useEffect(() => { fetchUnread(); }, []);
+  // 1) Alle Gruppen
   useEffect(() => {
     (async () => {
       setLoading(true);
@@ -66,46 +78,24 @@ export default function GroupsHub() {
           .filter(gr => (gr.is_private ? memberIds.includes(gr.id) : true))
           .map(gr => ({ ...gr, isMember: memberIds.includes(gr.id) }));
         setItems(filtered);
-      } finally {
-        setLoading(false);
-      }
+      } finally { setLoading(false); }
     })();
   }, []);
+  // 2) Previews (ein Call)
+  useEffect(() => { fetchPreviews(); }, []);
 
-  // 2) Vorschau-Posts holen (Mitgliedsgruppen zuerst)
-  useEffect(() => {
-    if (!items.length) return;
-    (async () => {
-      setLoadingPreviews(true);
-      try {
-        const order = [...items].sort((a, b) => Number(b.isMember) - Number(a.isMember));
-        const pick = order.slice(0, 6);
-
-        const results: Pair[] = await Promise.all(
-          pick.map(async g => {
-            try {
-              const r = await authedFetch(`/api/groups/${g.id}/posts?page=1&pageSize=3`);
-              if (!r.ok) return [g.id, [] as PostPreview[]] as Pair;
-              const j = await r.json();
-              const raw = Array.isArray(j.items) ? j.items : (Array.isArray(j.data) ? j.data : []);
-              const list: PostPreview[] = raw.map((p: any) => ({
-                id: p.id, title: p.title, created_at: p.created_at, hero_image_url: p.hero_image_url,
-              }));
-              return [g.id, list] as Pair;
-            } catch {
-              return [g.id, [] as PostPreview[]] as Pair;
-            }
-          })
-        );
-
-        const map: Record<number, PostPreview[]> = {};
-        results.forEach(([gid, list]) => { map[gid] = list; });
-        setPreviews(map);
-      } finally {
-        setLoadingPreviews(false);
-      }
-    })();
-  }, [items]);
+  // Als gelesen markieren
+  async function markAllSeen() {
+    try {
+      setMarking(true);
+      await authedFetch('/api/unread/seen', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+      // danach neu laden
+      await fetchUnread();
+      await fetchPreviews();
+    } finally {
+      setMarking(false);
+    }
+  }
 
   // Suche (clientseitig)
   const visible = useMemo(() => {
@@ -116,26 +106,18 @@ export default function GroupsHub() {
     );
   }, [items, q]);
 
-  // Nur Gruppen anzeigen, in denen man Mitglied ist UND die wirklich neue Posts haben
-  const previewEntries = useMemo(() => {
-    return Object.entries(previews)
-      .filter(([gid, list]) => {
-        const g = items.find(x => x.id === Number(gid));
-        return !!g?.isMember && (list?.length ?? 0) > 0;
-      });
-  }, [previews, items]);
-
-  const previewTotal = previewEntries.reduce((s, [,list]) => s + (list?.length ?? 0), 0);
+  const previewEntries = previewItems.filter(p => p.group.isMember ?? true);
+  const previewTotal = previewEntries.reduce((n, it) => n + (it.posts?.length || 0), 0);
 
   return (
     <div className="container max-w-6xl mx-auto py-8 space-y-6">
-      {/* Header + Suche */}
+      {/* Header + Suche + Als-gelesen */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold flex items-center gap-2">
           Gruppen
           {unreadCount > 0 && (
             <span
-              title={`${unreadCount} neue Beiträge`}
+              title={`${unreadCount} neue Elemente`}
               className="inline-flex items-center justify-center min-w-[1.5rem] h-6 px-2 text-xs rounded-full bg-red-600 text-white"
             >
               {unreadCount}
@@ -152,6 +134,14 @@ export default function GroupsHub() {
             className={inputClass + ' sm:w-[360px]'}
           />
           {q && <button onClick={() => setQ('')} className={btnBase}>Löschen</button>}
+          <button
+            onClick={markAllSeen}
+            disabled={marking}
+            className="px-3 py-2 rounded-xl text-sm border bg-white hover:bg-gray-50 dark:bg-white/10 dark:hover:bg-white/20 dark:border-gray-700 disabled:opacity-60"
+            title="Alle neuen Elemente als gelesen markieren"
+          >
+            {marking ? 'Markiere…' : 'Als gelesen markieren'}
+          </button>
         </div>
       </div>
 
@@ -169,20 +159,17 @@ export default function GroupsHub() {
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {previewEntries.map(([gid, list]) => {
-              const g = items.find(x => x.id === Number(gid))!;
+            {previewEntries.map(({ group: g, posts: list }) => {
               const cover = (list.find(p => p.hero_image_url)?.hero_image_url) || '';
               return (
-                <article key={gid}
+                <article key={g.id}
                   className="group rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-hidden shadow-sm hover:shadow-md transition-shadow">
                   {/* Cover */}
                   <div className="relative h-28 bg-gradient-to-r from-indigo-100 to-blue-100 dark:from-gray-800 dark:to-gray-800">
                     {cover ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={cover} alt="" className="absolute inset-0 h-full w-full object-cover" />
-                    ) : (
-                      <div className="absolute inset-0 opacity-40" />
-                    )}
+                    ) : <div className="absolute inset-0 opacity-40" /> }
                     <div className="absolute top-3 left-3 inline-flex items-center gap-2 px-2 py-1 text-xs rounded-full
                                     bg-white/90 dark:bg-black/40 border border-gray-200 dark:border-white/10 backdrop-blur">
                       {g.is_private ? 'Privat' : 'Öffentlich'}
@@ -193,7 +180,7 @@ export default function GroupsHub() {
                   {/* Body */}
                   <div className="p-4">
                     <div className="flex items-start justify-between gap-2">
-                      <h3 className="font-semibold truncate">{g.name}</h3>
+                      <h3 className="font-semibold truncate flex-1 min-w-0">{g.name}</h3>
                       <Link
                         href={`/groups/${g.id}`}
                         className="shrink-0 px-3 py-1.5 rounded-lg text-sm bg-blue-600 hover:bg-blue-700 text-white"
@@ -205,29 +192,18 @@ export default function GroupsHub() {
                       <p className="mt-1 text-sm text-gray-600 dark:text-gray-300 line-clamp-2">{g.description}</p>
                     )}
 
-                    {/* kleine Post-Liste – MAX 2 */}
                     <ul className="mt-3 space-y-1.5">
-                      {list.slice(0, 2).map(p => (
+                      {list.map(p => (
                         <li key={p.id} className="flex items-center gap-2">
                           <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
                           <span className="text-sm truncate">{p.title}</span>
                           {p.created_at && (
-                            <time
-                              dateTime={p.created_at}
-                              className="ml-auto text-xs text-gray-500 dark:text-gray-400"
-                            >
+                            <time dateTime={p.created_at} className="ml-auto text-xs text-gray-500 dark:text-gray-400">
                               {new Date(p.created_at).toLocaleDateString('de-DE')}
                             </time>
                           )}
                         </li>
                       ))}
-                      {list.length > 2 && (
-                        <li className="text-xs">
-                          <Link href={`/groups/${g.id}`} className="text-blue-600 hover:underline">
-                            weitere anzeigen →
-                          </Link>
-                        </li>
-                      )}
                     </ul>
                   </div>
                 </article>
@@ -258,7 +234,7 @@ export default function GroupsHub() {
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="font-semibold truncate">{g.name}</span>
+                      <span className="font-semibold truncate max-w-[14rem] sm:max-w-[16rem]">{g.name}</span>
                       <span className="text-[11px] px-1.5 py-0.5 rounded-full border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300">
                         {g.is_private ? 'Privat' : 'Öffentlich'}
                       </span>
@@ -279,18 +255,6 @@ export default function GroupsHub() {
                     {g.isMember ? 'Öffnen' : 'Beitreten'}
                   </Link>
                 </div>
-
-                {/* Mini-Liste aus vorhandenen Previews (max 2) */}
-                {previews[g.id]?.length ? (
-                  <ul className="mt-3 space-y-1.5">
-                    {previews[g.id].slice(0,2).map(p => (
-                      <li key={p.id} className="flex items-center gap-2 text-sm">
-                        <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
-                        <span className="truncate">{p.title}</span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
               </li>
             ))}
           </ul>
@@ -300,7 +264,6 @@ export default function GroupsHub() {
   );
 }
 
-/* ===== Skeletons ===== */
 function SkeletonGrid() {
   return (
     <ul className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
