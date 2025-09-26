@@ -13,8 +13,9 @@ export async function POST(req: NextRequest) {
     insert into public.user_states (user_id, last_seen_at, updated_at)
     values (${me.sub}::text, now(), now())
     on conflict (user_id)
-      do update set last_seen_at = excluded.last_seen_at,
-                   updated_at   = excluded.updated_at
+    do update set last_seen_at = excluded.last_seen_at,
+                 updated_at   = excluded.updated_at
   `;
+
   return json({ ok: true });
 }

@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
     cursor as (select ${last_seen}::timestamptz as last_seen),
     m as (
       select gm.group_id
-      from public.group_memberships gm
+      from public.group_members gm
       where gm.user_id = ${me.sub}::uuid
     ),
     p as (
