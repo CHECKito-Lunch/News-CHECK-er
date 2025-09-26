@@ -11,6 +11,7 @@ type Group = {
   isMember?: boolean;
 };
 type PostPreview = { id:number; title:string; created_at?:string; hero_image_url?:string|null };
+type Pair = [number, PostPreview[]];
 
 const inputClass =
   'rounded-xl px-3 py-2 w-full bg-white text-gray-900 placeholder-gray-500 border border-gray-300 ' +
@@ -51,38 +52,37 @@ export default function GroupsHub() {
 
   // 2) Vorschau-Posts für einige Gruppen holen (mitgliedschafts-Gruppen zuerst)
   useEffect(() => {
-    if (!items.length) return;
-    (async () => {
-      setLoadingPreviews(true);
-      try {
-        // Auswahl: zuerst Gruppen, in denen man Mitglied ist; max 6 Kacheln mit Vorschau
-        const order = [...items].sort((a, b) => Number(b.isMember) - Number(a.isMember));
-        const pick = order.slice(0, 6);
+  if (!items.length) return;
+  (async () => {
+    setLoadingPreviews(true);
+    try {
+      const order = [...items].sort((a, b) => Number(b.isMember) - Number(a.isMember));
+      const pick = order.slice(0, 6);
 
-        const results = await Promise.all(
-          pick.map(async g => {
-            try {
-              const r = await authedFetch(`/api/groups/${g.id}/posts?page=1&pageSize=3`);
-              if (!r.ok) return [g.id, []] as const;
-              const j = await r.json();
-              const list: PostPreview[] = (Array.isArray(j.items) ? j.items : j.data || []).map((p: any) => ({
-                id: p.id, title: p.title, created_at: p.created_at, hero_image_url: p.hero_image_url,
-              }));
-              return [g.id, list] as const;
-            } catch {
-              return [g.id, []] as const;
-            }
-          })
-        );
+      const results: Pair[] = await Promise.all(
+        pick.map(async g => {
+          try {
+            const r = await authedFetch(`/api/groups/${g.id}/posts?page=1&pageSize=3`);
+            if (!r.ok) return [g.id, [] as PostPreview[]] as Pair;
+            const j = await r.json();
+            const list: PostPreview[] = (Array.isArray(j.items) ? j.items : j.data || []).map((p: any) => ({
+              id: p.id, title: p.title, created_at: p.created_at, hero_image_url: p.hero_image_url,
+            }));
+            return [g.id, list] as Pair;
+          } catch {
+            return [g.id, [] as PostPreview[]] as Pair;
+          }
+        })
+      );
 
-        const map: Record<number, PostPreview[]> = {};
-        results.forEach(([gid, list]) => { map[gid] = list; });
-        setPreviews(map);
-      } finally {
-        setLoadingPreviews(false);
-      }
-    })();
-  }, [items]);
+      const map: Record<number, PostPreview[]> = {};
+      results.forEach(([gid, list]) => { map[gid] = list; });
+      setPreviews(map);
+    } finally {
+      setLoadingPreviews(false);
+    }
+  })();
+}, [items]);
 
   // Suche (clientseitig)
   const visible = useMemo(() => {
