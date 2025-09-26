@@ -13,6 +13,13 @@ type Group = {
 type PostPreview = { id:number; title:string; created_at?:string; hero_image_url?:string|null };
 type Pair = [number, PostPreview[]];
 
+type UnreadRes = {
+  ok: boolean;
+  total: number;
+  unread?: number;
+  preview?: any[];
+};
+
 const inputClass =
   'rounded-xl px-3 py-2 w-full bg-white text-gray-900 placeholder-gray-500 border border-gray-300 ' +
   'shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ' +
@@ -28,6 +35,21 @@ export default function GroupsHub() {
   const [q, setQ] = useState('');
   const [previews, setPreviews] = useState<Record<number, PostPreview[]>>({});
   const [loadingPreviews, setLoadingPreviews] = useState(false);
+  const [unreadCount, setUnreadCount] = useState<number>(0);
+
+  // 0) Unread (kleiner Badge im Header)
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await authedFetch('/api/unread');
+        const j: UnreadRes = await r.json().catch(() => ({ ok:false, total:0 }));
+        const c = typeof j?.unread === 'number' ? j.unread : (typeof j?.total === 'number' ? j.total : 0);
+        setUnreadCount(Math.max(0, c || 0));
+      } catch {
+        setUnreadCount(0);
+      }
+    })();
+  }, []);
 
   // 1) Gruppen & Mitgliedschaften laden
   useEffect(() => {
@@ -50,39 +72,40 @@ export default function GroupsHub() {
     })();
   }, []);
 
-  // 2) Vorschau-Posts für einige Gruppen holen (mitgliedschafts-Gruppen zuerst)
+  // 2) Vorschau-Posts holen (Mitgliedsgruppen zuerst)
   useEffect(() => {
-  if (!items.length) return;
-  (async () => {
-    setLoadingPreviews(true);
-    try {
-      const order = [...items].sort((a, b) => Number(b.isMember) - Number(a.isMember));
-      const pick = order.slice(0, 6);
+    if (!items.length) return;
+    (async () => {
+      setLoadingPreviews(true);
+      try {
+        const order = [...items].sort((a, b) => Number(b.isMember) - Number(a.isMember));
+        const pick = order.slice(0, 6);
 
-      const results: Pair[] = await Promise.all(
-        pick.map(async g => {
-          try {
-            const r = await authedFetch(`/api/groups/${g.id}/posts?page=1&pageSize=3`);
-            if (!r.ok) return [g.id, [] as PostPreview[]] as Pair;
-            const j = await r.json();
-            const list: PostPreview[] = (Array.isArray(j.items) ? j.items : j.data || []).map((p: any) => ({
-              id: p.id, title: p.title, created_at: p.created_at, hero_image_url: p.hero_image_url,
-            }));
-            return [g.id, list] as Pair;
-          } catch {
-            return [g.id, [] as PostPreview[]] as Pair;
-          }
-        })
-      );
+        const results: Pair[] = await Promise.all(
+          pick.map(async g => {
+            try {
+              const r = await authedFetch(`/api/groups/${g.id}/posts?page=1&pageSize=3`);
+              if (!r.ok) return [g.id, [] as PostPreview[]] as Pair;
+              const j = await r.json();
+              const raw = Array.isArray(j.items) ? j.items : (Array.isArray(j.data) ? j.data : []);
+              const list: PostPreview[] = raw.map((p: any) => ({
+                id: p.id, title: p.title, created_at: p.created_at, hero_image_url: p.hero_image_url,
+              }));
+              return [g.id, list] as Pair;
+            } catch {
+              return [g.id, [] as PostPreview[]] as Pair;
+            }
+          })
+        );
 
-      const map: Record<number, PostPreview[]> = {};
-      results.forEach(([gid, list]) => { map[gid] = list; });
-      setPreviews(map);
-    } finally {
-      setLoadingPreviews(false);
-    }
-  })();
-}, [items]);
+        const map: Record<number, PostPreview[]> = {};
+        results.forEach(([gid, list]) => { map[gid] = list; });
+        setPreviews(map);
+      } finally {
+        setLoadingPreviews(false);
+      }
+    })();
+  }, [items]);
 
   // Suche (clientseitig)
   const visible = useMemo(() => {
@@ -93,11 +116,32 @@ export default function GroupsHub() {
     );
   }, [items, q]);
 
+  // Nur Gruppen anzeigen, in denen man Mitglied ist UND die wirklich neue Posts haben
+  const previewEntries = useMemo(() => {
+    return Object.entries(previews)
+      .filter(([gid, list]) => {
+        const g = items.find(x => x.id === Number(gid));
+        return !!g?.isMember && (list?.length ?? 0) > 0;
+      });
+  }, [previews, items]);
+
+  const previewTotal = previewEntries.reduce((s, [,list]) => s + (list?.length ?? 0), 0);
+
   return (
     <div className="container max-w-6xl mx-auto py-8 space-y-6">
       {/* Header + Suche */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold">Gruppen</h1>
+        <h1 className="text-2xl font-semibold flex items-center gap-2">
+          Gruppen
+          {unreadCount > 0 && (
+            <span
+              title={`${unreadCount} neue Beiträge`}
+              className="inline-flex items-center justify-center min-w-[1.5rem] h-6 px-2 text-xs rounded-full bg-red-600 text-white"
+            >
+              {unreadCount}
+            </span>
+          )}
+        </h1>
         <div className="flex items-center gap-2 w-full sm:w-auto">
           <label htmlFor="q" className="text-sm text-gray-500 dark:text-gray-400">Suche:</label>
           <input
@@ -112,24 +156,29 @@ export default function GroupsHub() {
       </div>
 
       {/* Vorschau-Sektion */}
-      {Object.keys(previews).length > 0 && (
+      {previewEntries.length > 0 && (
         <section className="space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold">Neu in deinen Gruppen</h2>
-            {loadingPreviews && <span className="text-sm text-gray-500">lädt…</span>}
+            <div className="flex items-center gap-3">
+              {loadingPreviews && <span className="text-sm text-gray-500">lädt…</span>}
+              {previewTotal > 0 && (
+                <span className="text-xs text-gray-500">{previewTotal} neue Beiträge</span>
+              )}
+            </div>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {Object.entries(previews).map(([gid, list]) => {
-              const g = items.find(x => x.id === Number(gid));
-              if (!g) return null;
-              const cover = list.find(p => p.hero_image_url)?.hero_image_url || '';
+            {previewEntries.map(([gid, list]) => {
+              const g = items.find(x => x.id === Number(gid))!;
+              const cover = (list.find(p => p.hero_image_url)?.hero_image_url) || '';
               return (
                 <article key={gid}
                   className="group rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-hidden shadow-sm hover:shadow-md transition-shadow">
                   {/* Cover */}
                   <div className="relative h-28 bg-gradient-to-r from-indigo-100 to-blue-100 dark:from-gray-800 dark:to-gray-800">
                     {cover ? (
+                      // eslint-disable-next-line @next/next/no-img-element
                       <img src={cover} alt="" className="absolute inset-0 h-full w-full object-cover" />
                     ) : (
                       <div className="absolute inset-0 opacity-40" />
@@ -149,16 +198,16 @@ export default function GroupsHub() {
                         href={`/groups/${g.id}`}
                         className="shrink-0 px-3 py-1.5 rounded-lg text-sm bg-blue-600 hover:bg-blue-700 text-white"
                       >
-                        {g.isMember ? 'Öffnen' : 'Beitreten'}
+                        Öffnen
                       </Link>
                     </div>
                     {g.description && (
                       <p className="mt-1 text-sm text-gray-600 dark:text-gray-300 line-clamp-2">{g.description}</p>
                     )}
 
-                    {/* kleine Post-Liste */}
+                    {/* kleine Post-Liste – MAX 2 */}
                     <ul className="mt-3 space-y-1.5">
-                      {(list.length ? list : []).map(p => (
+                      {list.slice(0, 2).map(p => (
                         <li key={p.id} className="flex items-center gap-2">
                           <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
                           <span className="text-sm truncate">{p.title}</span>
@@ -172,8 +221,12 @@ export default function GroupsHub() {
                           )}
                         </li>
                       ))}
-                      {list.length === 0 && (
-                        <li className="text-sm text-gray-500">Noch keine Beiträge.</li>
+                      {list.length > 2 && (
+                        <li className="text-xs">
+                          <Link href={`/groups/${g.id}`} className="text-blue-600 hover:underline">
+                            weitere anzeigen →
+                          </Link>
+                        </li>
                       )}
                     </ul>
                   </div>
@@ -227,7 +280,7 @@ export default function GroupsHub() {
                   </Link>
                 </div>
 
-                {/* Wenn es schon Vorschau gibt: zeige die jüngsten 2 Titel als Mini-Liste */}
+                {/* Mini-Liste aus vorhandenen Previews (max 2) */}
                 {previews[g.id]?.length ? (
                   <ul className="mt-3 space-y-1.5">
                     {previews[g.id].slice(0,2).map(p => (

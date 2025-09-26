@@ -389,14 +389,14 @@ export default function HomePage() {
             <div className="text-sm text-gray-500 px-2">Keine Events gefunden.</div>
           ) : (
             <ul className="grid gap-3">
-              {upcomingEvents.map(ev => (
-                <li key={ev.id} className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/60 p-4">
-                  <EventCard ev={ev} />
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+              {upcomingEvents.slice(0, 2).map(ev => (
+        <li key={ev.id} className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/60 p-4">
+          <EventCard ev={ev} />
+        </li>
+      ))}
+    </ul>
+  )}
+</section>
 
         {/* News-Feed */}
         <section className={card + ' p-4'}>
@@ -415,14 +415,14 @@ export default function HomePage() {
             <div className="text-sm text-gray-500 px-2">Keine News.</div>
           ) : (
             <ul className="grid gap-3">
-              {newsFeed.map(it => (
-                <li key={it.id} className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/60 p-4">
-                  <NewsCard it={it} />
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+              {newsFeed.slice(0, 2).map(it => (
+        <li key={it.id} className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/60 p-4">
+          <NewsCard it={it} />
+        </li>
+      ))}
+    </ul>
+  )}
+</section>
       </div>
 
       {/* TOURISTISCHE NEWS */}
