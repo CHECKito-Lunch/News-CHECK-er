@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
       return json({ ok: true, unread: 0, breakdown: { invites: 0, groups: 0, news: 0, events: 0 }, preview: [] });
     }
 
-    // 1) last_seen aus user_states (Fallback: 1970-01-01)
+    // last_seen aus user_states (Fallback: 1970-01-01)
     const [{ last_seen }] = await sql<{ last_seen: string }[]>`
       select coalesce(
         (select us.last_seen_at from public.user_states us where us.user_id = ${me.sub}::text),
@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
       ) as last_seen
     `;
 
-    // 2) Einladungen offen
+    // Einladungen
     const [{ invites }] = await sql<{ invites: number }[]>`
       select count(*)::int as invites
       from public.group_invitations gi
@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
         and gi.revoked_at is null
     `;
 
-    // 3) neue Gruppen-Beiträge seit last_seen (Mitgliedschaften: group_members)
+    // Gruppen-Posts seit last_seen (Mitgliedschaften aus group_members)
     const [{ groups }] = await sql<{ groups: number }[]>`
       with cursor as (select ${last_seen}::timestamptz as last_seen)
       select count(*)::int as groups
@@ -43,8 +43,7 @@ export async function GET(req: NextRequest) {
       join cursor c on gp.created_at > c.last_seen
     `;
 
-    // 4) optionale Zähler: News + Events seit last_seen
-    //    Falls es die Tabellen (oder Spalten) anders heißen, bitte anpassen oder die zwei Blöcke auskommentieren.
+    // Optional: News / Events
     let news = 0;
     try {
       const [{ n }] = await sql<{ n: number }[]>`
@@ -54,7 +53,7 @@ export async function GET(req: NextRequest) {
         join cursor c on p.created_at > c.last_seen
       `;
       news = Number(n || 0);
-    } catch { news = 0; }
+    } catch {}
 
     let events = 0;
     try {
@@ -65,9 +64,9 @@ export async function GET(req: NextRequest) {
         join cursor c on coalesce(ev.starts_at, ev.created_at) > c.last_seen
       `;
       events = Number(e || 0);
-    } catch { events = 0; }
+    } catch {}
 
-    // 5) kleine Vorschau: jüngste Gruppen-Posts (max 20)
+    // Vorschau: jüngste Gruppen-Posts (max 20)
     const previewRows = await sql<any[]>`
       with cursor as (select ${last_seen}::timestamptz as last_seen),
       m as (
@@ -77,25 +76,34 @@ export async function GET(req: NextRequest) {
       ),
       p as (
         select
-          gp.id, gp.group_id, gp.title, gp.hero_image_url, gp.created_at as ts
+          gp.id,
+          gp.group_id,
+          gp.title,
+          gp.hero_image_url,
+          gp.created_at as ts
         from public.group_posts gp
         join m on m.group_id = gp.group_id
         join cursor c on gp.created_at > c.last_seen
       )
       select
-        p.id, p.group_id, p.title, p.ts as created_at, p.hero_image_url,
-        g.name as group_name, g.is_private
+        p.id,
+        p.group_id,
+        p.title,
+        p.ts as created_at,
+        p.hero_image_url,
+        g.name as group_name,
+        g.is_private
       from p
       join public.groups g on g.id = p.group_id
-      order by p.created_at desc
+      order by p.ts desc     -- ✅ fix: NICHT p.created_at
       limit 20
     `;
 
     const breakdown = {
-      invites: Number(invites || 0),  // -> Profil
-      groups:  Number(groups  || 0),  // -> Gruppen
-      news:    Number(news    || 0),  // -> News (red. Posts)
-      events:  Number(events  || 0),  // -> Events
+      invites: Number(invites || 0),
+      groups:  Number(groups  || 0),
+      news:    Number(news    || 0),
+      events:  Number(events  || 0),
     };
     const unread = breakdown.invites + breakdown.groups + breakdown.news + breakdown.events;
 
