@@ -14,6 +14,7 @@ export default function SiteHeader() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [unread, setUnread] = useState<number>(0);
 
+  // ---- User laden / auf Auth-Events hören
   useEffect(() => {
     let mounted = true;
     const load = async () => {
@@ -35,6 +36,7 @@ export default function SiteHeader() {
     };
   }, []);
 
+  // ---- Unread laden / Polling / auf unread-changed reagieren
   useEffect(() => {
     if (!me) { setUnread(0); return; }
 
@@ -51,8 +53,8 @@ export default function SiteHeader() {
         });
         if (!r.ok) return;
         const j = await r.json().catch(() => null);
-        const cnt = j && typeof j.unread === 'number' ? j.unread : j && typeof j.total === 'number' ? j.total : 0;
-        if (!stop) setUnread(cnt);
+        const cnt = (j && typeof j.unread === 'number') ? j.unread : 0;
+        if (!stop) setUnread(Math.max(0, cnt));
       } catch {}
     };
 
@@ -60,13 +62,16 @@ export default function SiteHeader() {
     timer = window.setInterval(loadUnread, 60_000);
 
     const onAuth = () => loadUnread();
+    const onUnread = () => loadUnread();           // ⇐ reagiert auf window.dispatchEvent(new Event('unread-changed'))
     window.addEventListener('auth-changed', onAuth);
+    window.addEventListener('unread-changed', onUnread);
 
     return () => {
       stop = true;
       ctrl.abort();
       if (timer) clearInterval(timer);
       window.removeEventListener('auth-changed', onAuth);
+      window.removeEventListener('unread-changed', onUnread);
     };
   }, [me]);
 
@@ -74,8 +79,8 @@ export default function SiteHeader() {
     const arr: { href: string; label: string }[] = [
       { href: '/', label: 'Start' },
       { href: '/news', label: 'News' },
-      { href: '/groups', label: 'Gruppen' }, // ← hinzugefügt
-      { href: '/events', label: 'Events' },  // ← hinzugefügt (war schon markiert)
+      { href: '/groups', label: 'Gruppen' },
+      { href: '/events', label: 'Events' },
     ];
     if (me) arr.push({ href: '/profile', label: 'Profil' });
     if (me && (me.role === 'admin' || me.role === 'moderator')) {
@@ -93,6 +98,7 @@ export default function SiteHeader() {
     </span>
   );
 
+  // ESC: Menü schließen
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false); };
     window.addEventListener('keydown', onKey);
@@ -138,6 +144,7 @@ export default function SiteHeader() {
               {links.map((n) => {
                 const isProfile = n.href === '/profile';
                 const isNews = n.href === '/news';
+                const isGroups = n.href === '/groups'; // ⇐ Badge optional auch hier
                 const active = pathname === n.href || (n.href !== '/' && pathname?.startsWith(n.href));
                 return (
                   <Link
@@ -152,7 +159,7 @@ export default function SiteHeader() {
                   >
                     <span>{n.label}</span>
                     <span className="relative inline-block w-6 h-6">
-                      {(me && unread > 0 && (isProfile || isNews)) && <Badge count={unread} />}
+                      {(me && unread > 0 && (isProfile || isNews || isGroups)) && <Badge count={unread} />}
                     </span>
                   </Link>
                 );
