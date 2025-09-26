@@ -1,3 +1,4 @@
+// app/api/groups/previews/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -9,69 +10,72 @@ import { requireUser } from '@/lib/auth-server';
 const json = (d: any, s = 200) => NextResponse.json(d, { status: s });
 
 export async function GET(req: NextRequest) {
-  const me = await requireUser(req).catch(() => null);
-  if (!me) return json({ ok: true, items: [] });
+  try {
+    const me = await requireUser(req).catch(() => null);
+    // Previews sind nur sinnvoll für eingeloggte Users (Mitgliedsgruppen)
+    if (!me) return json({ ok: true, items: [] });
 
-  const { searchParams } = new URL(req.url);
-  const groupsLimit = Number(searchParams.get('groups') || 6);
-  const perGroup = Number(searchParams.get('perGroup') || 2);
+    const { searchParams } = new URL(req.url);
+    const groupsLimit = Math.max(1, Math.min(12, Number(searchParams.get('groups') || 6)));
+    const perGroup = Math.max(1, Math.min(5, Number(searchParams.get('perGroup') || 2)));
 
-  // last_seen
-  const [{ last_seen }] = await sql<{ last_seen: string }[]>`
-    select coalesce(us.last_seen_at, to_timestamp(0)) as last_seen
-    from public.user_states us
-    where us.user_id = ${me.sub}::text
-  `.catch(() => [{ last_seen: '1970-01-01T00:00:00Z' as any }]);
-
-  // Top-Gruppen mit max N Posts je Gruppe
-  const rows = await sql<any[]>`
-    with
-    cursor as (select ${last_seen}::timestamptz as last_seen),
-    m as (
-      select gm.group_id
-      from public.group_members gm
-      where gm.user_id = ${me.sub}::uuid
-    ),
-    p as (
+    // Kandidaten-Gruppen = Gruppen, in denen der User Mitglied ist
+    // Dann je Gruppe die jüngsten Posts (nur created_at), begrenzt via LATERAL.
+    // Sortierung der Gruppen nach "letztes Posting" absteigend.
+    const rows = await sql<any[]>`
+      with my_groups as (
+        select gm.group_id
+        from public.group_members gm
+        where gm.user_id = ${me.sub}::uuid
+      ),
+      cand as (
+        select g.id, g.name, g.description, g.is_private
+        from public.groups g
+        join my_groups mg on mg.group_id = g.id
+      )
       select
-        gp.id, gp.group_id, gp.title, gp.hero_image_url,
-        coalesce(gp.effective_from, gp.created_at) as ts,
-        row_number() over (partition by gp.group_id order by coalesce(gp.effective_from, gp.created_at) desc) as rn
-      from public.group_posts gp
-      join m on m.group_id = gp.group_id
-      join cursor c on coalesce(gp.effective_from, gp.created_at) > c.last_seen
-    ),
-    limited as (
-      select * from p where rn <= ${perGroup}
-    )
-    select
-      g.id as group_id, g.name as group_name, g.description, g.is_private,
-      json_agg(
-        json_build_object(
-          'id', l.id,
-          'title', l.title,
-          'created_at', l.ts,
-          'hero_image_url', l.hero_image_url
-        ) order by l.ts desc
-      ) as posts,
-      max(l.ts) as last_ts
-    from limited l
-    join public.groups g on g.id = l.group_id
-    group by g.id, g.name, g.description, g.is_private
-    order by last_ts desc
-    limit ${groupsLimit}
-  `;
+        c.id            as group_id,
+        c.name          as group_name,
+        c.description   as group_description,
+        c.is_private    as is_private,
+        max(p.created_at) as last_post_at,
+        json_agg(
+          json_build_object(
+            'id',            p.id,
+            'title',         p.title,
+            'created_at',    p.created_at,
+            'hero_image_url',p.hero_image_url
+          )
+          order by p.created_at desc
+        ) as posts
+      from cand c
+      join lateral (
+        select gp.id, gp.title, gp.created_at, gp.hero_image_url
+        from public.group_posts gp
+        where gp.group_id = c.id
+        order by gp.created_at desc
+        limit ${perGroup}
+      ) p on true
+      group by c.id, c.name, c.description, c.is_private
+      order by last_post_at desc
+      limit ${groupsLimit}
+    `;
 
-  const items = rows.map((r: { group_id: any; group_name: any; description: any; is_private: any; posts: any; }) => ({
-    group: {
-      id: r.group_id,
-      name: r.group_name,
-      description: r.description,
-      is_private: !!r.is_private,
-      isMember: true,
-    },
-    posts: r.posts ?? []
-  }));
+    // in das vom Frontend erwartete Shape mappen
+    const items = rows.map((r: { group_id: any; group_name: any; group_description: any; is_private: any; posts: any; }) => ({
+      group: {
+        id: r.group_id,
+        name: r.group_name,
+        description: r.group_description,
+        is_private: !!r.is_private,
+        isMember: true, // wir liefern nur Mitgliedsgruppen
+      },
+      posts: Array.isArray(r.posts) ? r.posts : [],
+    }));
 
-  return json({ ok: true, items });
+    return json({ ok: true, items });
+  } catch (e) {
+    console.error('[groups/previews GET]', e);
+    return json({ ok: true, items: [] });
+  }
 }
