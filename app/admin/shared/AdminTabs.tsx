@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Newspaper, ListChecks, Vote, Store, Tags, Award, Users2,
+  Newspaper, ListChecks, Vote, Store, Tags, Award, Users2, Trophy,
   Wrench, CalendarDays, Bot, Activity, UserCircle2, Ticket, ChevronLeft
 } from 'lucide-react';
 
@@ -21,6 +21,9 @@ const NAV: Group[] = [
     { href: '/admin/badges', label: 'Badges', icon: Award },
     { href: '/admin/termine', label: 'Termine', icon: CalendarDays },
     { href: '/admin/events', label: 'Events', icon: Ticket },
+    { href: '/admin/checkiade', label: 'CHECKiade', icon: Trophy },
+    { href: '/admin/tools', label: 'Tools', icon: Wrench },
+    { href: '/admin/kpis', label: 'KPIs', icon: Activity },
   ]},
   { title: 'Veranstalter', items: [
     { href: '/admin/vendors', label: 'Veranstalter', icon: Store },
@@ -28,10 +31,8 @@ const NAV: Group[] = [
   
   ]},
   { title: 'System', items: [
-    { href: '/admin/tools', label: 'Tools', icon: Wrench },
     { href: '/admin/news-agent', label: 'News-Agent', icon: Bot },
-    { href: '/admin/kpis', label: 'KPIs', icon: Activity },
-    { href: '/admin/users', label: 'Benutzer', icon: UserCircle2 },
+    { href: '/admin/users', label: 'Benutzer und Gruppen', icon: UserCircle2 },
   ]},
 ];
 

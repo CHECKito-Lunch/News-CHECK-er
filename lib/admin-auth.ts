@@ -3,7 +3,9 @@ import 'server-only';
 import { cookies } from 'next/headers';
 import { AUTH_COOKIE, verifyToken, type Session } from './auth';
 
-export type AdminCtx = { session: Session };
+export type AdminCtx = {
+  [x: string]: any; session: Session 
+};
 
 /** Liest Session aus dem `auth`-Cookie (Fallback: alte role-/user_-Cookies) */
 export async function getSessionFromCookies(): Promise<Session | null> {

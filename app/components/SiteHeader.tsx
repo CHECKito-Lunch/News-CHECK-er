@@ -106,6 +106,7 @@ export default function SiteHeader() {
       { href: '/news', label: 'News' },
       { href: '/groups', label: 'Gruppen' },
       { href: '/events', label: 'Events' },
+      { href: '/checkiade', label: 'CHECKiade' },
     ];
     if (me) arr.push({ href: '/profile', label: 'Profil' });
     if (me && (me.role === 'admin' || me.role === 'moderator')) {

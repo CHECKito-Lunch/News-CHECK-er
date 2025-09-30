@@ -5,7 +5,9 @@ import { cookies, headers } from 'next/headers';
 
 export type Role = 'admin'|'moderator'|'user';
 export type SessionUser = { sub: string; role: Role; name?: string; email?: string };
-export type AuthUser = { sub: string; email: string|null; name: string|null; role: Role };
+export type AuthUser = {
+  [x: string]: any; sub: string; email: string|null; name: string|null; role: Role 
+};
 
 export const json = (d: any, s = 200) => NextResponse.json(d, { status: s });
 

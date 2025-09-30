@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { headers as nextHeaders } from 'next/headers';
 import {
-  Newspaper, ListChecks, Vote, Store, Tags, Award,
+  Newspaper, ListChecks, Vote, Store, Tags, Award, Trophy,
   Users2, Wrench, CalendarDays, Bot, Activity, UserCircle2, Ticket
 } from 'lucide-react';
 
@@ -22,6 +22,7 @@ const tiles = [
   { href: '/admin/news-agent',    label: 'News-Agent',         icon: Bot },
   { href: '/admin/kpis',          label: 'KPIs',               icon: Activity },
   { href: '/admin/users',         label: 'Benutzer',           icon: UserCircle2 },
+  { href: '/admin/checkiade',     label: 'CHECKiade',          icon: Trophy },
 ];
 
 async function absoluteUrl(path: string) {
