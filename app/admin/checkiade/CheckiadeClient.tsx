@@ -650,7 +650,7 @@ function AdminCheckiadeInner() {
       </Collapsible>
 
       {/* Upsert-Form – AUSKLAPPBAR */}
-      <Collapsible title="Score erfassen / upserten" defaultOpen={false}>
+      <Collapsible title="Score erfassen / updaten" defaultOpen={false}>
         <UpsertForm year={year} onSaved={() => { loadScores(year); add({ variant:'success', title:'Score upserted' }); }} />
       </Collapsible>
     </div>

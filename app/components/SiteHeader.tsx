@@ -212,7 +212,7 @@ export default function SiteHeader() {
                 </form>
               ) : (
                 <Link
-                  href="/login"
+                  href="https://www.karl-marx-checknitz.de/"
                   onClick={() => setMenuOpen(false)}
                   className="inline-flex items-center gap-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-white/10 hover:bg-gray-50 dark:hover:bg-white/20 px-3 py-2 text-sm text-blue-600 dark:text-blue-300 shadow-sm mt-2"
                 >
