@@ -52,6 +52,43 @@ type MonthCard = {
   teamsDetailed: TeamMonthDetail[];
 };
 
+type MinMax = { min: number; max: number };
+
+function mm(vals: number[]): MinMax | null {
+  const nums = vals.filter(v => Number.isFinite(v));
+  if (!nums.length) return null;
+  return { min: Math.min(...nums), max: Math.max(...nums) };
+}
+
+/** Liefert ein Inline-Style für grünen Verlaufsbalken im Tabellenfeld. */
+function cellGradient(
+  raw: unknown,
+  bounds: MinMax | null,
+  opts?: { invert?: boolean }
+): React.CSSProperties | undefined {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || !bounds) return undefined;
+
+  const { min, max } = bounds;
+  const range = max - min;
+
+  // Normierung 0..1; bei range=0 alle leicht grün
+  let p = range > 0 ? (n - min) / range : 0.5;
+  if (opts?.invert) p = 1 - p;
+
+  // sanfter Verlauf: Deckkraft 0.08–0.30, Breite 20–100%
+  const alpha = 0.08 + p * 0.22;
+  const width = 20 + p * 80;
+
+  return {
+    background: `linear-gradient(90deg, rgba(34,197,94,${alpha}) 0%, rgba(34,197,94,${alpha}) ${width}%, transparent ${width}%)`,
+    borderRadius: 6,
+  };
+}
+
+/** Formatiere Zahl sauber oder '—' */
+const fmtSafe = (x: unknown, digits = 2) =>
+  Number.isFinite(Number(x)) ? Number(x).toFixed(digits) : '—';
 
 const card = 'rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 shadow-sm';
 
@@ -470,58 +507,88 @@ for (let mm = windowStart; mm <= m; mm++) {
         </summary>
 
 
-{/* --- Aufgeklappt: Detailansicht (nur Tabelle) --- */}
+{/* --- Aufgeklappt: Detailansicht (nur Tabelle, mit Min/Max & Gradienten) --- */}
 <div className="px-4">
   {/* optional: feine Trennlinie */}
   <div className="h-px bg-gray-200 dark:bg-gray-800 my-3" />
 
-  {/* Detailtabelle je Monat */}
-  <div className="overflow-x-auto">
-    <table className="min-w-full text-sm">
-      <thead>
-        <tr className="text-left text-gray-500">
-          <th className="py-2 pr-4">Team</th>
-          <th className="py-2 pr-4">Punkte</th>
-          <th className="py-2 pr-4">Ø Ausfall %</th>
-          <th className="py-2 pr-4">Σ Versp. Min.</th>
-          <th className="py-2 pr-4">Ø eFeedback</th>
-          <th className="py-2 pr-4">Trend</th>
-        </tr>
-      </thead>
-      <tbody>
-        {m.teamsDetailed.map((t: { team_id: Key | null | undefined; team_name: string | number | bigint | boolean | ReactElement<unknown, string | JSXElementConstructor<any>> | Iterable<ReactNode> | ReactPortal | Promise<string | number | bigint | boolean | ReactPortal | ReactElement<unknown, string | JSXElementConstructor<any>> | Iterable<ReactNode> | null | undefined> | null | undefined; points: string | number | bigint | boolean | ReactElement<unknown, string | JSXElementConstructor<any>> | Iterable<ReactNode> | ReactPortal | Promise<string | number | bigint | boolean | ReactPortal | ReactElement<unknown, string | JSXElementConstructor<any>> | Iterable<ReactNode> | null | undefined> | null | undefined; avgOutage: number | null | undefined; totalLate: number | null | undefined; avgFeedback: number | null | undefined; trend: any[] | undefined; }) => (
-          <tr key={t.team_id} className="border-t border-gray-100 dark:border-gray-800">
-            <td className="py-2 pr-4">{t.team_name}</td>
-            <td className="py-2 pr-4 tabular-nums">{t.points}</td>
-            <td className="py-2 pr-4 tabular-nums">{fmt(t.avgOutage)}</td>
-            <td className="py-2 pr-4 tabular-nums">{fmtInt(t.totalLate)}</td>
-            <td className="py-2 pr-4 tabular-nums">{fmt(t.avgFeedback)}</td>
+  {(() => {
+    const rows = m.teamsDetailed as TeamMonthDetail[];
 
-            {/* Mini-Trend (Sparkline) – falls du ihn schon berechnest */}
-            <td className="py-2 pr-4">
-              <div className="h-8 w-28">
-                <ResponsiveContainer width="100%" height="100%">
-                 <LineChart data={t.trend}>
-  <Tooltip />
-  <Line
-    type="monotone"
-    dataKey="y"
-    strokeWidth={2}
-    dot={{ r: 2 }}     // kleine Punkte sichtbar
-    connectNulls        // Linien werden verbunden, auch wenn Monate fehlen
-  />
-</LineChart>
-                </ResponsiveContainer>
-              </div>
-            </td>
-          </tr>
-        ))}
-        {m.teamsDetailed.length===0 && (
-          <tr><td colSpan={6} className="py-3 text-gray-500">Keine Daten</td></tr>
-        )}
-      </tbody>
-    </table>
-  </div>
+    // Min/Max je Spalte ermitteln
+    const bPoints = mm(rows.map(r => Number(r.points)));
+    const bOut    = mm(rows.map(r => r.avgOutage == null ? NaN : Number(r.avgOutage)));
+    const bLate   = mm(rows.map(r => r.totalLate == null ? NaN : Number(r.totalLate)));
+    const bFb     = mm(rows.map(r => r.avgFeedback == null ? NaN : Number(r.avgFeedback)));
+
+    return (
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-sm">
+          <thead>
+            <tr className="text-left text-gray-500">
+              <th className="py-2 pr-4">Team</th>
+              <th className="py-2 pr-4">Punkte</th>
+              <th className="py-2 pr-4">Ø Ausfall %</th>
+              <th className="py-2 pr-4">Σ Versp. Min.</th>
+              <th className="py-2 pr-4">Ø eFeedback</th>
+              <th className="py-2 pr-4">Trend</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((t: TeamMonthDetail) => (
+              <tr key={t.team_id} className="border-t border-gray-100 dark:border-gray-800">
+                <td className="py-2 pr-4">{t.team_name}</td>
+
+                {/* Punkte – höchster Wert grün */}
+                <td className="py-2 pr-4 tabular-nums" style={cellGradient(t.points, bPoints)}>
+                  {t.points}
+                </td>
+
+                {/* Ø Ausfall % – niedrigster Wert grün */}
+                <td className="py-2 pr-4 tabular-nums" style={cellGradient(t.avgOutage, bOut, { invert: true })}>
+                  {fmt(t.avgOutage)}
+                </td>
+
+                {/* Σ Versp. Min. – niedrigster Wert grün */}
+                <td className="py-2 pr-4 tabular-nums" style={cellGradient(t.totalLate, bLate, { invert: true })}>
+                  {fmtInt(t.totalLate)}
+                </td>
+
+                {/* Ø eFeedback – höchster Wert grün */}
+                <td className="py-2 pr-4 tabular-nums" style={cellGradient(t.avgFeedback, bFb)}>
+                  {fmt(t.avgFeedback)}
+                </td>
+
+                {/* Mini-Trend (Sparkline) – zeigt nur Monate > 0 Punkte; connectNulls VERBINDET Lücken */}
+                <td className="py-2 pr-4">
+                  <div className="h-8 w-28">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={t.trend}>
+                        <Tooltip />
+                        <Line
+                          type="monotone"
+                          dataKey="y"
+                          strokeWidth={2}
+                          dot={{ r: 2 }}
+                          connectNulls
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </td>
+              </tr>
+            ))}
+
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={6} className="py-3 text-gray-500">Keine Daten</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    );
+  })()}
 </div>
       </details>
     ))}
