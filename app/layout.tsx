@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import type { Metadata } from 'next';
 import type { Viewport } from 'next';
 import 'react-calendar/dist/Calendar.css';
+import { Analytics } from "@vercel/analytics/next"
 
 // hier kannst du globale <meta>-Infos setzen:
 export const metadata: Metadata = {
