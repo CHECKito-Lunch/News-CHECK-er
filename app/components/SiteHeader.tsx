@@ -19,18 +19,14 @@ type UnreadRes = {
   };
 };
 
+
 export default function SiteHeader() {
   const pathname = usePathname();
   const [me, setMe] = useState<Me['user']>(null);
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const [counts, setCounts] = useState({
-    total: 0,
-    invites: 0,
-    groups: 0,
-    news: 0,
-    events: 0,
-  });
+  const [counts, setCounts] = useState({ total: 0, invites: 0, groups: 0, news: 0, events: 0 });
+  const [marking, setMarking] = useState(false); // 🆕
 
   // ---- User laden / auf Auth-Events hören
   useEffect(() => {
@@ -100,6 +96,26 @@ export default function SiteHeader() {
     };
   }, [me]);
 
+async function markAllRead() {
+    if (!me || marking) return;
+    setMarking(true);
+    const prev = counts;
+    // Optimistisch alles auf 0 setzen
+    setCounts({ total: 0, invites: 0, groups: 0, news: 0, events: 0 });
+    try {
+      const r = await fetch('/api/unread/seen', { method: 'POST', credentials: 'include' });
+      if (!r.ok) throw new Error('failed');
+      // anderen Komponenten signalisieren
+      window.dispatchEvent(new Event('unread-changed'));
+    } catch {
+      // rollback bei Fehler
+      setCounts(prev);
+      alert('Konnte nicht als gelesen markieren.');
+    } finally {
+      setMarking(false);
+    }
+  }
+
   const links = useMemo(() => {
     const arr: { href: string; label: string }[] = [
       { href: '/', label: 'Start' },
@@ -165,6 +181,7 @@ export default function SiteHeader() {
         <div className="w-10" />
       </div>
 
+      
       <AnimatePresence initial={false}>
         {menuOpen && (
           <motion.div
@@ -197,6 +214,35 @@ export default function SiteHeader() {
                   </Link>
                 );
               })}
+
+              {/* 🆕 Alles-als-gelesen */}
+              {me && (
+                <button
+                  type="button"
+                  onClick={markAllRead}
+                  disabled={marking}
+                  className="mt-2 inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-medium
+                             border border-gray-200 dark:border-gray-700 bg-white dark:bg-white/10
+                             hover:bg-gray-50 dark:hover:bg-white/20 disabled:opacity-60"
+                >
+                  {marking ? (
+                    <>
+                      <svg viewBox="0 0 24 24" width="16" height="16" className="animate-spin" aria-hidden>
+                        <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" opacity=".3"/>
+                        <path d="M21 12a9 9 0 0 0-9-9" fill="none" stroke="currentColor" strokeWidth="2"/>
+                      </svg>
+                      Markiere …
+                    </>
+                  ) : (
+                    <>
+                      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden>
+                        <path d="M20 7l-9 9-5-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                      Alles als gelesen markieren
+                    </>
+                  )}
+                </button>
+              )}
 
               {me ? (
                 <form action="/api/logout" method="post" onSubmit={() => setMenuOpen(false)} className="mt-2">
