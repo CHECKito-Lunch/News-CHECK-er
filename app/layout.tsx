@@ -4,6 +4,7 @@ import type { Metadata } from 'next';
 import type { Viewport } from 'next';
 import 'react-calendar/dist/Calendar.css';
 import { Analytics } from "@vercel/analytics/next"
+import { SpeedInsights } from "@vercel/speed-insights/next"
 
 // hier kannst du globale <meta>-Infos setzen:
 export const metadata: Metadata = {
@@ -28,6 +29,8 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="de">
       <body className="min-h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100">
         {children}
+        <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   );
