@@ -523,70 +523,58 @@ for (let mm = windowStart; mm <= m; mm++) {
 
     return (
       <div className="overflow-x-auto">
-        <table className="min-w-full text-sm">
-          <thead>
-            <tr className="text-left text-gray-500">
-              <th className="py-2 pr-4">Team</th>
-              <th className="py-2 pr-4">Punkte</th>
-              <th className="py-2 pr-4">Ø Ausfall %</th>
-              <th className="py-2 pr-4">Σ Versp. Min.</th>
-              <th className="py-2 pr-4">Ø eFeedback</th>
-              <th className="py-2 pr-4">Trend</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((t: TeamMonthDetail) => (
-              <tr key={t.team_id} className="border-t border-gray-100 dark:border-gray-800">
-                <td className="py-2 pr-4">{t.team_name}</td>
+  <table className="min-w-full text-sm border border-gray-200 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800">
+    <thead className="bg-gray-50 dark:bg-gray-900/30">
+      <tr className="text-left text-gray-500">
+        <th className="py-2 pr-4">Team</th>
+        <th className="py-2 pr-4">Punkte</th>
+        <th className="py-2 pr-4">Ø Ausfall %</th>
+        <th className="py-2 pr-4">Σ Versp. Min.</th>
+        <th className="py-2 pr-4">Ø eFeedback</th>
+        <th className="py-2 pr-4">Trend</th>
+      </tr>
+    </thead>
+    <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+      {rows.map((t, i) => (
+        <tr
+          key={t.team_id}
+          className={i % 2 === 1 ? "bg-gray-50 dark:bg-gray-900/20" : ""}
+        >
+          <td className="py-2 pr-4">{t.team_name}</td>
+          <td className="py-2 pr-4 tabular-nums text-sm font-medium" style={cellGradient(t.points, bPoints)}>
+            {t.points}
+          </td>
+          <td className="py-2 pr-4 tabular-nums text-sm font-medium" style={cellGradient(t.avgOutage, bOut, { invert: true })}>
+            {fmt(t.avgOutage)}
+          </td>
+          <td className="py-2 pr-4 tabular-nums text-sm font-medium" style={cellGradient(t.totalLate, bLate, { invert: true })}>
+            {fmtInt(t.totalLate)}
+          </td>
+          <td className="py-2 pr-4 tabular-nums text-sm font-medium" style={cellGradient(t.avgFeedback, bFb)}>
+            {fmt(t.avgFeedback)}
+          </td>
+          <td className="py-2 pr-4">
+            <div className="h-8 w-28">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={t.trend}>
+                  <Tooltip />
+                  <Line
+                    type="monotone"
+                    dataKey="y"
+                    strokeWidth={2}
+                    dot={{ r: 2 }}
+                    connectNulls
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+</div>
 
-                {/* Punkte – höchster Wert grün */}
-                <td className="py-2 pr-4 tabular-nums" style={cellGradient(t.points, bPoints)}>
-                  {t.points}
-                </td>
-
-                {/* Ø Ausfall % – niedrigster Wert grün */}
-                <td className="py-2 pr-4 tabular-nums" style={cellGradient(t.avgOutage, bOut, { invert: true })}>
-                  {fmt(t.avgOutage)}
-                </td>
-
-                {/* Σ Versp. Min. – niedrigster Wert grün */}
-                <td className="py-2 pr-4 tabular-nums" style={cellGradient(t.totalLate, bLate, { invert: true })}>
-                  {fmtInt(t.totalLate)}
-                </td>
-
-                {/* Ø eFeedback – höchster Wert grün */}
-                <td className="py-2 pr-4 tabular-nums" style={cellGradient(t.avgFeedback, bFb)}>
-                  {fmt(t.avgFeedback)}
-                </td>
-
-                {/* Mini-Trend (Sparkline) – zeigt nur Monate > 0 Punkte; connectNulls VERBINDET Lücken */}
-                <td className="py-2 pr-4">
-                  <div className="h-8 w-28">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={t.trend}>
-                        <Tooltip />
-                        <Line
-                          type="monotone"
-                          dataKey="y"
-                          strokeWidth={2}
-                          dot={{ r: 2 }}
-                          connectNulls
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                </td>
-              </tr>
-            ))}
-
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={6} className="py-3 text-gray-500">Keine Daten</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
     );
   })()}
 </div>
