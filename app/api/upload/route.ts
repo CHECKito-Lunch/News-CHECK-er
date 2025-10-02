@@ -14,7 +14,7 @@ function supabaseAdmin() {
 }
 
 export async function POST(req: NextRequest) {
-  if (!getAdminFromCookies())
+  if (!getAdminFromCookies(req))
     return NextResponse.json({ ok:false, error:'forbidden' }, { status: 401 });
 
   const form = await req.formData().catch(() => null);
