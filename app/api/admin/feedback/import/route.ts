@@ -3,17 +3,14 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
-import { sql } from '@/lib/db';
+import { sql, sqlJson } from '@/lib/db';           // ⬅️ sqlJson importieren
 import { getAdminFromCookies } from '@/lib/admin-auth';
 
-/* ===========================
-   Input/Output Typen
-=========================== */
 type IncomingRow = Record<string, any>;
 
 type NormalizedRow = {
-  feedback_at: string;             // YYYY-MM-DD (NOT NULL in DB)
-  channel: string | null;          // aus Feedbacktyp
+  feedback_at: string;             // YYYY-MM-DD
+  channel: string | null;
   rating_overall: number | null;
   rating_friend: number | null;
   rating_qual: number | null;
@@ -25,11 +22,8 @@ type NormalizedRow = {
   note: string | null;
 };
 
-/* ===========================
-   Header-Mapping (inkl. Umlaut-/Mojibake-Varianten)
-=========================== */
+/* Header-Mapping (inkl. Mojibake) */
 const headerMap: Record<string, string> = {
-  // Normale Header
   'Datum': 'ts',
   'Bewertung': 'bewertung',
   'Beraterfreundlichkeit': 'beraterfreundlichkeit',
@@ -41,13 +35,11 @@ const headerMap: Record<string, string> = {
   'Anliegen geklärt?': 'geklaert',
   'Feedbacktyp': 'feedbacktyp',
   'Interner Kommentar': 'note',
-
-  // Häufige Mojibake-Varianten (Excel/CSV-Encoding)
+  // Mojibake
   'Beratungsangebotsattraktivit√§t': 'angebotsattraktivitaet',
   'Anliegen gekl√§rt?': 'geklaert',
 };
 
-// auf interne Keys mappen (case-sensitiv exakt, plus fallback mit trim)
 function mapHeaders(row: Record<string, any>): Record<string, any> {
   const out: Record<string, any> = {};
   for (const [k, v] of Object.entries(row)) {
@@ -57,9 +49,6 @@ function mapHeaders(row: Record<string, any>): Record<string, any> {
   return out;
 }
 
-/* ===========================
-   Helper
-=========================== */
 const isUUID = (s: string) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s);
 
@@ -89,19 +78,15 @@ function toISODate(v: any): string | null {
   const s = String(v ?? '').trim();
   if (!s) return null;
 
-  // 1) dd.mm.yy(yy)
   let m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2}|\d{4})$/);
   if (m) {
     let [_, dd, mm, yy] = m;
     let year = Number(yy);
-    if (yy.length === 2) {
-      year = 2000 + year; // „25“ → 2025
-    }
+    if (yy.length === 2) year = 2000 + year;
     const d = new Date(Date.UTC(year, Number(mm) - 1, Number(dd)));
     if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
   }
 
-  // 2) dd/mm/yy(yy)
   m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/);
   if (m) {
     let [_, dd, mm, yy] = m;
@@ -111,16 +96,15 @@ function toISODate(v: any): string | null {
     if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
   }
 
-  // 3) ISO oder sonstige Date-Parse-Varianten (z.B. 2025-01-02T12:34)
   const d = new Date(s);
-  if (!isNaN(d.getTime())) return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())).toISOString().slice(0, 10);
+  if (!isNaN(d.getTime())) {
+    return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
+      .toISOString().slice(0, 10);
+  }
 
   return null;
 }
 
-/* ===========================
-   Route
-=========================== */
 export async function POST(req: NextRequest) {
   const admin = await getAdminFromCookies(req).catch(() => null);
   if (!admin) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
@@ -143,12 +127,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, inserted: 0, skipped: 0 });
   }
 
-  // Normalisieren → DB-Shape
+  // Normalisieren
   const normalized: NormalizedRow[] = [];
   let skipped = 0;
 
   for (const r of rows) {
-    const feedback_at = toISODate(r.ts ?? r.Datum); // Fallback, falls Mapping verfehlt
+    const feedback_at = toISODate(r.ts ?? r.Datum);
     if (!feedback_at) { skipped++; continue; }
 
     normalized.push({
@@ -170,14 +154,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, inserted: 0, skipped });
   }
 
-  // Immer garantiert ein echtes JSON-Array:
-  const payload = JSON.stringify(normalized);
-
   try {
+    // ⬇️ WICHTIG: sqlJson(normalized) übergibt ein echtes JSON-Array an Postgres
     const res = await sql<{ inserted: number }[]>`
       with src as (
         select *
-        from jsonb_to_recordset(${payload}::jsonb) as r(
+        from jsonb_to_recordset(${sqlJson(normalized)}) as r(
           feedback_at     date,
           channel         text,
           rating_overall  int,
