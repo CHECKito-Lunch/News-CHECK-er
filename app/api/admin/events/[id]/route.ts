@@ -43,7 +43,7 @@ async function readBody(req: NextRequest): Promise<any> {
 }
 
 export async function PATCH(req: NextRequest) {
-  if (!(await getAdminFromCookies())) {
+  if (!(await getAdminFromCookies(req))) {
     return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 401 });
   }
 
@@ -118,7 +118,7 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  if (!(await getAdminFromCookies())) {
+  if (!(await getAdminFromCookies(req))) {
     return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 401 });
   }
 

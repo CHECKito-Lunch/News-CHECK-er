@@ -39,9 +39,9 @@ async function readBody(req: NextRequest): Promise<any> {
   try { return raw ? JSON.parse(raw) : {}; } catch { return {}; }
 }
 
-export async function GET(req: NextRequest) {
-  const admin = await getAdminFromCookies();
-  if (!admin) return NextResponse.json({ ok:false, error:'forbidden' }, { status: 401 });
+export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+  const admin = await getAdminFromCookies(req); // ✅ req übergeben
+  if (!admin) return NextResponse.json({ ok:false, error:'unauthorized' }, { status: 401 });
 
   const q = (new URL(req.url).searchParams.get('q') ?? '').trim();
 
@@ -63,8 +63,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const admin = await getAdminFromCookies();
-  if (!admin) return NextResponse.json({ ok:false, error:'forbidden' }, { status: 401 });
+  const admin = await getAdminFromCookies(req); // ✅ req übergeben
+  if (!admin) return NextResponse.json({ ok:false, error:'unauthorized' }, { status: 401 });
 
   // ⬇️ Body robust lesen
   const body: any = await readBody(req);
