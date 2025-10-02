@@ -28,7 +28,7 @@ export async function getSessionFromCookies(): Promise<Session | null> {
 }
 
 /** Gibt Admin-Kontext zurück oder `null`, wenn nicht eingeloggt/kein Admin */
-export async function getAdminFromCookies(): Promise<AdminCtx | null> {
+export async function getAdminFromCookies(req: unknown): Promise<AdminCtx | null> {
   const session = await getSessionFromCookies();
   if (!session || session.role !== 'admin') return null;
   return { session };
