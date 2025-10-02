@@ -67,7 +67,7 @@ export async function GET(req: NextRequest) {
   console.log('[widgets GET dbg] cookie header length:', (req.headers.get('cookie') || '').length);
   console.log('[widgets GET dbg] ua:', req.headers.get('user-agent'));
 
-  const admin = await getAdminFromCookies();
+  const admin = await getAdminFromCookies(req);
   console.log('[widgets GET dbg] admin raw:', admin);
 
   if (!admin) return json({ ok:false, error:'forbidden' }, 401);
@@ -93,7 +93,7 @@ export async function POST(req: NextRequest) {
   console.log('[widgets POST dbg] referer:', req.headers.get('referer'));
   console.log('[widgets POST dbg] ua:', req.headers.get('user-agent'));
 
-  const admin = await getAdminFromCookies();
+  const admin = await getAdminFromCookies(req);
   console.log('[widgets POST dbg] admin raw:', admin);
 
   const creatorId = await resolveCreatorId(admin);

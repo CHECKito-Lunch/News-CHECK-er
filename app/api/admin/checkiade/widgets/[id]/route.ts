@@ -2,7 +2,7 @@
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-import { NextResponse } from 'next/server';
+import { NextRequest,NextResponse } from 'next/server';
 import { sql, sqlJson } from '@/lib/db';
 import { getAdminFromCookies } from '@/lib/admin-auth';
 
@@ -13,7 +13,7 @@ const stripUndefined = <T,>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
 
 /** PATCH /api/admin/checkiade/widgets/[id] */
 export async function PATCH(req: Request, context: any) {
-  const admin = await getAdminFromCookies();
+  const admin = await getAdminFromCookies(req);
   if (!admin) return json({ ok: false, error: 'forbidden' }, 401);
 
   const id = String(context?.params?.id || '');
@@ -64,7 +64,7 @@ export async function PATCH(req: Request, context: any) {
 
 /** DELETE /api/admin/checkiade/widgets/[id] */
 export async function DELETE(_req: Request, context: any) {
-  const admin = await getAdminFromCookies();
+  const admin = await getAdminFromCookies(_req);
   if (!admin) return json({ ok: false, error: 'forbidden' }, 401);
 
   const id = String(context?.params?.id || '');
