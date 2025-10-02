@@ -60,6 +60,8 @@ export async function GET(req: NextRequest) {
         reklamation                 as rekla,
         resolved                    as geklaert,
         channel                     as feedbacktyp
+        note                        as internal_note       
+        note_checked                as internal_checked 
       from public.user_feedback
       where user_id = ${uuid}::uuid
     `;

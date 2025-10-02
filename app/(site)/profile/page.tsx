@@ -59,6 +59,8 @@ type FeedbackItem = {
   beraterqualifikation?: number | null;
   angebotsattraktivitaet?: number | null;
   kommentar?: string | null;
+  internal_note?: string | null;
+  internal_checked?: boolean | null;
   template_name?: string | null;
   rekla?: string | null;        // "ja"/"nein"
   geklaert?: string | null;     // "ja"/"nein"
@@ -1155,13 +1157,20 @@ function FeedbackSection() {
     : (v as number) >= 4.0  ? 'text-amber-600'
     : 'text-red-600';
 
-  function levelFor(avg: number, target: number) {
-    const d = avg - target;
-    if (d >= 0) return { name: 'Gold', class: 'bg-yellow-400 text-yellow-900', icon: '🏆' };
-    if (d >= -0.15) return { name: 'Silber', class: 'bg-gray-300 text-gray-900', icon: '🥈' };
-    if (d >= -0.30) return { name: 'Bronze', class: 'bg-amber-300 text-amber-900', icon: '🥉' };
-    return { name: 'Starter', class: 'bg-gray-200 text-gray-700', icon: '✨' };
-  }
+
+// - GAME LEVELGRENZEN //
+
+
+
+function levelFor(avg: number, target: number) {
+  const d = avg - target;          // wie weit über Ziel?
+  if (d >= 0.35) return { name:'Diamant', class:'bg-cyan-300 text-cyan-900', icon:'💎' };
+  if (d >= 0.20) return { name:'Platin',  class:'bg-indigo-300 text-indigo-900', icon:'🏅' };
+  if (d >= 0.00) return { name:'Gold',    class:'bg-yellow-400 text-yellow-900', icon:'🏆' };
+  if (d >= -0.15) return { name:'Silber', class:'bg-gray-300 text-gray-900',     icon:'🥈' };
+  if (d >= -0.30) return { name:'Bronze', class:'bg-amber-300 text-amber-900',   icon:'🥉' };
+  return { name:'Starter', class:'bg-gray-200 text-gray-700', icon:'✨' };
+}
   const barClass = (pct: number) =>
     pct >= 100 ? 'bg-emerald-500' : pct >= 95 ? 'bg-green-500' : pct >= 85 ? 'bg-amber-500' : 'bg-red-500';
 
@@ -1401,6 +1410,7 @@ function FeedbackSection() {
                               const dKey = `${m.monthKey}:${d.key}`;
                               const dOpen = !!openDays[dKey];
                               const pct = Math.max(0, Math.min(100, d.normAvg*100));
+                              const openInternal = d.items.filter(x => (x.internal_note?.trim() ?? '') && !x.internal_checked).length;
                               const head = new Date(d.key+'T00:00:00Z').toLocaleDateString('de-DE', { weekday:'short', day:'2-digit', month:'2-digit' });
                               return (
                                 <li key={dKey} className="rounded-lg border border-gray-200 dark:border-gray-800">
