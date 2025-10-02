@@ -1,0 +1,65 @@
+// app/api/admin/feedback/bulk-update/route.ts
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+import type { NextRequest } from 'next/server';
+import { NextResponse } from 'next/server';
+import { sql, sqlJson } from '@/lib/db';
+import { getAdminFromCookies } from '@/lib/admin-auth';
+
+const isUUID = (s: unknown): s is string =>
+  typeof s === 'string' &&
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s);
+
+export async function POST(req: NextRequest) {
+  const admin = await getAdminFromCookies(req).catch(() => null);
+  if (!admin) return NextResponse.json({ ok:false, error:'unauthorized' }, { status:401 });
+
+  let body:any = {};
+  try { body = await req.json(); } catch {
+    return NextResponse.json({ ok:false, error:'invalid_json' }, { status:400 });
+  }
+
+  const user_id = body?.user_id;
+  const items = Array.isArray(body?.items) ? body.items : [];
+
+  if (!isUUID(user_id)) return NextResponse.json({ ok:false, error:'user_id_must_be_uuid' }, { status:400 });
+  if (items.length === 0) return NextResponse.json({ ok:true, updated: 0 });
+
+  // Erlaubte Felder: wie im Einzel-PATCH
+  // Wir setzen nur, wenn im JSON-Feld vorhanden (per jsonb '?')
+  const result = await sql<{ updated:number }[]>`
+    with src as (
+      select *
+      from jsonb_to_recordset(${sqlJson(items)}) as r(
+        id              bigint,
+        channel         text,
+        rating_overall  int,
+        rating_friend   int,
+        rating_qual     int,
+        rating_offer    int,
+        comment_raw     text,
+        template_name   text,
+        reklamation     boolean,
+        resolved        boolean,
+        note            text
+      )
+    )
+    update public.user_feedback t set
+      channel        = coalesce(s.channel,        t.channel),
+      rating_overall = coalesce(s.rating_overall, t.rating_overall),
+      rating_friend  = coalesce(s.rating_friend,  t.rating_friend),
+      rating_qual    = coalesce(s.rating_qual,    t.rating_qual),
+      rating_offer   = coalesce(s.rating_offer,   t.rating_offer),
+      comment_raw    = coalesce(s.comment_raw,    t.comment_raw),
+      template_name  = coalesce(s.template_name,  t.template_name),
+      reklamation    = coalesce(s.reklamation,    t.reklamation),
+      resolved       = coalesce(s.resolved,       t.resolved),
+      note           = coalesce(s.note,           t.note)
+    from src s
+    where t.id = s.id and t.user_id = ${user_id}::uuid
+    returning 1 as updated
+  `;
+
+  return NextResponse.json({ ok:true, updated: result.length });
+}
