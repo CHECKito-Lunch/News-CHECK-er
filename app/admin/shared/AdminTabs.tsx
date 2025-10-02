@@ -24,6 +24,7 @@ const NAV: Group[] = [
     { href: '/admin/checkiade', label: 'CHECKiade', icon: Trophy },
     { href: '/admin/tools', label: 'Tools', icon: Wrench },
     { href: '/admin/kpis', label: 'KPIs', icon: Activity },
+    { href: '/admin/feedback', label: 'Feedbacks', icon: Vote },
   ]},
   { title: 'Veranstalter', items: [
     { href: '/admin/vendors', label: 'Veranstalter', icon: Store },

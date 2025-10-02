@@ -19,14 +19,17 @@ type UnreadRes = {
   };
 };
 
-
 export default function SiteHeader() {
   const pathname = usePathname();
+
+  // ✅ ALLE Hooks stehen jetzt im Funktionskörper der Komponente
   const [me, setMe] = useState<Me['user']>(null);
   const [menuOpen, setMenuOpen] = useState(false);
-
   const [counts, setCounts] = useState({ total: 0, invites: 0, groups: 0, news: 0, events: 0 });
-  const [marking, setMarking] = useState(false); // 🆕
+
+  // 👇 diese beiden waren vorher außerhalb – jetzt korrekt hier drin:
+  const [marking, setMarking] = useState(false);
+  const [markedOk, setMarkedOk] = useState(false);
 
   // ---- User laden / auf Auth-Events hören
   useEffect(() => {
@@ -49,6 +52,8 @@ export default function SiteHeader() {
       window.removeEventListener('auth-changed', onAuth);
     };
   }, []);
+
+ 
 
   // ---- Unread laden / Polling / auf unread-changed reagieren
   useEffect(() => {
@@ -97,24 +102,26 @@ export default function SiteHeader() {
   }, [me]);
 
 async function markAllRead() {
-    if (!me || marking) return;
-    setMarking(true);
-    const prev = counts;
-    // Optimistisch alles auf 0 setzen
-    setCounts({ total: 0, invites: 0, groups: 0, news: 0, events: 0 });
-    try {
-      const r = await fetch('/api/unread/seen', { method: 'POST', credentials: 'include' });
-      if (!r.ok) throw new Error('failed');
-      // anderen Komponenten signalisieren
-      window.dispatchEvent(new Event('unread-changed'));
-    } catch {
-      // rollback bei Fehler
-      setCounts(prev);
-      alert('Konnte nicht als gelesen markieren.');
-    } finally {
-      setMarking(false);
-    }
+  if (!me || marking) return;
+  setMarking(true);
+  const prev = counts;
+
+  // Optimistisch auf 0
+  setCounts({ total: 0, invites: 0, groups: 0, news: 0, events: 0 });
+
+  try {
+    const r = await fetch('/api/unread/seen', { method: 'POST', credentials: 'include' });
+    if (!r.ok) throw new Error('failed');
+    window.dispatchEvent(new Event('unread-changed'));
+    setMarkedOk(true);              // ✓ anzeigen
+    setTimeout(() => setMarkedOk(false), 1200);
+  } catch {
+    setCounts(prev);                // Rollback
+    alert('Konnte nicht als gelesen markieren.');
+  } finally {
+    setMarking(false);
   }
+}
 
   const links = useMemo(() => {
     const arr: { href: string; label: string }[] = [
@@ -156,6 +163,9 @@ async function markAllRead() {
     return 0;
   }
 
+
+
+  
   return (
     <header className="sticky top-0 z-30 border-b border-gray-200 bg-white/70 dark:bg-gray-900/70 backdrop-blur">
       <div className="container max-w-15xl mx-auto flex items-center justify-between py-3">
@@ -216,33 +226,63 @@ async function markAllRead() {
               })}
 
               {/* 🆕 Alles-als-gelesen */}
-              {me && (
-                <button
-                  type="button"
-                  onClick={markAllRead}
-                  disabled={marking}
-                  className="mt-2 inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-medium
-                             border border-gray-200 dark:border-gray-700 bg-white dark:bg-white/10
-                             hover:bg-gray-50 dark:hover:bg-white/20 disabled:opacity-60"
-                >
-                  {marking ? (
-                    <>
-                      <svg viewBox="0 0 24 24" width="16" height="16" className="animate-spin" aria-hidden>
-                        <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" opacity=".3"/>
-                        <path d="M21 12a9 9 0 0 0-9-9" fill="none" stroke="currentColor" strokeWidth="2"/>
-                      </svg>
-                      Markiere …
-                    </>
-                  ) : (
-                    <>
-                      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden>
-                        <path d="M20 7l-9 9-5-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                      </svg>
-                      Alles als gelesen markieren
-                    </>
-                  )}
-                </button>
-              )}
+{me && (
+  <motion.button
+    type="button"
+    onClick={markAllRead}
+    disabled={marking}
+    initial={false}
+    animate={{ scale: markedOk ? 1.01 : 1, boxShadow: markedOk ? '0 8px 24px rgba(59,130,246,.25)' : '0 1px 3px rgba(0,0,0,.06)' }}
+    className={`
+      relative mt-3 inline-flex w-full items-center justify-between gap-3 rounded-2xl px-4 py-3 text-sm font-medium
+      border bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-900
+      dark:from-white/5 dark:to-white/[.03] dark:text-blue-200
+      border-blue-100 dark:border-white/10
+      hover:from-blue-100 hover:to-indigo-100 dark:hover:from-white/10 dark:hover:to-white/[.07]
+      disabled:opacity-60
+    `}
+  >
+    <span className="inline-flex items-center gap-2">
+      {/* Icon / Spinner / Check */}
+      {marking ? (
+        <svg viewBox="0 0 24 24" width="16" height="16" className="animate-spin" aria-hidden>
+          <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" opacity=".25"/>
+          <path d="M21 12a9 9 0 0 0-9-9" fill="none" stroke="currentColor" strokeWidth="2"/>
+        </svg>
+      ) : markedOk ? (
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden>
+          <path d="M20 7l-9 9-5-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      ) : (
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden>
+          <path d="M3 12h12M3 6h18M3 18h18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+        </svg>
+      )}
+
+      <span className="truncate">
+        {markedOk ? 'Alles gelesen!' : 'Alles als gelesen markieren'}
+      </span>
+    </span>
+
+    {/* rechte Seite: kleiner Subtext + Badge */}
+    <span className="flex items-center gap-3">
+      <span className="hidden sm:block text-[11px] opacity-70">
+        News · Events · Gruppen
+      </span>
+      {counts.total > 0 && !markedOk && (
+        <span className="
+          inline-flex min-w-[1.5rem] h-6 px-2 items-center justify-center rounded-full text-[11px] font-semibold
+          bg-blue-600 text-white dark:bg-blue-500 shadow-sm
+        ">
+          {counts.total > 99 ? '99+' : counts.total}
+        </span>
+      )}
+    </span>
+
+    {/* sanfter Glanz beim Hover */}
+    <span className="pointer-events-none absolute inset-0 rounded-2xl ring-1 ring-inset ring-blue-200/50 dark:ring-white/10" />
+  </motion.button>
+)}
 
               {me ? (
                 <form action="/api/logout" method="post" onSubmit={() => setMenuOpen(false)} className="mt-2">
