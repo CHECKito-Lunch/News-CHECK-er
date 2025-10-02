@@ -1,22 +1,37 @@
 // app/api/me/feedback/route.ts
-import { NextResponse } from 'next/server';
-import type { NextRequest } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 import { sql } from '@/lib/db';
 import { requireUser } from '@/lib/auth-server';
 
 export const dynamic = 'force-dynamic';
 
+function toISODate(d: string | null): string | null {
+  if (!d) return null;
+  // akzeptiert YYYY-MM-DD oder beliebiges Datum, fällt auf null zurück, wenn invalid
+  const dt = new Date(d);
+  return isNaN(dt.getTime()) ? null : dt.toISOString().slice(0, 10); // YYYY-MM-DD
+}
+
 export async function GET(req: NextRequest) {
   try {
     const me = await requireUser(req).catch(() => null);
-    if (!me) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
+    if (!me) {
+      return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
+    }
+
+    // 🔑 User-ID sicher auf number bringen (app_users.id = bigint)
+    const rawId = (me.user?.id ?? me.user?.sub ?? me.sub) as unknown;
+    const userId = Number(rawId);
+    if (!Number.isFinite(userId)) {
+      return NextResponse.json({ ok: false, error: 'invalid_user_id' }, { status: 400 });
+    }
 
     const { searchParams } = new URL(req.url);
-    const from = searchParams.get('from');
-    const to = searchParams.get('to');
+    const fromISO = toISODate(searchParams.get('from'));
+    const toISO = toISODate(searchParams.get('to'));
 
-    // Basisquery
-    let query = sql`
+    // Basis-Query
+    let q = sql`
       select id,
              user_id,
              ts,
@@ -30,20 +45,21 @@ export async function GET(req: NextRequest) {
              geklaert,
              feedbacktyp
       from public.feedback
-      where user_id = ${me.sub}::uuid
+      where user_id = ${userId}
     `;
 
-    if (from) {
-      query = sql`${query} and ts >= ${from}::date`;
+    // Filter sicher hinzufügen
+    if (fromISO) {
+      q = sql`${q} and ts >= ${fromISO}::date`;
     }
-    if (to) {
-      query = sql`${query} and ts <= ${to}::date + interval '1 day'`;
+    if (toISO) {
+      // inkl. Tagesende
+      q = sql`${q} and ts < (${toISO}::date + interval '1 day')`;
     }
 
-    query = sql`${query} order by ts desc limit 200`;
+    q = sql`${q} order by ts desc limit 200`;
 
-    const rows = await query;
-
+    const rows = await q;
     return NextResponse.json({ ok: true, items: rows });
   } catch (e) {
     console.error('[feedback GET]', e);
