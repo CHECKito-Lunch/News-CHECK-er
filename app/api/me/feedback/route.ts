@@ -70,7 +70,7 @@ export async function GET(req: NextRequest) {
 
     if (fromISO) q = sql`${q} and feedback_at >= ${fromISO}::date`;
     if (toISO)   q = sql`${q} and feedback_at < (${toISO}::date + interval '1 day')`;
-    q = sql`${q} order by feedback_at desc, id desc limit 200`;
+    q = sql`${q} order by feedback_at desc, id desc`;
 
     const rows = await q;
     return NextResponse.json({ ok: true, items: rows });
