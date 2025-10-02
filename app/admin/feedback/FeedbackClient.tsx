@@ -158,40 +158,34 @@ export default function AdminFeedbackPage(){
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((r,idx)=>{
-                    const avgFromParts = avg([
-                      r.beraterfreundlichkeit,
-                      r.beraterqualifikation,
-                      r.angebotsattraktivitaet
-                    ]);
-                    const avgDisplay = avgFromParts ?? r.bewertung ?? '–';
-
-                    return (
-                      <tr key={idx} className="border-t border-gray-100 dark:border-gray-800 align-top">
-                        <td className="px-3 py-2 whitespace-nowrap">{r.ts ?? '–'}</td>
-                        <td className="px-3 py-2 whitespace-nowrap">{r.feedbacktyp ?? '–'}</td>
-                        <td className="px-3 py-2 font-medium">{avgDisplay}</td>
-                        <td className="px-3 py-2">{r.beraterfreundlichkeit ?? '–'}</td>
-                        <td className="px-3 py-2">{r.beraterqualifikation ?? '–'}</td>
-                        <td className="px-3 py-2">{r.angebotsattraktivitaet ?? '–'}</td>
-                        <td className="px-3 py-2 max-w-[28rem]">
-                          {r.kommentar ? <span className="whitespace-pre-wrap">{r.kommentar}</span> : '–'}
-                        </td>
-                        <td className="px-3 py-2">{r.template_name ?? '–'}</td>
-                        <td className="px-3 py-2">{r.rekla ?? '–'}</td>
-                        <td className="px-3 py-2">{r.geklaert ?? '–'}</td>
-                        <td className="px-3 py-2 w-[22rem]">
-                          <input
-                            value={r.note||''}
-                            onChange={(e)=>setRows(prev=>prev.map((x,i)=> i===idx ? {...x, note:e.target.value} : x))}
-                            placeholder="optional…"
-                            className="w-full px-2 py-1 rounded border dark:border-gray-700 bg-white dark:bg-white/10"
-                          />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
+  {rows.map((r,idx)=>{
+    return (
+      <tr key={idx} className="border-t border-gray-100 dark:border-gray-800 align-top">
+        <td className="px-3 py-2 whitespace-nowrap">{r.ts ?? '–'}</td>
+        <td className="px-3 py-2 whitespace-nowrap">{r.feedbacktyp ?? '–'}</td>
+        {/* ⬇️ Nur importierte Bewertung, kein avg mehr */}
+        <td className="px-3 py-2 font-medium">{r.bewertung ?? '–'}</td>
+        <td className="px-3 py-2">{r.beraterfreundlichkeit ?? '–'}</td>
+        <td className="px-3 py-2">{r.beraterqualifikation ?? '–'}</td>
+        <td className="px-3 py-2">{r.angebotsattraktivitaet ?? '–'}</td>
+        <td className="px-3 py-2 max-w-[28rem]">
+          {r.kommentar ? <span className="whitespace-pre-wrap">{r.kommentar}</span> : '–'}
+        </td>
+        <td className="px-3 py-2">{r.template_name ?? '–'}</td>
+        <td className="px-3 py-2">{r.rekla ?? '–'}</td>
+        <td className="px-3 py-2">{r.geklaert ?? '–'}</td>
+        <td className="px-3 py-2 w-[22rem]">
+          <input
+            value={r.note||''}
+            onChange={(e)=>setRows(prev=>prev.map((x,i)=> i===idx ? {...x, note:e.target.value} : x))}
+            placeholder="optional…"
+            className="w-full px-2 py-1 rounded border dark:border-gray-700 bg-white dark:bg-white/10"
+          />
+        </td>
+      </tr>
+    );
+  })}
+</tbody>
               </table>
             </div>
 
