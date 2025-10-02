@@ -1,143 +1,162 @@
 // app/api/admin/feedback/import/route.ts
-import { NextRequest } from 'next/server';
-import { sql } from '@/lib/db';
-import { getAdminFromCookies } from '@/lib/admin-auth';
-
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const json = (d:any, s=200) => new Response(JSON.stringify(d), {
-  status: s,
-  headers: { 'content-type': 'application/json; charset=utf-8' }
-});
+import { NextRequest, NextResponse } from 'next/server';
+import { sql } from '@/lib/db';
+import { getAdminFromCookies } from '@/lib/admin-auth';
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+type IncomingRow = {
+  ts?: string | null;
+  bewertung?: number | null;
+  beraterfreundlichkeit?: number | null;
+  beraterqualifikation?: number | null;
+  angebotsattraktivitaet?: number | null;
+  kommentar?: string | null;
+  template_name?: string | null;
+  rekla?: 'ja' | 'nein' | string | null;
+  geklaert?: 'ja' | 'nein' | string | null;
+  feedbacktyp?: string | null;
+  note?: string | null;
+};
 
-function isObj(v: unknown): v is Record<string, any> {
-  return v != null && typeof v === 'object' && !Array.isArray(v);
-}
+type NormalizedRow = {
+  feedback_at: string | null;     // 'YYYY-MM-DD'
+  channel: string | null;         // aus feedbacktyp
+  rating_overall: number | null;
+  rating_friend: number | null;
+  rating_qual: number | null;
+  rating_offer: number | null;
+  comment_raw: string | null;
+  template_name: string | null;
+  reklamation: boolean | null;
+  resolved: boolean | null;
+  note: string | null;
+};
 
-function toInt(v: any): number | null {
-  const n = Number(v);
-  return Number.isFinite(n) ? Math.trunc(n) : null;
-}
-function toBool(v: any): boolean | null {
-  if (typeof v === 'boolean') return v;
-  if (typeof v === 'number') return v !== 0;
-  if (typeof v === 'string') {
-    const s = v.trim().toLowerCase();
-    if (['ja','yes','true','wahr','1','y','j'].includes(s)) return true;
-    if (['nein','no','false','falsch','0','n'].includes(s)) return false;
-  }
-  return null;
-}
-function toDateString(v: any): string | null {
-  // akzeptiert ISO, 'YYYY-MM-DD', oder TS/Datum; gibt 'YYYY-MM-DD' zurück
-  if (!v) return null;
-  if (typeof v === 'string') {
-    const s = v.trim();
-    // häufigster Fall: bereits Datum
-    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-    const d = new Date(s);
-    if (!isNaN(d.getTime())) return d.toISOString().slice(0,10);
-    return null;
-  }
-  const d = new Date(v);
-  return isNaN(d.getTime()) ? null : d.toISOString().slice(0,10);
-}
-
-// … oben bleibt gleich …
 export async function POST(req: NextRequest) {
-  const me = await getAdminFromCookies(req).catch(() => null);
-  if (!me) return json({ ok:false, error:'unauthorized' }, 401);
+  const admin = await getAdminFromCookies(req).catch(() => null);
+  if (!admin) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
 
-  let body: any;
+  let body: any = {};
   try {
     body = await req.json();
   } catch {
-    return json({ ok:false, error:'invalid json' }, 400);
+    return NextResponse.json({ ok: false, error: 'invalid_json' }, { status: 400 });
   }
 
-  const user_id = String(body?.user_id || '');
-  if (!user_id) return json({ ok:false, error:'user_id required' }, 400);
+  const user_id_raw = String(body?.user_id ?? '').trim();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(user_id_raw)) {
+    return NextResponse.json({ ok: false, error: 'user_id_must_be_uuid' }, { status: 400 });
+  }
 
-  // rows robust absichern (auch wenn ein einzelnes Objekt kommt)
-  const rowsInput = body?.rows;
-  const rowsArr: any[] =
-    Array.isArray(rowsInput) ? rowsInput
-    : rowsInput && typeof rowsInput === 'object' ? [rowsInput]
-    : [];
+  const rowsIn: unknown = body?.rows;
+  const rowsArr: IncomingRow[] = Array.isArray(rowsIn) ? rowsIn as IncomingRow[] : [];
+  if (rowsArr.length === 0) {
+    return NextResponse.json({ ok: true, inserted: 0 });
+  }
 
-  if (rowsArr.length === 0) return json({ ok:true, inserted: 0 });
+  // ---- Helpers
+  const toStr = (v: any): string | null => {
+    const s = String(v ?? '').trim();
+    return s ? s : null;
+  };
+  const toBool = (v: any): boolean | null => {
+    const s = String(v ?? '').trim().toLowerCase();
+    if (!s) return null;
+    if (['ja','yes','y','true','1'].includes(s)) return true;
+    if (['nein','no','n','false','0'].includes(s)) return false;
+    return null;
+  };
+  const toInt1to5 = (v: any): number | null => {
+    const n = Number(String(v ?? '').replace(',', '.'));
+    return Number.isFinite(n) && n >= 1 && n <= 5 ? Math.trunc(n) : null;
+  };
+  const toISODate = (v: any): string | null => {
+    const s = String(v ?? '').trim();
+    if (!s) return null;
+    // unterstützt z.B. '2024-10-01', '01.10.2024', '01/10/2024', '2024-10-01T12:34'
+    const d = new Date(s);
+    if (isNaN(d.getTime())) return null;
+    return d.toISOString().slice(0, 10); // YYYY-MM-DD
+  };
 
-  const payload = JSON.stringify(rowsArr);
+  // ---- Normalisieren ins DB-Schema
+  const normalized: NormalizedRow[] = rowsArr.map((r) => ({
+    feedback_at: toISODate(r.ts),
+    channel: toStr(r.feedbacktyp),
+    rating_overall: toInt1to5(r.bewertung),
+    rating_friend: toInt1to5(r.beraterfreundlichkeit),
+    rating_qual: toInt1to5(r.beraterqualifikation),
+    rating_offer: toInt1to5(r.angebotsattraktivitaet),
+    comment_raw: toStr(r.kommentar),
+    template_name: toStr(r.template_name),
+    reklamation: toBool(r.rekla),
+    resolved: toBool(r.geklaert),
+    note: toStr(r.note),
+  }))
+  // DB verlangt feedback_at NOT NULL → bereits hier filtern
+  .filter(r => !!r.feedback_at);
 
-  const result = await sql<{ inserted: number }[]>`
-    with data as (
-      select case
-        when jsonb_typeof(${payload}::jsonb) = 'array'  then ${payload}::jsonb
-        when jsonb_typeof(${payload}::jsonb) = 'object' then jsonb_build_array(${payload}::jsonb)
-        else '[]'::jsonb
-      end as j
-    ),
-    elems as (
-      select elem
-      from data, lateral jsonb_array_elements(j) as elem
-      where jsonb_typeof(elem) = 'object'
-    ),
-    casted as (
+  if (normalized.length === 0) {
+    return NextResponse.json({ ok: true, inserted: 0, skipped: rowsArr.length });
+  }
+
+  // ---- Bulk-Insert via jsonb_to_recordset (immer echtes Array)
+  const payload = JSON.stringify(normalized);
+
+  try {
+    const result = await sql<{ inserted: number }[]>`
+      with src as (
+        select *
+        from jsonb_to_recordset(${payload}::jsonb) as r(
+          feedback_at     date,
+          channel         text,
+          rating_overall  int,
+          rating_friend   int,
+          rating_qual     int,
+          rating_offer    int,
+          comment_raw     text,
+          template_name   text,
+          reklamation     boolean,
+          resolved        boolean,
+          note            text
+        )
+      )
+      insert into public.user_feedback (
+        user_id,
+        feedback_at,
+        channel,
+        rating_overall,
+        rating_friend,
+        rating_qual,
+        rating_offer,
+        comment_raw,
+        template_name,
+        reklamation,
+        resolved,
+        note
+      )
       select
-        nullif(elem->>'ts','')::timestamptz               as ts_raw,
-        nullif(elem->>'feedbacktyp','')                   as channel,
-        nullif((elem->>'bewertung')::int,0)               as rating_overall,
-        nullif((elem->>'beraterfreundlichkeit')::int,0)   as rating_friend,
-        nullif((elem->>'beraterqualifikation')::int,0)    as rating_qual,
-        nullif((elem->>'angebotsattraktivitaet')::int,0)  as rating_offer,
-        nullif(elem->>'kommentar','')                     as comment_raw,
-        nullif(elem->>'template_name','')                 as template_name,
-        case lower(coalesce(elem->>'rekla',''))
-          when 'ja' then true
-          when 'nein' then false
-          else null
-        end                                               as reklamation,
-        case lower(coalesce(elem->>'geklaert',''))
-          when 'ja' then true
-          when 'nein' then false
-          else null
-        end                                               as resolved,
-        nullif(elem->>'note','')                          as note
-      from elems
-    )
-    insert into public.user_feedback (
-      user_id,
-      feedback_at,
-      channel,
-      rating_overall,
-      rating_friend,
-      rating_qual,
-      rating_offer,
-      comment_raw,
-      template_name,
-      reklamation,
-      resolved,
-      note
-    )
-    select
-      ${user_id}::uuid,
-      (ts_raw)::date,                                    -- deine Tabelle hat "date": casten
-      channel,
-      rating_overall,
-      rating_friend,
-      rating_qual,
-      rating_offer,
-      comment_raw,
-      template_name,
-      coalesce(reklamation,false),
-      coalesce(resolved,false),
-      note
-    from casted
-    returning 1 as inserted
-  `;
+        ${user_id_raw}::uuid,
+        s.feedback_at,
+        nullif(s.channel,''),
+        (case when s.rating_overall between 1 and 5 then s.rating_overall else null end),
+        (case when s.rating_friend  between 1 and 5 then s.rating_friend  else null end),
+        (case when s.rating_qual    between 1 and 5 then s.rating_qual    else null end),
+        (case when s.rating_offer   between 1 and 5 then s.rating_offer   else null end),
+        nullif(s.comment_raw,''),
+        nullif(s.template_name,''),
+        s.reklamation,
+        s.resolved,
+        nullif(s.note,'')
+      from src s
+      returning 1 as inserted
+    `;
 
-  return json({ ok:true, inserted: result.length });
+    return NextResponse.json({ ok: true, inserted: result.length });
+  } catch (e: any) {
+    console.error('[feedback/import]', e);
+    return NextResponse.json({ ok: false, error: e?.message ?? 'server_error' }, { status: 500 });
+  }
 }
