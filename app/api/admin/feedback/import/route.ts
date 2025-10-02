@@ -46,6 +46,7 @@ function toDateString(v: any): string | null {
   return isNaN(d.getTime()) ? null : d.toISOString().slice(0,10);
 }
 
+// … oben bleibt gleich …
 export async function POST(req: NextRequest) {
   const me = await getAdminFromCookies(req).catch(() => null);
   if (!me) return json({ ok:false, error:'unauthorized' }, 401);
@@ -54,91 +55,58 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return json({ ok:false, error:'invalid_json' }, 400);
+    return json({ ok:false, error:'invalid json' }, 400);
   }
 
-  const user_id_raw = String(body?.user_id ?? '').trim();
-  if (!user_id_raw) return json({ ok:false, error:'user_id_required' }, 400);
+  const user_id = String(body?.user_id || '');
+  if (!user_id) return json({ ok:false, error:'user_id required' }, 400);
 
-  // user_id (bigint oder uuid) -> user_uuid (uuid)
-  let user_uuid: string | null = null;
-  if (UUID_RE.test(user_id_raw)) {
-    user_uuid = user_id_raw;
-  } else {
-    const asNum = Number(user_id_raw);
-    if (!Number.isFinite(asNum)) return json({ ok:false, error:'invalid_user_id' }, 400);
-    const rows = await sql<{ user_id: string | null }[]>`
-      select user_id from public.app_users where id = ${asNum} limit 1
-    `;
-    user_uuid = rows[0]?.user_id ?? null;
-  }
-  if (!user_uuid) return json({ ok:false, error:'user_uuid_not_found' }, 404);
+  // rows robust absichern (auch wenn ein einzelnes Objekt kommt)
+  const rowsInput = body?.rows;
+  const rowsArr: any[] =
+    Array.isArray(rowsInput) ? rowsInput
+    : rowsInput && typeof rowsInput === 'object' ? [rowsInput]
+    : [];
 
-  // rows -> garantiertes Array von Objekten im erwarteten Schema
-  const input = body?.rows;
-  const arr: any[] = Array.isArray(input) ? input : (input ? [input] : []);
-  if (arr.length === 0) return json({ ok:true, inserted: 0 });
+  if (rowsArr.length === 0) return json({ ok:true, inserted: 0 });
 
-  const normalized = arr
-    .filter(isObj)
-    .map((r) => {
-      // Mappings (de/alt -> intern)
-      const feedback_at = toDateString(
-        r.feedback_at ?? r.ts ?? r.date ?? r.Datum
-      );
-      const channel = (r.channel ?? r.feedbacktyp ?? r.Channel ?? '').toString().trim() || null;
-      const rating_overall = toInt(r.rating_overall ?? r.bewertung ?? r['Ø']);
-      const rating_friend  = toInt(r.rating_friend  ?? r.beraterfreundlichkeit ?? r.F);
-      const rating_qual    = toInt(r.rating_qual    ?? r.beraterqualifikation  ?? r.Q);
-      const rating_offer   = toInt(r.rating_offer   ?? r.angebotsattraktivitaet ?? r.A);
-      const comment_raw    = (r.comment_raw ?? r.kommentar ?? r.Kommentar ?? '').toString().trim() || null;
-      const template_name  = (r.template_name ?? r['Template Name'] ?? r.template ?? '').toString().trim() || null;
-      const reklamation    = toBool(r.reklamation ?? r.rekla);
-      const resolved       = toBool(r.resolved ?? r.geklaert ?? r['Anliegen geklärt?']);
-      const note           = (r.note ?? r['Interner Kommentar'] ?? '').toString().trim() || null;
-
-      return {
-        feedback_at,
-        channel,
-        rating_overall,
-        rating_friend,
-        rating_qual,
-        rating_offer,
-        comment_raw,
-        template_name,
-        reklamation,
-        resolved,
-        note,
-      };
-    })
-    // mindestens irgendein Feld sinnvoll?
-    .filter(o =>
-      o.feedback_at || o.channel || o.rating_overall || o.rating_friend ||
-      o.rating_qual || o.rating_offer || o.comment_raw || o.template_name || o.note
-    );
-
-  if (normalized.length === 0) {
-    return json({ ok:true, inserted: 0, skipped: arr.length });
-  }
-
-  // Jetzt ist garantiert: normalized ist ein Array von Objekten
-  const payload = JSON.stringify(normalized);
+  const payload = JSON.stringify(rowsArr);
 
   const result = await sql<{ inserted: number }[]>`
-    with src as (
-      select * from jsonb_to_recordset(${payload}::jsonb) as r(
-        feedback_at       text,
-        channel           text,
-        rating_overall    int,
-        rating_friend     int,
-        rating_qual       int,
-        rating_offer      int,
-        comment_raw       text,
-        template_name     text,
-        reklamation       boolean,
-        resolved          boolean,
-        note              text
-      )
+    with data as (
+      select case
+        when jsonb_typeof(${payload}::jsonb) = 'array'  then ${payload}::jsonb
+        when jsonb_typeof(${payload}::jsonb) = 'object' then jsonb_build_array(${payload}::jsonb)
+        else '[]'::jsonb
+      end as j
+    ),
+    elems as (
+      select elem
+      from data, lateral jsonb_array_elements(j) as elem
+      where jsonb_typeof(elem) = 'object'
+    ),
+    casted as (
+      select
+        nullif(elem->>'ts','')::timestamptz               as ts_raw,
+        nullif(elem->>'feedbacktyp','')                   as channel,
+        nullif((elem->>'bewertung')::int,0)               as rating_overall,
+        nullif((elem->>'beraterfreundlichkeit')::int,0)   as rating_friend,
+        nullif((elem->>'beraterqualifikation')::int,0)    as rating_qual,
+        nullif((elem->>'angebotsattraktivitaet')::int,0)  as rating_offer,
+        nullif(elem->>'kommentar','')                     as comment_raw,
+        nullif(elem->>'template_name','')                 as template_name,
+        case lower(coalesce(elem->>'rekla',''))
+          when 'ja' then true
+          when 'nein' then false
+          else null
+        end                                               as reklamation,
+        case lower(coalesce(elem->>'geklaert',''))
+          when 'ja' then true
+          when 'nein' then false
+          else null
+        end                                               as resolved,
+        nullif(elem->>'note','')                          as note
+      from elems
     )
     insert into public.user_feedback (
       user_id,
@@ -155,19 +123,19 @@ export async function POST(req: NextRequest) {
       note
     )
     select
-      ${user_uuid}::uuid,
-      nullif(r.feedback_at,'')::date,
-      nullif(r.channel,''),
-      nullif(r.rating_overall,0),
-      nullif(r.rating_friend,0),
-      nullif(r.rating_qual,0),
-      nullif(r.rating_offer,0),
-      nullif(r.comment_raw,''),
-      nullif(r.template_name,''),
-      coalesce(r.reklamation,false),
-      coalesce(r.resolved,false),
-      nullif(r.note,'')
-    from src r
+      ${user_id}::uuid,
+      (ts_raw)::date,                                    -- deine Tabelle hat "date": casten
+      channel,
+      rating_overall,
+      rating_friend,
+      rating_qual,
+      rating_offer,
+      comment_raw,
+      template_name,
+      coalesce(reklamation,false),
+      coalesce(resolved,false),
+      note
+    from casted
     returning 1 as inserted
   `;
 
