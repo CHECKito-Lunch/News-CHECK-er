@@ -11,6 +11,22 @@ const isUUID = (s: unknown): s is string =>
   typeof s === 'string' &&
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s);
 
+// entfernt undefined-Keys und wandelt undefined->null
+function cleanPatch(obj: any) {
+  const allowed = [
+    'id','channel','rating_overall','rating_friend','rating_qual','rating_offer',
+    'comment_raw','template_name','reklamation','resolved','note'
+  ] as const;
+  const out: Record<string, any> = {};
+  for (const k of allowed) {
+    if (Object.prototype.hasOwnProperty.call(obj, k)) {
+      const v = obj[k];
+      out[k] = (v === undefined) ? null : v;
+    }
+  }
+  return out;
+}
+
 export async function POST(req: NextRequest) {
   const admin = await getAdminFromCookies(req).catch(() => null);
   if (!admin) return NextResponse.json({ ok:false, error:'unauthorized' }, { status:401 });
@@ -21,13 +37,13 @@ export async function POST(req: NextRequest) {
   }
 
   const user_id = body?.user_id;
-  const items = Array.isArray(body?.items) ? body.items : [];
-
+  const rawItems = Array.isArray(body?.items) ? body.items : [];
   if (!isUUID(user_id)) return NextResponse.json({ ok:false, error:'user_id_must_be_uuid' }, { status:400 });
-  if (items.length === 0) return NextResponse.json({ ok:true, updated: 0 });
+  if (rawItems.length === 0) return NextResponse.json({ ok:true, updated: 0 });
 
-  // Erlaubte Felder: wie im Einzel-PATCH
-  // Wir setzen nur, wenn im JSON-Feld vorhanden (per jsonb '?')
+  // 💡 hier säubern: keine undefined in sqlJson!
+  const items = rawItems.map(cleanPatch);
+
   const result = await sql<{ updated:number }[]>`
     with src as (
       select *

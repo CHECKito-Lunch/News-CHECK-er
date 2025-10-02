@@ -15,6 +15,8 @@ function toISODate(d: string | null): string | null {
   return isNaN(dt.getTime()) ? null : dt.toISOString().slice(0, 10);
 }
 
+
+
 export async function GET(req: NextRequest) {
   try {
     const me = await requireUser(req).catch(() => null);
