@@ -5,66 +5,77 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { getAdminFromCookies } from '@/lib/admin-auth';
-import bcrypt from 'bcryptjs';
 
-const json = (d: any, s = 200) => NextResponse.json(d, { status: s });
-
-type Row = {
-  id: number;
-  name: string;
-  description: string | null;
-  is_active: boolean;
-  is_private: boolean;
-  join_password_hash: string | null;
-  member_count: number;
-};
-
-export async function GET() {
-  if (!(await getAdminFromCookies())) return json({ ok: false, error: 'forbidden' }, 401);
-
-  const rows: Row[] = await sql<Row[]>`
-    select
-      g.id, g.name, g.description, g.is_active, g.is_private, g.join_password_hash,
-      coalesce(mc.member_count,0)::int as member_count
-    from public.groups g
-    left join (
-      select group_id, count(*) as member_count
-      from public.group_members
-      group by group_id
-    ) mc on mc.group_id = g.id
-    order by g.name asc
-  `;
-
-  const data = rows.map((r: Row) => ({
-    id: r.id,
-    name: r.name,
-    description: r.description,
-    is_active: r.is_active,
-    is_private: r.is_private,
-    has_password: !!r.join_password_hash,
-    memberCount: r.member_count,
-  }));
-
-  return json({ ok: true, data });
+// Body robust lesen (JSON/Form/Fallback)
+async function readBody(req: NextRequest): Promise<any> {
+  const ct = req.headers.get('content-type') || '';
+  if (ct.includes('application/json')) {
+    const raw = await req.text().catch(() => '');
+    try { return raw ? JSON.parse(raw) : {}; } catch { return {}; }
+  }
+  if (ct.includes('multipart/form-data') || ct.includes('application/x-www-form-urlencoded')) {
+    const form = await req.formData().catch(() => null);
+    if (!form) return {};
+    const obj: Record<string, any> = {};
+    for (const [k, v] of form.entries()) obj[k] = typeof v === 'string' ? v : v.name;
+    return obj;
+  }
+  const raw = await req.text().catch(() => '');
+  try { return raw ? JSON.parse(raw) : {}; } catch { return {}; }
 }
 
+// GET /api/admin/groups  -> Liste (optional q-Filter)
+export async function GET(req: NextRequest) {
+  const admin = await getAdminFromCookies(req);          // ✅ req übergeben
+  if (!admin) return NextResponse.json({ ok:false, error:'unauthorized' }, { status: 401 });
+
+  const url = new URL(req.url);
+  const q = (url.searchParams.get('q') ?? '').trim();
+
+  try {
+    const rows = await sql<any[]>`
+      select id, name, description, is_private, created_at
+        from public.groups
+       ${q ? sql`where name ilike ${'%' + q + '%'} or description ilike ${'%' + q + '%'}` : sql``}
+       order by created_at desc
+       limit 500
+    `;
+    return NextResponse.json({ ok:true, data: rows });
+  } catch (e:any) {
+    console.error('[admin/groups GET]', e);
+    return NextResponse.json({ ok:false, error: e?.message ?? 'server_error' }, { status: 500 });
+  }
+}
+
+// POST /api/admin/groups  -> anlegen/ändern (einfach: nur anlegen)
 export async function POST(req: NextRequest) {
-  if (!(await getAdminFromCookies())) return json({ ok: false, error: 'forbidden' }, 401);
-  const b = await req.json().catch(() => ({}));
+  const admin = await getAdminFromCookies(req);          // ✅ req übergeben
+  if (!admin) return NextResponse.json({ ok:false, error:'unauthorized' }, { status: 401 });
 
-  const name = (b?.name ?? '').toString().trim();
-  if (!name) return json({ ok: false, error: 'name_required' }, 400);
+  const body = await readBody(req);
+  const name = typeof body?.name === 'string' ? body.name.trim() : '';
+  const description =
+    typeof body?.description === 'string' ? body.description : null;
+  const is_private =
+    typeof body?.is_private === 'boolean'
+      ? body.is_private
+      : /^(1|true|yes|on)$/i.test(String(body?.is_private ?? ''));
 
-  const description = (b?.description ?? null) as string | null;
-  const is_private = !!b?.is_private;
-  const password = (b?.password ?? '').toString().trim();
+  if (!name) {
+    return NextResponse.json({ ok:false, error:'name_required' }, { status: 400 });
+  }
 
-  const hash = password ? await bcrypt.hash(password, 10) : null;
-
-  const [row] = await sql<{ id: number }[]>`
-    insert into public.groups (name, description, is_active, is_private, join_password_hash)
-    values (${name}, ${description}, true, ${is_private}, ${hash})
-    returning id
-  `;
-  return json({ ok: true, id: row.id });
+  try {
+    const [row] = await sql<any[]>`
+      insert into public.groups (name, description, is_private)
+      values (${name}, ${description}, ${is_private})
+      returning id, name, description, is_private
+    `;
+    return NextResponse.json({ ok:true, data: row });
+  } catch (e:any) {
+    console.error('[admin/groups POST]', e);
+    const msg = String(e?.message ?? '');
+    const status = /duplicate key|unique/i.test(msg) ? 409 : 500;
+    return NextResponse.json({ ok:false, error: msg || 'server_error' }, { status });
+  }
 }

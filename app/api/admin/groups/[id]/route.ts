@@ -21,15 +21,16 @@ function getId(url: string): number | null {
 }
 
 export async function PATCH(req: NextRequest) {
-  if (!(await getAdminFromCookies())) return json({ ok: false, error: 'forbidden' }, 401);
+  // ✅ req übergeben
+  if (!(await getAdminFromCookies(req))) return json({ ok: false, error: 'forbidden' }, 401);
 
   const id = getId(req.url);
   if (!id) return json({ ok: false, error: 'invalid_id' }, 400);
 
-  // Body robust lesen & als Map typisieren
+  // Body robust lesen
   const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
 
-  // ❗ Wichtig: niemals undefined ins SQL geben → auf null normalisieren
+  // niemals undefined ins SQL geben → auf null normalisieren
   const name: string | null =
     Object.prototype.hasOwnProperty.call(b, 'name') ? ((b['name'] as string | null | undefined) ?? null) : null;
 
@@ -69,7 +70,8 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  if (!(await getAdminFromCookies())) return json({ ok: false, error: 'forbidden' }, 401);
+  // ✅ req übergeben
+  if (!(await getAdminFromCookies(req))) return json({ ok: false, error: 'forbidden' }, 401);
 
   const id = getId(req.url);
   if (!id) return json({ ok: false, error: 'invalid_id' }, 400);

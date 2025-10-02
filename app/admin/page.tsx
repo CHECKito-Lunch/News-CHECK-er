@@ -23,6 +23,7 @@ const tiles = [
   { href: '/admin/kpis',          label: 'KPIs',               icon: Activity },
   { href: '/admin/users',         label: 'Benutzer',           icon: UserCircle2 },
   { href: '/admin/checkiade',     label: 'CHECKiade',          icon: Trophy },
+  { href: '/admin/feedback',     label: 'Feedbacks',          icon: Vote },
 ];
 
 async function absoluteUrl(path: string) {
