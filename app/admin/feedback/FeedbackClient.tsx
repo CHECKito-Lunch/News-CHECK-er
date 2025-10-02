@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
-type User = { id: string; name?: string; email?: string };
+type User = { id: string; user_id?: string|null; name?: string; email?: string };
 
 // Shape aus /api/admin/feedback/parse
 type ParsedRow = {
@@ -22,17 +22,23 @@ type ParsedRow = {
 
 export default function AdminFeedbackPage(){
   const [users,setUsers]=useState<User[]>([]);
-  const [userId,setUserId]=useState('');
+  const [userId,setUserId]=useState('');               // <- UUID
   const [rows,setRows]=useState<ParsedRow[]>([]);
   const [loading,setLoading]=useState(false);
   const [saving,setSaving]=useState(false);
 
-  // Nutzerliste laden
+  // Nutzerliste laden (und auf UUID normalisieren)
   useEffect(()=>{(async()=>{
     try{
       const r=await fetch('/api/admin/users',{cache:'no-store'});
       const j=await r.json().catch(()=>({}));
-      setUsers(Array.isArray(j?.data)? j.data : []);
+      const arr = Array.isArray(j?.data)? j.data : [];
+      setUsers(arr.map((u:any)=>({
+        id: String(u?.user_id ?? u?.id ?? ''),     // <- value wird zur UUID, Fallback: bigint id (nicht ideal)
+        user_id: u?.user_id ?? null,
+        name: u?.name ?? null,
+        email: u?.email ?? null,
+      })));
     }catch{}
   })();},[]);
 
@@ -89,7 +95,7 @@ export default function AdminFeedbackPage(){
       const r=await fetch('/api/admin/feedback/import',{
         method:'POST',
         headers:{'Content-Type':'application/json'},
-        // Schicke die Parser-Zeilen unverändert (zzgl. note) an die Import-API
+        // schickt die UUID (userId) und die Zeilen 1:1 an die Import-API
         body: JSON.stringify({ user_id:userId, rows })
       });
       const j=await r.json().catch(()=>({}));
@@ -127,7 +133,9 @@ export default function AdminFeedbackPage(){
             >
               <option value="">– auswählen –</option>
               {users.map(u=>(
-                <option key={u.id} value={u.id}>{u.name || u.email || u.id}</option>
+                <option key={u.id} value={u.id}>
+                  {u.name || u.email || u.id}
+                </option>
               ))}
             </select>
           </label>
@@ -158,34 +166,32 @@ export default function AdminFeedbackPage(){
                   </tr>
                 </thead>
                 <tbody>
-  {rows.map((r,idx)=>{
-    return (
-      <tr key={idx} className="border-t border-gray-100 dark:border-gray-800 align-top">
-        <td className="px-3 py-2 whitespace-nowrap">{r.ts ?? '–'}</td>
-        <td className="px-3 py-2 whitespace-nowrap">{r.feedbacktyp ?? '–'}</td>
-        {/* ⬇️ Nur importierte Bewertung, kein avg mehr */}
-        <td className="px-3 py-2 font-medium">{r.bewertung ?? '–'}</td>
-        <td className="px-3 py-2">{r.beraterfreundlichkeit ?? '–'}</td>
-        <td className="px-3 py-2">{r.beraterqualifikation ?? '–'}</td>
-        <td className="px-3 py-2">{r.angebotsattraktivitaet ?? '–'}</td>
-        <td className="px-3 py-2 max-w-[28rem]">
-          {r.kommentar ? <span className="whitespace-pre-wrap">{r.kommentar}</span> : '–'}
-        </td>
-        <td className="px-3 py-2">{r.template_name ?? '–'}</td>
-        <td className="px-3 py-2">{r.rekla ?? '–'}</td>
-        <td className="px-3 py-2">{r.geklaert ?? '–'}</td>
-        <td className="px-3 py-2 w-[22rem]">
-          <input
-            value={r.note||''}
-            onChange={(e)=>setRows(prev=>prev.map((x,i)=> i===idx ? {...x, note:e.target.value} : x))}
-            placeholder="optional…"
-            className="w-full px-2 py-1 rounded border dark:border-gray-700 bg-white dark:bg-white/10"
-          />
-        </td>
-      </tr>
-    );
-  })}
-</tbody>
+                  {rows.map((r,idx)=>(
+                    <tr key={idx} className="border-t border-gray-100 dark:border-gray-800 align-top">
+                      <td className="px-3 py-2 whitespace-nowrap">{r.ts ?? '–'}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">{r.feedbacktyp ?? '–'}</td>
+                      {/* Nur importierte Bewertung, kein avg */}
+                      <td className="px-3 py-2 font-medium">{r.bewertung ?? '–'}</td>
+                      <td className="px-3 py-2">{r.beraterfreundlichkeit ?? '–'}</td>
+                      <td className="px-3 py-2">{r.beraterqualifikation ?? '–'}</td>
+                      <td className="px-3 py-2">{r.angebotsattraktivitaet ?? '–'}</td>
+                      <td className="px-3 py-2 max-w-[28rem]">
+                        {r.kommentar ? <span className="whitespace-pre-wrap">{r.kommentar}</span> : '–'}
+                      </td>
+                      <td className="px-3 py-2">{r.template_name ?? '–'}</td>
+                      <td className="px-3 py-2">{r.rekla ?? '–'}</td>
+                      <td className="px-3 py-2">{r.geklaert ?? '–'}</td>
+                      <td className="px-3 py-2 w-[22rem]">
+                        <input
+                          value={r.note||''}
+                          onChange={(e)=>setRows(prev=>prev.map((x,i)=> i===idx ? {...x, note:e.target.value} : x))}
+                          placeholder="optional…"
+                          className="w-full px-2 py-1 rounded border dark:border-gray-700 bg-white dark:bg-white/10"
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
               </table>
             </div>
 
@@ -226,11 +232,4 @@ function ynOrNull(v:any): 'ja'|'nein'|null {
   if (['ja','yes','y','true','1'].includes(s)) return 'ja';
   if (['nein','no','n','false','0'].includes(s)) return 'nein';
   return (s==='ja'||s==='nein') ? (s as any) : null;
-}
-function avg(nums:(number|null|undefined)[]): number|null {
-  const xs = nums.filter((n):n is number => Number.isFinite(n as number));
-  if (xs.length===0) return null;
-  const s = xs.reduce((a,b)=>a+b,0);
-  // auf eine Nachkommastelle runden (falls du ganze Zahlen willst: Math.round)
-  return Math.round((s/xs.length)*100)/100;
 }
