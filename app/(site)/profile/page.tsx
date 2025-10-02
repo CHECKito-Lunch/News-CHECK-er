@@ -1123,13 +1123,15 @@ function FeedbackCard() {
   const [items, setItems] = useState<FeedbackItem[] | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Ziele je Typ
+  // feste Ziele pro Typ
   const targets: Record<string, number> = {
-    service_mail: 4.5,        // E-Mail Service-Templates
-    service_mail_rekla: 4.0,  // E-Mail Rekla-Templates
+    service_mail: 4.5,
+    service_mail_rekla: 4.0,
     service_phone: 4.7,
     sales_phone: 4.85,
     sales_lead: 4.5,
+    // fallback:
+    unknown: 4.5,
   };
 
   const typeLabel: Record<string, string> = {
@@ -1139,6 +1141,18 @@ function FeedbackCard() {
     sales_phone: 'Sales Phone',
     sales_lead: 'Sales Lead',
   };
+
+  // Score eines Eintrags (Ø aus Teilwerten; fallback auf "bewertung")
+  function avgScore(f: FeedbackItem) {
+    const parts = [
+      f.beraterfreundlichkeit,
+      f.beraterqualifikation,
+      f.angebotsattraktivitaet,
+    ].filter((n): n is number => Number.isFinite(n as number));
+    if (parts.length >= 2) return parts.reduce((s, n) => s + n, 0) / parts.length;
+    if (typeof f.bewertung === 'number') return f.bewertung;
+    return null;
+  }
 
   function noteColor(avg: number | null | undefined) {
     if (!Number.isFinite(avg as any)) return 'text-gray-500';
@@ -1157,20 +1171,6 @@ function FeedbackCard() {
     return { name: 'Starter', class: 'bg-gray-200 text-gray-700', icon: '✨' };
   }
 
-  // Durchschnitt aus 3 Teilwerten, Fallback auf "bewertung"
-  function avgScore(f: FeedbackItem) {
-    const v = [
-      f.beraterfreundlichkeit,
-      f.beraterqualifikation,
-      f.angebotsattraktivitaet,
-    ]
-      .map((n) => (typeof n === 'number' ? n : null))
-      .filter((n): n is number => Number.isFinite(n));
-    if (v.length >= 2) return v.reduce((s, n) => s + n, 0) / v.length;
-    if (typeof f.bewertung === 'number') return f.bewertung;
-    return null;
-  }
-
   async function load() {
     setLoading(true);
     try {
@@ -1180,16 +1180,14 @@ function FeedbackCard() {
       const r = await authedFetch(`/api/me/feedback${params.toString() ? `?${params.toString()}` : ''}`);
       const j: FeedbackRes = await r.json().catch(() => ({ ok: false, items: [] }));
       setItems(j?.ok ? (Array.isArray(j.items) ? j.items : []) : []);
-    } catch {
-      setItems([]);
-    } finally {
-      setLoading(false);
-    }
+    } catch { setItems([]); }
+    finally { setLoading(false); }
   }
 
-  useEffect(() => { load(); /* on mount */ }, []);
-  useEffect(() => { load(); /* on date change */ }, [from, to]);
+  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [from, to]);
 
+  // ----- Aggregation (nur gefilterte Items) -----
   const byType = useMemo(() => {
     const m = new Map<string, { count: number; sum: number; avg: number }>();
     (items ?? []).forEach((it) => {
@@ -1205,15 +1203,55 @@ function FeedbackCard() {
   }, [items]);
 
   const overall = useMemo(() => {
-    const vals: number[] = [];
+    const xs: number[] = [];
     (items ?? []).forEach((it) => {
       const a = avgScore(it);
-      if (Number.isFinite(a as any)) vals.push(Number(a));
+      if (Number.isFinite(a as any)) xs.push(Number(a));
     });
-    const avg = vals.length ? vals.reduce((s, n) => s + n, 0) / vals.length : 0;
-    return { count: vals.length, avg };
+    const avg = xs.length ? xs.reduce((s, n) => s + n, 0) / xs.length : 0;
+    return { count: xs.length, avg };
   }, [items]);
 
+  // ----- Gruppierung (Accordion nach Tag) -----
+  type Group = { key: string; items: FeedbackItem[]; normAvg: number; pass: boolean };
+  const groups: Group[] = useMemo(() => {
+    const byDay = new Map<string, FeedbackItem[]>();
+    (items ?? []).forEach((f) => {
+      const d = f.ts ? new Date(f.ts) : null;
+      const key = d ? new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
+        .toISOString().slice(0,10) : '—';
+      const arr = byDay.get(key) ?? [];
+      arr.push(f); byDay.set(key, arr);
+    });
+    const out: Group[] = [];
+    for (const [key, arr] of byDay.entries()) {
+      // normierte Tages-Performance: Ø(score/target)
+      const ratios: number[] = [];
+      arr.forEach((f) => {
+        const s = avgScore(f);
+        if (!Number.isFinite(s as any)) return;
+        const t = targets[f.feedbacktyp] ?? targets.unknown;
+        ratios.push(Number(s) / t);
+      });
+      const normAvg = ratios.length ? ratios.reduce((a,b)=>a+b,0)/ratios.length : 0;
+      out.push({ key, items: arr, normAvg, pass: normAvg >= 1 });
+    }
+    // neueste zuerst
+    return out.sort((a,b)=> (a.key < b.key ? 1 : -1));
+  }, [items]);
+
+  // ----- Streaks (tageweise, basierend auf groups.pass) -----
+  const { currentStreak, bestStreak } = useMemo(() => {
+    const days = groups.map(g => g.pass);
+    let cur = 0, best = 0;
+    for (let i = 0; i < days.length; i++) {
+      if (days[i]) { cur++; best = Math.max(best, cur); }
+      else cur = 0;
+    }
+    return { currentStreak: cur, bestStreak: best };
+  }, [groups]);
+
+  // UI helper
   function barClass(pct: number) {
     if (pct >= 100) return 'bg-emerald-500';
     if (pct >= 95) return 'bg-green-500';
@@ -1221,26 +1259,22 @@ function FeedbackCard() {
     return 'bg-red-500';
   }
 
+  // Accordion-Open-State pro Tag
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  function toggleGroup(k: string) {
+    setOpenGroups(p => ({ ...p, [k]: !p[k] }));
+  }
+
   return (
     <section className={card}>
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-lg font-semibold">Kunden-Feedback</h2>
         <div className="flex items-center gap-2">
-          <input
-            type="date"
-            value={from}
-            onChange={(e) => setFrom(e.target.value)}
-            className="px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-white/10 text-sm"
-            aria-label="Von"
-          />
+          <input type="date" value={from} onChange={(e)=>setFrom(e.target.value)}
+                 className="px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-white/10 text-sm" />
           <span className="text-gray-400">–</span>
-          <input
-            type="date"
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
-            className="px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-white/10 text-sm"
-            aria-label="Bis"
-          />
+          <input type="date" value={to} onChange={(e)=>setTo(e.target.value)}
+                 className="px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-white/10 text-sm" />
         </div>
       </div>
 
@@ -1248,114 +1282,156 @@ function FeedbackCard() {
 
       {!loading && (
         <>
-          {/* Gesamtübersicht */}
+          {/* Gesamtübersicht + Streaks */}
           <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-3 bg-gray-50 dark:bg-gray-800/40 mb-3">
-            <div className="flex items-end gap-3">
-              <div>
-                <div className="text-xs text-gray-500">Ø-Bewertung (gesamt)</div>
-                <div className={`text-2xl font-semibold ${noteColor(overall.avg)}`}>
-                  {overall.avg ? overall.avg.toFixed(2) : '–'}
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-end gap-3">
+                <div>
+                  <div className="text-xs text-gray-500">Ø-Bewertung (gefiltert)</div>
+                  <div className={`text-2xl font-semibold ${noteColor(overall.avg)}`}>
+                    {overall.avg ? overall.avg.toFixed(2) : '–'}
+                  </div>
+                </div>
+                <div className="text-sm text-gray-600 dark:text-gray-300">
+                  {overall.count} Feedbacks{(from || to) ? ' (gefiltert)' : ''}
                 </div>
               </div>
-              <div className="text-sm text-gray-600 dark:text-gray-300">
-                {overall.count} Feedbacks{(from || to) ? ' (gefiltert)' : ''}
+              <div className="flex items-center gap-2">
+                <span className="text-xs rounded-full px-2 py-1 bg-emerald-600/10 text-emerald-700 dark:text-emerald-300">
+                  🔥 Streak: <b>{currentStreak}</b> Tage
+                </span>
+                <span className="text-xs rounded-full px-2 py-1 bg-blue-600/10 text-blue-700 dark:text-blue-300">
+                  🏅 Bestwert: <b>{bestStreak}</b>
+                </span>
               </div>
             </div>
           </div>
 
           {/* KPI-Tiles pro Typ */}
           <div className="grid gap-3 sm:grid-cols-2">
-            {Array.from(byType.entries())
-              .sort((a, b) => (a[0] > b[0] ? 1 : -1))
-              .map(([type, v]) => {
-                const label = typeLabel[type] ?? type;
-                const target = targets[type] ?? 4.5;
-                const pct = Math.max(0, Math.min(100, (v.avg / target) * 100));
-                const lvl = levelFor(v.avg, target);
-                return (
-                  <div key={type} className="rounded-xl border border-gray-200 dark:border-gray-800 p-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="font-medium">{label}</div>
-                      <span
-                        className={`text-[11px] px-2 py-0.5 rounded-full ${lvl.class}`}
-                        title={`Level: ${lvl.name}`}
-                      >
-                        {lvl.icon} {lvl.name}
-                      </span>
-                    </div>
-                    <div className="mt-1 flex items-baseline gap-2">
-                      <span className={`text-xl font-semibold ${noteColor(v.avg)}`}>
-                        {v.avg.toFixed(2)}
-                      </span>
-                      <span className="text-xs text-gray-500">Ziel ≥ {target.toFixed(2)}</span>
-                      <span className="ml-auto text-xs text-gray-500">{v.count}x</span>
-                    </div>
-                    <div className="mt-2 h-2 w-full rounded-full bg-gray-200 dark:bg-gray-800 overflow-hidden">
-                      <div className={`h-full ${barClass(pct)}`} style={{ width: `${pct}%` }} />
-                    </div>
+            {Array.from(byType.entries()).sort((a,b)=>a[0].localeCompare(b[0])).map(([type, v]) => {
+              const label = typeLabel[type] ?? type;
+              const target = targets[type] ?? targets.unknown;
+              const pct = Math.max(0, Math.min(100, (v.avg / target) * 100));
+              const lvl = levelFor(v.avg, target);
+              return (
+                <div key={type} className="rounded-xl border border-gray-200 dark:border-gray-800 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="font-medium">{label}</div>
+                    <span className={`text-[11px] px-2 py-0.5 rounded-full ${lvl.class}`} title={`Level: ${lvl.name}`}>
+                      {lvl.icon} {lvl.name}
+                    </span>
                   </div>
-                );
-              })}
-            {byType.size === 0 && (
-              <div className="text-sm text-gray-500">Keine Daten für den Zeitraum.</div>
-            )}
+                  <div className="mt-1 flex items-baseline gap-2">
+                    <span className={`text-xl font-semibold ${noteColor(v.avg)}`}>{v.avg.toFixed(2)}</span>
+                    <span className="text-xs text-gray-500">Ziel ≥ {target.toFixed(2)}</span>
+                    <span className="ml-auto text-xs text-gray-500">{v.count}x</span>
+                  </div>
+                  <div className="mt-2 h-2 w-full rounded-full bg-gray-200 dark:bg-gray-800 overflow-hidden">
+                    <div className={`h-full ${barClass(pct)}`} style={{ width: `${pct}%` }} />
+                  </div>
+                </div>
+              );
+            })}
+            {byType.size === 0 && <div className="text-sm text-gray-500">Keine Daten für den Zeitraum.</div>}
           </div>
 
-          {/* Liste */}
+          {/* Gruppierte Liste (Accordion nach Tag) */}
           <div className="mt-4">
             <div className="text-sm font-medium mb-2">Einzel-Feedbacks</div>
-            {(!items || items.length === 0) ? (
+            {groups.length === 0 ? (
               <div className="text-sm text-gray-500">Keine Einträge.</div>
             ) : (
-              <ul className="divide-y divide-gray-200 dark:divide-gray-800">
-                {items!.map((f) => {
-                  const avg = avgScore(f);
-                  const dateStr = f.ts
-                    ? new Date(f.ts).toLocaleString('de-DE', {
-                        dateStyle: 'short',
-                        timeStyle: 'short',
-                      })
-                    : '—';
-                  const lbl = typeLabel[f.feedbacktyp] ?? f.feedbacktyp ?? '—';
-                  const gekl = (f.geklaert ?? '').toLowerCase();
-                  const geklChip =
-                    gekl === 'ja'
-                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200'
-                      : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300';
-                  const rekla = (f.rekla ?? '').toLowerCase() === 'ja';
-
+              <ul className="space-y-2">
+                {groups.map(g => {
+                  const d = new Date(g.key + 'T00:00:00Z');
+                  const head = d.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', year: '2-digit' });
+                  const pct = Math.max(0, Math.min(100, g.normAvg * 100));
+                  const open = !!openGroups[g.key];
                   return (
-                    <li key={String(f.id)} className="py-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium">{lbl}</span>
-                            {rekla && (
-                              <span className="text-[11px] px-1.5 py-0.5 rounded-full border border-amber-300 text-amber-700 dark:border-amber-900 dark:text-amber-300">
-                                Rekla
-                              </span>
-                            )}
-                            <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${geklChip}`}>
-                              {gekl === 'ja' ? 'geklärt' : 'offen'}
-                            </span>
-                          </div>
-                          <div className="text-xs text-gray-500">
-                            {dateStr}
-                            {f.template_name ? ` · ${f.template_name}` : ''}
-                          </div>
-                          {f.kommentar && (
-                            <p className="mt-1 text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
-                              {f.kommentar}
-                            </p>
-                          )}
+                    <li key={g.key} className="rounded-xl border border-gray-200 dark:border-gray-800">
+                      <button
+                        onClick={()=>toggleGroup(g.key)}
+                        className="w-full flex items-center justify-between px-3 py-2"
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="font-medium">{head}</span>
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${g.pass ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200' : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'}`}>
+                            {g.pass ? 'Ziel erreicht' : 'unter Ziel'}
+                          </span>
                         </div>
-                        <div className="shrink-0 text-right">
-                          <div className={`text-lg font-semibold ${noteColor(avg)}`}>
-                            {Number.isFinite(avg as any) ? (avg as number).toFixed(2) : '–'}
+                        <div className="flex items-center gap-3">
+                          <div className="w-28 h-1.5 bg-gray-200 dark:bg-gray-800 rounded-full overflow-hidden">
+                            <div className="h-full bg-blue-500" style={{ width: `${pct}%` }} />
                           </div>
-                          <div className="text-xs text-gray-500">Score</div>
+                          <span className="text-xs text-gray-500">{g.items.length}x</span>
+                          <span className="text-gray-400">{open ? '▾' : '▸'}</span>
                         </div>
-                      </div>
+                      </button>
+
+                      {open && (
+                        <ul className="divide-y divide-gray-200 dark:divide-gray-800">
+                          {g.items.map((f) => {
+                            const avg = avgScore(f);
+                            const lbl = typeLabel[f.feedbacktyp] ?? f.feedbacktyp ?? '—';
+                            const ch = f.feedbacktyp; // Kanal roh
+                            const dt = f.ts ? new Date(f.ts).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '—';
+                            const [openComment, setOpenComment] = useState(false); // local hook per item not allowed here
+                            // kleine Inline-Komponente, damit pro Item eigener State möglich ist:
+                            const ItemRow = () => {
+                              const [openC, setOpenC] = useState(false);
+                              return (
+                                <div className="px-3 py-3 flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-medium">{lbl}</span>
+                                      <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300" title="Kanal">
+                                        {ch}
+                                      </span>
+                                      {(f.rekla ?? '').toLowerCase() === 'ja' && (
+                                        <span className="text-[11px] px-1.5 py-0.5 rounded-full border border-amber-300 text-amber-700 dark:border-amber-900 dark:text-amber-300">
+                                          Rekla
+                                        </span>
+                                      )}
+                                      <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${((f.geklaert ?? '').toLowerCase()==='ja') ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200' : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'}`}>
+                                        {((f.geklaert ?? '').toLowerCase()==='ja') ? 'geklärt' : 'offen'}
+                                      </span>
+                                    </div>
+                                    <div className="text-xs text-gray-500">
+                                      {dt}{f.template_name ? ` · ${f.template_name}` : ''}
+                                    </div>
+
+                                    {f.kommentar && (
+                                      <div className="mt-1">
+                                        {!openC ? (
+                                          <button
+                                            onClick={()=>setOpenC(true)}
+                                            className="text-xs underline text-blue-700 dark:text-blue-400"
+                                          >
+                                            Kommentar anzeigen
+                                          </button>
+                                        ) : (
+                                          <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap mt-1">
+                                            {f.kommentar}
+                                          </p>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  <div className="shrink-0 text-right">
+                                    <div className={`text-lg font-semibold ${noteColor(avg)}`}>
+                                      {Number.isFinite(avg as any) ? (avg as number).toFixed(2) : '–'}
+                                    </div>
+                                    <div className="text-xs text-gray-500">Score</div>
+                                  </div>
+                                </div>
+                              );
+                            };
+                            return <li key={String(f.id)}><ItemRow/></li>;
+                          })}
+                        </ul>
+                      )}
                     </li>
                   );
                 })}
