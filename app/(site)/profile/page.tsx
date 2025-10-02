@@ -1116,7 +1116,7 @@ function UnreadCard() {
 }
 
 /* ===========================
-   🆕 Kunden-Feedback – Vollbreite, Monats-/Tages-Accordion, Streaks
+   🆕 Kunden-Feedback – Vollbreite, Monats-/Tages-Accordion, Streaks, XP
 =========================== */
 function FeedbackSection() {
   const [from, setFrom] = useState<string>('');
@@ -1150,6 +1150,7 @@ function FeedbackSection() {
     if (typeof f.bewertung === 'number') return f.bewertung;
     return null;
   }
+
   const noteColor = (v: number | null | undefined) =>
     !Number.isFinite(v as any) ? 'text-gray-500'
     : (v as number) >= 4.75 ? 'text-emerald-600'
@@ -1157,20 +1158,16 @@ function FeedbackSection() {
     : (v as number) >= 4.0  ? 'text-amber-600'
     : 'text-red-600';
 
-
-// - GAME LEVELGRENZEN //
-
-
-
-function levelFor(avg: number, target: number) {
-  const d = avg - target;          // wie weit über Ziel?
-  if (d >= 0.35) return { name:'Diamant', class:'bg-cyan-300 text-cyan-900', icon:'💎' };
-  if (d >= 0.20) return { name:'Platin',  class:'bg-indigo-300 text-indigo-900', icon:'🏅' };
-  if (d >= 0.00) return { name:'Gold',    class:'bg-yellow-400 text-yellow-900', icon:'🏆' };
-  if (d >= -0.15) return { name:'Silber', class:'bg-gray-300 text-gray-900',     icon:'🥈' };
-  if (d >= -0.30) return { name:'Bronze', class:'bg-amber-300 text-amber-900',   icon:'🥉' };
-  return { name:'Starter', class:'bg-gray-200 text-gray-700', icon:'✨' };
-}
+  /* ---- Gamification: Level ---- */
+  function levelFor(avg: number, target: number) {
+    const d = avg - target;          // wie weit über Ziel?
+    if (d >= 0.35) return { name:'Diamant', class:'bg-cyan-300 text-cyan-900', icon:'💎' };
+    if (d >= 0.20) return { name:'Platin',  class:'bg-indigo-300 text-indigo-900', icon:'🏅' };
+    if (d >= 0.00) return { name:'Gold',    class:'bg-yellow-400 text-yellow-900', icon:'🏆' };
+    if (d >= -0.15) return { name:'Silber', class:'bg-gray-300 text-gray-900',     icon:'🥈' };
+    if (d >= -0.30) return { name:'Bronze', class:'bg-amber-300 text-amber-900',   icon:'🥉' };
+    return { name:'Starter', class:'bg-gray-200 text-gray-700', icon:'✨' };
+  }
   const barClass = (pct: number) =>
     pct >= 100 ? 'bg-emerald-500' : pct >= 95 ? 'bg-green-500' : pct >= 85 ? 'bg-amber-500' : 'bg-red-500';
 
@@ -1200,6 +1197,8 @@ function levelFor(avg: number, target: number) {
     overallCount: number;
     overallPass: boolean; // alle vorhandenen Typen >= Ziel
     days: DayGroup[];
+    badges: string[];     // 🆕
+    xp: number;           // 🆕 Monatspunkte
   };
 
   const months: MonthAgg[] = useMemo(() => {
@@ -1218,11 +1217,13 @@ function levelFor(avg: number, target: number) {
       // per type agg
       const byType = new Map<string, { count:number; sum:number; avg:number; pass:boolean }>();
       const vals:number[] = [];
+      let reklaVals:number[] = []; // für "Hero of Rekla"
       arr.forEach(f => {
         const t = f.feedbacktyp || 'unknown';
         const a = avgScore(f);
         if (!Number.isFinite(a as any)) return;
         vals.push(a as number);
+        if ((f.rekla ?? '').toLowerCase() === 'ja') reklaVals.push(a as number);
         const prev = byType.get(t) ?? { count:0, sum:0, avg:0, pass:false };
         prev.count++; prev.sum += a as number;
         byType.set(t, prev);
@@ -1262,6 +1263,16 @@ function levelFor(avg: number, target: number) {
       }
       days.sort((a,b)=> a.key < b.key ? 1 : -1);
 
+      // Badges
+      const badges:string[] = [];
+      if (overallAvg >= 4.9 && overallCount >= 5) badges.push('🌟 Perfekter Monat');
+      // Rekla-„Hero“
+      if (reklaVals.length >= 3) {
+        const avgRekla = reklaVals.reduce((s,n)=>s+n,0)/reklaVals.length;
+        const targetRekla = targets.service_mail_rekla ?? 4.0;
+        if (avgRekla >= targetRekla) badges.push('🛡️ Hero of Rekla');
+      }
+
       const [y,m] = monthKey.split('-');
       result.push({
         monthKey,
@@ -1272,37 +1283,78 @@ function levelFor(avg: number, target: number) {
         overallCount,
         overallPass,
         days,
+        badges,
+        xp: 0, // wird später berechnet
       });
     }
     // sort months newest first
     return result.sort((a,b)=> a.monthKey < b.monthKey ? 1 : -1);
   }, [items]);
 
-  /* ------- Streaks (Monate in Folge) ------- */
-  // Gesamt (alle Ziele pro Monat erfüllt)
-  const overallStreak = useMemo(()=>{
-    let cur=0, best=0;
-    for (const m of months) {
-      if (m.overallPass) { cur++; best=Math.max(best,cur); } else cur=0;
+  /* ------- XP & Combo (Monate chronologisch berechnen) ------- */
+  // Punkte pro Eintrag: max(0, round((score - target) * 20))
+  // Combo: +10% pro aufeinander folgendem Erfolgs-Monat, cap 50%
+  const withXp = useMemo(() => {
+    const clone = months.map(m => ({ ...m, xp: 0 }));
+    const chrono = [...clone].reverse(); // ältester → neuester
+    let combo = 0;
+    for (let i = 0; i < chrono.length; i++) {
+      const m = chrono[i];
+      combo = m.overallPass ? Math.min(combo + 1, 5) : 0; // 0..5
+      const multiplier = 1 + combo * 0.1;                 // 1.0 .. 1.5
+      // Monatspunkte
+      let monthXp = 0;
+      for (const f of m.items) {
+        const s = avgScore(f);
+        if (!Number.isFinite(s as any)) continue;
+        const t = targets[f.feedbacktyp] ?? targets.unknown;
+        const base = Math.max(0, Math.round((Number(s) - t) * 20));
+        monthXp += Math.round(base * multiplier);
+      }
+      m.xp = monthXp;
+      // Comeback-Badge (erfolgreich nach Misserfolg im Vormonat)
+      const prev = chrono[i-1];
+      if (m.overallPass && prev && !prev.overallPass) {
+        if (!m.badges.includes('🔁 Comeback')) m.badges.push('🔁 Comeback');
+      }
     }
-    return { current: cur, best };
+    return clone;
   }, [months]);
 
-  // pro Typ
+  // Saison-XP & simple Leveling (Zeitraum, nicht persistent)
+  const seasonXp = useMemo(() => withXp.reduce((s,m) => s + (m.xp||0), 0), [withXp]);
+  function levelFromXp(xp:number) {
+    // Level 1: 0..249, Level 2: 250..399, danach +100 pro Level
+    if (xp < 250) return { level: 1, cur: xp, next: 250 };
+    let lvl = 2, need = 250;
+    let rest = xp - 250;
+    let step = 100;
+    while (rest >= step) { rest -= step; lvl++; need += step; }
+    return { level: lvl, cur: rest, next: step };
+  }
+  const lvl = levelFromXp(seasonXp);
+
+  /* ------- Streaks (Monate in Folge) ------- */
+  const overallStreak = useMemo(()=>{
+    let cur=0, best=0;
+    for (const m of withXp) { if (m.overallPass) { cur++; best=Math.max(best,cur); } else cur=0; }
+    return { current: cur, best };
+  }, [withXp]);
+
   const perTypeStreaks = useMemo(()=>{
     const types = new Set<string>(['service_mail','service_mail_rekla','service_phone','sales_phone','sales_lead']);
     const res = new Map<string,{current:number;best:number}>();
     for (const t of types) {
       let cur=0, best=0;
-      for (const m of months) {
+      for (const m of withXp) {
         const v = m.byType.get(t);
-        const pass = v ? v.pass : false; // zählt nur, wenn Typ im Monat vorhanden war UND Ziel erreicht
+        const pass = v ? v.pass : false;
         if (pass) { cur++; best=Math.max(best,cur); } else cur=0;
       }
       res.set(t,{current:cur,best});
     }
     return res;
-  }, [months]);
+  }, [withXp]);
 
   // open states
   const [openMonths, setOpenMonths] = useState<Record<string, boolean>>({});
@@ -1327,18 +1379,30 @@ function levelFor(avg: number, target: number) {
 
       {!loading && (
         <>
-          {/* Übersicht + Streaks */}
+          {/* Übersicht + Streaks + Season-XP */}
           <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-3 bg-gray-50 dark:bg-gray-800/40 mb-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-end gap-3">
+              <div className="flex items-end gap-4">
                 <div>
                   <div className="text-xs text-gray-500">Monate im Zeitraum</div>
-                  <div className="text-xl font-semibold">{months.length}</div>
+                  <div className="text-xl font-semibold">{withXp.length}</div>
                 </div>
                 <div>
                   <div className="text-xs text-gray-500">Gesamt-Streak (alle Ziele)</div>
                   <div className="text-xl font-semibold">{overallStreak.current} <span className="text-sm text-gray-500">/ best {overallStreak.best}</span></div>
                 </div>
+              </div>
+
+              {/* Season XP */}
+              <div className="min-w-[260px]">
+                <div className="flex items-baseline justify-between">
+                  <div className="text-sm font-medium">Season-XP</div>
+                  <div className="text-xs text-gray-500">Level {lvl.level}</div>
+                </div>
+                <div className="mt-1 h-2 w-full rounded-full bg-gray-200 dark:bg-gray-800 overflow-hidden">
+                  <div className="h-full bg-blue-500" style={{ width: `${Math.min(100, (lvl.cur / (lvl.next||1))*100)}%` }} />
+                </div>
+                <div className="mt-1 text-xs text-gray-600 dark:text-gray-300">{lvl.cur} / {lvl.next} XP · gesamt {seasonXp}</div>
               </div>
 
               <div className="flex items-center gap-2 flex-wrap">
@@ -1352,11 +1416,11 @@ function levelFor(avg: number, target: number) {
           </div>
 
           {/* Monate */}
-          {months.length === 0 ? (
+          {withXp.length === 0 ? (
             <div className="text-sm text-gray-500">Keine Daten im Zeitraum.</div>
           ) : (
             <ul className="space-y-3">
-              {months.map((m)=> {
+              {withXp.map((m)=> {
                 const mOpen = !!openMonths[m.monthKey];
                 return (
                   <li key={m.monthKey} className="rounded-xl border border-gray-200 dark:border-gray-800">
@@ -1368,8 +1432,14 @@ function levelFor(avg: number, target: number) {
                           {m.overallPass ? 'alle Ziele erreicht' : 'unter Ziel'}
                         </span>
                         <span className="text-xs text-gray-500">{m.overallCount} Feedbacks</span>
+                        {m.badges.length > 0 && (
+                          <span className="text-xs text-amber-700 dark:text-amber-300">· {m.badges.join(' · ')}</span>
+                        )}
                       </div>
-                      <span className="text-gray-400">{mOpen ? '▾' : '▸'}</span>
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs text-gray-600 dark:text-gray-300">{m.xp} XP</span>
+                        <span className="text-gray-400">{mOpen ? '▾' : '▸'}</span>
+                      </div>
                     </button>
 
                     {/* Month body */}
@@ -1422,6 +1492,11 @@ function levelFor(avg: number, target: number) {
                                       </span>
                                     </div>
                                     <div className="flex items-center gap-3">
+                                      {openInternal > 0 && (
+                                        <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
+                                          {openInternal} intern
+                                        </span>
+                                      )}
                                       <div className="w-24 h-1.5 bg-gray-200 dark:bg-gray-800 rounded-full overflow-hidden">
                                         <div className="h-full bg-blue-500" style={{ width: `${pct}%` }} />
                                       </div>
@@ -1432,7 +1507,15 @@ function levelFor(avg: number, target: number) {
 
                                   {dOpen && (
                                     <ul className="divide-y divide-gray-200 dark:divide-gray-800">
-                                      {d.items.map((f)=> <FeedbackItemRow key={String(f.id)} f={f} avg={avgScore(f)} labelMap={typeLabel} noteColor={noteColor} />)}
+                                      {d.items.map((f)=> (
+                                        <FeedbackItemRow
+                                          key={String(f.id)}
+                                          f={f}
+                                          avg={avgScore(f)}
+                                          labelMap={typeLabel}
+                                          noteColor={noteColor}
+                                        />
+                                      ))}
                                     </ul>
                                   )}
                                 </li>
@@ -1453,7 +1536,9 @@ function levelFor(avg: number, target: number) {
   );
 }
 
-/* Einzelzeile mit lokalem Kommentar-Toggle */
+/* ===========================
+   Einzelzeile – Kommentar-Toggle, interne Notiz, „erledigt“ + Highlight
+=========================== */
 function FeedbackItemRow({
   f,
   avg,
@@ -1466,13 +1551,36 @@ function FeedbackItemRow({
   noteColor: (v:number|null|undefined)=>string;
 }) {
   const [openC, setOpenC] = useState(false);
+  const [internalChecked, setInternalChecked] = useState(!!f.internal_checked);
+
   const lbl = labelMap[f.feedbacktyp] ?? f.feedbacktyp ?? '—';
   const ch = f.feedbacktyp;
   const dt = f.ts ? new Date(f.ts).toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' }) : '—';
+
+  const hasInternal = !!(f.internal_note && f.internal_note.trim());
+  const highlight = hasInternal && !internalChecked
+    ? 'border-l-4 border-amber-400 pl-2 bg-amber-50 dark:bg-amber-900/10'
+    : '';
+
+  async function toggleInternalChecked() {
+    const next = !internalChecked;
+    setInternalChecked(next);
+    try {
+      await authedFetch(`/api/me/feedback/${f.id}/note-check`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ checked: next }),
+      });
+    } catch {
+      setInternalChecked(!next);
+      alert('Konnte internen Kommentar nicht aktualisieren.');
+    }
+  }
+
   return (
-    <li className="px-3 py-3 flex items-start justify-between gap-3">
+    <li className={`px-3 py-3 flex items-start justify-between gap-3 ${highlight}`}>
       <div className="min-w-0">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <span className="font-medium">{lbl}</span>
           <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300" title="Kanal">{ch}</span>
           {(f.rekla ?? '').toLowerCase()==='ja' && (
@@ -1483,11 +1591,19 @@ function FeedbackItemRow({
           <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${((f.geklaert ?? '').toLowerCase()==='ja') ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200' : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'}`}>
             {((f.geklaert ?? '').toLowerCase()==='ja') ? 'geklärt' : 'offen'}
           </span>
+          {hasInternal && (
+            <span className={`text-[11px] px-1.5 py-0.5 rounded-full
+              ${internalChecked ? 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300' : 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200'}`}>
+              intern
+            </span>
+          )}
         </div>
+
         <div className="text-xs text-gray-500">
           {dt}{f.template_name ? ` · ${f.template_name}` : ''}
         </div>
 
+        {/* Kundenkommentar: auf/zu */}
         {f.kommentar && (
           <div className="mt-1">
             {!openC ? (
@@ -1495,13 +1611,38 @@ function FeedbackItemRow({
                 Kommentar anzeigen
               </button>
             ) : (
-              <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap mt-1">
-                {f.kommentar}
-              </p>
+              <>
+                <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap mt-1">
+                  {f.kommentar}
+                </p>
+                <button onClick={()=>setOpenC(false)} className="mt-1 text-xs underline text-blue-700 dark:text-blue-400">
+                  Kommentar verbergen
+                </button>
+              </>
             )}
           </div>
         )}
+
+        {/* Interner Kommentar + Abhaken */}
+        {hasInternal && (
+          <div className="mt-2 rounded-lg border border-amber-200 dark:border-amber-900/50 bg-white/60 dark:bg-transparent p-2">
+            <div className="text-xs uppercase tracking-wide text-amber-700 dark:text-amber-300 mb-1">
+              Interner Kommentar
+            </div>
+            <p className="text-sm text-amber-900 dark:text-amber-200 whitespace-pre-wrap">{f.internal_note}</p>
+            <label className="mt-2 inline-flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={internalChecked}
+                onChange={toggleInternalChecked}
+                className="h-4 w-4 rounded border-gray-300 dark:border-gray-600"
+              />
+              {internalChecked ? 'als erledigt markiert' : 'als erledigt markieren'}
+            </label>
+          </div>
+        )}
       </div>
+
       <div className="shrink-0 text-right">
         <div className={`text-lg font-semibold ${noteColor(avg)}`}>
           {Number.isFinite(avg as any) ? (avg as number).toFixed(2) : '–'}
