@@ -1641,7 +1641,93 @@ function FeedbackSection() {
                                     </div>
                                   </button>
 
+{/* 🆕 Tages-Scores: alle Teilnoten + Ø */}
+<div className="mb-3 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900/40 overflow-x-auto">
+  {(() => {
+    // Spalten-Setup
+    const cols = [
+      { key: 'bewertung',               label: 'Bewertung' },
+      { key: 'beraterfreundlichkeit',   label: 'Beraterfreundlichkeit' },
+      { key: 'beraterqualifikation',    label: 'Beraterqualifikation' },
+      { key: 'angebotsattraktivitaet',  label: 'Beratungsangebotsattraktivität' },
+    ] as const;
+
+    const val = (f: any, k: string) =>
+      Number.isFinite(Number(f?.[k])) ? Number(f[k]) as number : null;
+
+    const avg = (arr: (number|null)[]) => {
+      const nums = arr.filter((x): x is number => Number.isFinite(x as number));
+      return nums.length ? (nums.reduce((s,n)=>s+n,0) / nums.length) : null;
+    };
+
+    const dayRows = d.items.map(f => {
+      const rowVals = cols.map(c => val(f, c.key));
+      const rowAvg  = (() => {
+        const parts = [
+          val(f,'beraterfreundlichkeit'),
+          val(f,'beraterqualifikation'),
+          val(f,'angebotsattraktivitaet'),
+        ].filter((n): n is number => Number.isFinite(n as number));
+        if (parts.length >= 2) return parts.reduce((s,n)=>s+n,0) / parts.length;
+        return val(f,'bewertung');
+      })();
+      return { f, rowVals, rowAvg };
+    });
+
+    const colAvgs = cols.map((c,i) => avg(dayRows.map(r => r.rowVals[i])));
+    const dayAvg  = avg(dayRows.map(r => r.rowAvg));
+
+    const fmt = (n: number|null) => Number.isFinite(n as number) ? (n as number).toFixed(2) : '–';
+    const timeOf = (iso?: string|null) =>
+      iso ? new Date(iso).toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' }) : '–';
+
+    return (
+      <table className="min-w-[640px] w-full text-sm">
+        <thead className="bg-gray-50 dark:bg-gray-800/60 text-gray-600 dark:text-gray-300">
+          <tr>
+            <th className="text-left px-3 py-2 font-medium">Zeit</th>
+            <th className="text-left px-3 py-2 font-medium">Kanal</th>
+            {cols.map(c => (
+              <th key={c.key} className="text-right px-3 py-2 font-medium">{c.label}</th>
+            ))}
+            <th className="text-right px-3 py-2 font-medium">Ø</th>
+          </tr>
+        </thead>
+        <tbody>
+          {dayRows.map(({ f, rowVals, rowAvg }) => (
+            <tr key={String(f.id)} className="border-t border-gray-100 dark:border-gray-800">
+              <td className="px-3 py-2">{timeOf(f.ts)}</td>
+              <td className="px-3 py-2">
+                <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+                  {f.feedbacktyp}
+                </span>
+              </td>
+              {rowVals.map((v, i) => (
+                <td key={i} className="px-3 py-2 text-right tabular-nums">{fmt(v)}</td>
+              ))}
+              <td className="px-3 py-2 text-right font-medium tabular-nums">{fmt(rowAvg)}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr className="border-t border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/30">
+            <td className="px-3 py-2 text-right" colSpan={2}><span className="text-xs text-gray-500">Tages-Ø</span></td>
+            {colAvgs.map((a, i) => (
+              <td key={i} className="px-3 py-2 text-right font-medium tabular-nums">{fmt(a)}</td>
+            ))}
+            <td className="px-3 py-2 text-right font-semibold tabular-nums">{fmt(dayAvg)}</td>
+          </tr>
+        </tfoot>
+      </table>
+    );
+  })()}
+</div>
+
+
+
                                   {dOpen && (
+
+
                                     <ul className="divide-y divide-gray-200 dark:divide-gray-800">
                                       {d.items.map((f)=> (
                                         <FeedbackItemRow
@@ -1762,24 +1848,35 @@ function FeedbackItemRow({
           </div>
         )}
 
-        {/* Interner Kommentar + Abhaken */}
-        {hasInternal && (
-          <div className="mt-2 rounded-lg border border-amber-200 dark:border-amber-900/50 bg-white/60 dark:bg-transparent p-2">
-            <div className="text-xs uppercase tracking-wide text-amber-700 dark:text-amber-300 mb-1">
-              Interner Kommentar
-            </div>
-            <p className="text-sm text-amber-900 dark:text-amber-200 whitespace-pre-wrap">{f.internal_note}</p>
-            <label className="mt-2 inline-flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={internalChecked}
-                onChange={toggleInternalChecked}
-                className="h-4 w-4 rounded border-gray-300 dark:border-gray-600"
-              />
-              {internalChecked ? 'als erledigt markiert' : 'als erledigt markieren'}
-            </label>
-          </div>
-        )}
+{/* Interner Kommentar + Abhaken */}
+{hasInternal && (
+  <div className="mt-2 rounded-lg border border-amber-200 dark:border-amber-900/50 bg-white/60 dark:bg-transparent p-3">
+    <div className="text-xs uppercase tracking-wide text-amber-700 dark:text-amber-300 mb-1">
+      Interner Kommentar
+    </div>
+
+    <p className="text-sm text-amber-900 dark:text-amber-200 whitespace-pre-wrap">{f.internal_note}</p>
+
+    {/* 🆕 schöner Toggle */}
+    <div className="mt-3">
+      <button
+        type="button"
+        onClick={toggleInternalChecked}
+        aria-pressed={internalChecked}
+        className={[
+          "inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors",
+          internalChecked
+            ? "bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700"
+            : "bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-200 dark:border-amber-900"
+        ].join(' ')}
+        title={internalChecked ? "als erledigt markiert" : "als erledigt markieren"}
+      >
+        <span className="text-base leading-none">{internalChecked ? '✓' : '◻︎'}</span>
+        {internalChecked ? "Erledigt" : "Als erledigt markieren"}
+      </button>
+    </div>
+  </div>
+)}
       </div>
 
       <div className="shrink-0 text-right">
