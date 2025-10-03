@@ -1228,18 +1228,22 @@ function FeedbackSection() {
 
   /* ------- Monats-Aggregation ------- */
   type DayGroup = { key: string; items: FeedbackItem[]; normAvg: number; pass: boolean };
-  type MonthAgg = {
-    monthKey: string; // YYYY-MM
-    label: string;    // z.B. "03/2025"
-    items: FeedbackItem[];
-    byType: Map<string, { count:number; sum:number; avg:number; pass:boolean }>;
-    overallAvg: number;
-    overallCount: number;
-    overallPass: boolean; // alle vorhandenen Typen >= Ziel
-    days: DayGroup[];
-    badges: string[];     // 🆕
-    xp: number;           // 🆕 Monatspunkte
-  };
+ type MonthAgg = {
+  monthKey: string; // YYYY-MM
+  label: string;    // z.B. "03/2025"
+  items: FeedbackItem[];
+  byType: Map<string, { count:number; sum:number; avg:number; pass:boolean }>;
+  overallAvg: number;
+  overallCount: number;
+  overallPass: boolean;
+  days: DayGroup[];
+  badges: string[];
+  xp: number;
+
+  // 🆕 Interne-Notizen-Infos pro Monat
+  openInternal: number;
+  internalPreview: { id: string|number; date: string; label: string; excerpt: string }[];
+};
 
   const months: MonthAgg[] = useMemo(() => {
   // partition by YYYY-MM (Berlin)
@@ -1316,8 +1320,24 @@ function FeedbackSection() {
       if (avgRekla >= targetRekla) badges.push('🛡️ Hero of Rekla');
     }
 
+// 🆕 Offene interne Notizen im Monat & kleine Vorschau
+    const openInternalItems = arr.filter(x =>
+      (x.internal_note?.trim() ?? '').length > 0 && !isTrueish(x.internal_checked)
+    );
+
+    const openInternal = openInternalItems.length;
+    const internalPreview = openInternalItems.slice(0, 3).map(i => {
+      const d = i.ts ? new Date(i.ts) : null;
+      const date = d ? ymdBerlin(d) : '';
+      const label =
+        i.template_name ??
+        (typeLabel[i.feedbacktyp] ?? i.feedbacktyp ?? '—');
+      const excerpt = (i.internal_note ?? '').trim().slice(0, 90);
+      return { id: i.id, date, label, excerpt };
+    });
+
     const [y,m] = monthKey.split('-');
-    base.push({
+ base.push({
       monthKey,
       label: `${m}/${y}`,
       items: arr,
@@ -1328,6 +1348,10 @@ function FeedbackSection() {
       days,
       badges,
       xp: 0,
+
+      // 🆕
+      openInternal,
+      internalPreview,
     });
   }
 
@@ -1344,7 +1368,7 @@ function FeedbackSection() {
     cur = incMonthKey(cur);
     if (!have.has(cur)) {
       const [y,m] = cur.split('-');
-      filled.push({
+     filled.push({
         monthKey: cur,
         label: `${m}/${y}`,
         items: [],
@@ -1355,6 +1379,9 @@ function FeedbackSection() {
         days: [],
         badges: [],
         xp: 0,
+        // 🆕
+        openInternal: 0,
+        internalPreview: [],
       });
     }
   }
@@ -1454,16 +1481,26 @@ function FeedbackSection() {
           {/* Übersicht + Streaks + Season-XP */}
           <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-3 bg-gray-50 dark:bg-gray-800/40 mb-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-end gap-4">
-                <div>
-                  <div className="text-xs text-gray-500">Monate im Zeitraum</div>
-                  <div className="text-xl font-semibold">{withXp.length}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-gray-500">Gesamt-Streak (alle Ziele)</div>
-                  <div className="text-xl font-semibold">{overallStreak.current} <span className="text-sm text-gray-500">/ best {overallStreak.best}</span></div>
-                </div>
-              </div>
+          <div className="flex items-end gap-4">
+  <div>
+    <div className="text-xs text-gray-500">Monate im Zeitraum</div>
+    <div className="text-xl font-semibold">{withXp.length}</div>
+  </div>
+  <div>
+    <div className="text-xs text-gray-500">Gesamt-Streak (alle Ziele)</div>
+    <div className="text-xl font-semibold">
+      {overallStreak.current} <span className="text-sm text-gray-500">/ best {overallStreak.best}</span>
+    </div>
+  </div>
+  {/* 🆕 Offene interne Notizen im Zeitraum */}
+  <div>
+    <div className="text-xs text-gray-500">Offene interne Notizen</div>
+    <div className="text-xl font-semibold text-amber-600">
+      {withXp.reduce((s,m)=> s + (m.openInternal||0), 0)}
+    </div>
+  </div>
+</div>
+
 
               {/* Season XP */}
               <div className="min-w-[260px]">
@@ -1504,19 +1541,44 @@ function FeedbackSection() {
                           {m.overallPass ? 'alle Ziele erreicht' : 'unter Ziel'}
                         </span>
                         <span className="text-xs text-gray-500">{m.overallCount} Feedbacks</span>
-                        {m.badges.length > 0 && (
-                          <span className="text-xs text-amber-700 dark:text-amber-300">· {m.badges.join(' · ')}</span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="text-xs text-gray-600 dark:text-gray-300">{m.xp} XP</span>
-                        <span className="text-gray-400">{mOpen ? '▾' : '▸'}</span>
-                      </div>
+  {/* 🆕 Badge für offene interne Notizen */}
+  {m.openInternal > 0 && (
+    <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
+      {m.openInternal} intern
+    </span>
+  )}
+
+  {m.badges.length > 0 && (
+    <span className="text-xs text-amber-700 dark:text-amber-300">· {m.badges.join(' · ')}</span>
+  )}
+</div>
+
                     </button>
 
                     {/* Month body */}
                     {mOpen && (
                       <div className="px-3 pb-3">
+{/* 🆕 Interne Notizen Preview */}
+{m.openInternal > 0 && (
+  <div className="mb-3 rounded-xl border border-amber-200 dark:border-amber-900/50 bg-amber-50/60 dark:bg-amber-900/10 p-3">
+    <div className="text-xs uppercase tracking-wide text-amber-700 dark:text-amber-300 mb-1">
+      Offene interne Notizen ({m.openInternal})
+    </div>
+    <ul className="space-y-1">
+      {m.internalPreview.map(p => (
+        <li key={String(p.id)} className="text-sm text-amber-900 dark:text-amber-200">
+          <span className="font-medium">{p.date}</span>
+          <span className="text-amber-700/70 dark:text-amber-300/70"> · {p.label} · </span>
+          <span className="opacity-90">{p.excerpt}{p.excerpt.length >= 90 ? '…' : ''}</span>
+        </li>
+      ))}
+    </ul>
+    <div className="mt-1 text-[11px] text-amber-700/80 dark:text-amber-300/80">
+      Details bei den jeweiligen Tagen.
+    </div>
+  </div>
+)}
+
                         {/* KPI per type for this month */}
                         <div className="grid gap-3 sm:grid-cols-2">
                           {Array.from(m.byType.entries()).sort((a,b)=>a[0].localeCompare(b[0])).map(([type, v])=>{
