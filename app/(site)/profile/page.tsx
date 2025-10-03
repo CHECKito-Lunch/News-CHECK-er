@@ -1131,16 +1131,6 @@ function isTrueish(v: unknown) {
   return s === 'ja' || s === 'true' || s === '1' || s === 'y' || s === 'yes';
 }
 
-// 0 = "kein Wert"
-const numOrNull = (x: unknown): number | null => {
-  const n = Number(x);
-  return Number.isFinite(n) && n > 0 ? n : null;
-};
-const avgOf = (arr: Array<number | null | undefined>) => {
-  const vals = arr.map(numOrNull).filter((n): n is number => n != null);
-  return vals.length ? vals.reduce((s, n) => s + n, 0) / vals.length : null;
-};
-
 // "Zoned" Date -> YYYY-MM (Berlin)
 function ymKeyBerlin(d: Date) {
   const z = new Date(d.toLocaleString('en-US', { timeZone: FE_TZ }));
@@ -1188,27 +1178,27 @@ function FeedbackSection() {
     sales_lead: 'Sales Lead',
   };
 
-  // Ø-Regel: wenn ≥2 Teilnoten (ohne 0/n.v.) vorhanden -> Mittel dieser Teilnoten, sonst Bewertung (wenn >0)
   function avgScore(f: FeedbackItem) {
     const parts = [
-      numOrNull(f.beraterfreundlichkeit),
-      numOrNull(f.beraterqualifikation),
-      numOrNull(f.angebotsattraktivitaet),
-    ].filter((n): n is number => n != null);
+      f.beraterfreundlichkeit,
+      f.beraterqualifikation,
+      f.angebotsattraktivitaet,
+    ].filter((n): n is number => Number.isFinite(n as number) && (n as number) >= 1);
     if (parts.length >= 2) return parts.reduce((s, n) => s + n, 0) / parts.length;
-    return numOrNull(f.bewertung);
+    if (typeof f.bewertung === 'number' && f.bewertung >= 1) return f.bewertung;
+    return null;
   }
 
   const noteColor = (v: number | null | undefined) =>
     !Number.isFinite(v as any) ? 'text-gray-500'
       : (v as number) >= 4.75 ? 'text-emerald-600'
-      : (v as number) >= 4.5  ? 'text-green-600'
-      : (v as number) >= 4.0  ? 'text-amber-600'
+      : (v as number) >= 4.5 ? 'text-green-600'
+      : (v as number) >= 4.0 ? 'text-amber-600'
       : 'text-red-600';
 
   /* ---- Gamification: Level ---- */
   function levelFor(avg: number, target: number) {
-    const d = avg - target;
+    const d = avg - target;          // wie weit über Ziel?
     if (d >= 0.35) return { name:'Diamant', class:'bg-cyan-300 text-cyan-900', icon:'💎' };
     if (d >= 0.20) return { name:'Platin',  class:'bg-indigo-300 text-indigo-900', icon:'🏅' };
     if (d >= 0.00) return { name:'Gold',    class:'bg-yellow-400 text-yellow-900', icon:'🏆' };
@@ -1332,6 +1322,7 @@ function FeedbackSection() {
       const openInternalItems = arr.filter(x =>
         (x.internal_note?.trim() ?? '').length > 0 && !isTrueish(x.internal_checked)
       );
+
       const openInternal = openInternalItems.length;
       const internalPreview = openInternalItems.slice(0, 3).map(i => {
         const d = i.ts ? new Date(i.ts) : null;
@@ -1355,6 +1346,8 @@ function FeedbackSection() {
         days,
         badges,
         xp: 0,
+
+        // 🆕
         openInternal,
         internalPreview,
       });
@@ -1384,6 +1377,7 @@ function FeedbackSection() {
           days: [],
           badges: [],
           xp: 0,
+          // 🆕
           openInternal: 0,
           internalPreview: [],
         });
@@ -1452,8 +1446,7 @@ function FeedbackSection() {
       for (const m of withXp) {
         const v = m.byType.get(t);
         const pass = v ? v.pass : false;
-        if (pass) { cur++; best=Math.max(best,cur); } else cur=0;
-      }
+        if (pass) { cur++; best=Math.max(best,cur); } else cur=0; }
       res.set(t,{current:cur,best});
     }
     return res;
@@ -1488,7 +1481,7 @@ function FeedbackSection() {
               <div className="flex items-end gap-4">
                 <div>
                   <div className="text-xs text-gray-500">Monate im Zeitraum</div>
-                  <div className="text-xl font-semibold">{withXp.length}</div>
+                  <div className="text-xl font-semibold">{(withXp ?? []).length}</div>
                 </div>
                 <div>
                   <div className="text-xs text-gray-500">Gesamt-Streak (alle Ziele)</div>
@@ -1500,7 +1493,7 @@ function FeedbackSection() {
                 <div>
                   <div className="text-xs text-gray-500">Offene interne Notizen</div>
                   <div className="text-xl font-semibold text-amber-600">
-                    {withXp.reduce((s,m)=> s + (m.openInternal||0), 0)}
+                    {(withXp ?? []).reduce((s,m)=> s + (m.openInternal||0), 0)}
                   </div>
                 </div>
               </div>
@@ -1528,11 +1521,11 @@ function FeedbackSection() {
           </div>
 
           {/* Monate */}
-          {withXp.length === 0 ? (
+          {(withXp ?? []).length === 0 ? (
             <div className="text-sm text-gray-500">Keine Daten im Zeitraum.</div>
           ) : (
             <ul className="space-y-3">
-              {withXp.map((m)=> {
+              {(withXp ?? []).map((m)=> {
                 const mOpen = !!openMonths[m.monthKey];
                 return (
                   <li key={m.monthKey} className="rounded-xl border border-gray-200 dark:border-gray-800">
@@ -1562,27 +1555,24 @@ function FeedbackSection() {
                         {/* 🆕 Interne Notizen Preview */}
                         {m.openInternal > 0 && (
                           <div className="mb-3 rounded-xl border border-amber-200 dark:border-amber-900/50 bg-amber-50/60 dark:bg-amber-900/10 p-3">
-                            <div className="text-xs uppercase tracking-wide text-amber-700 dark:text-amber-300 mb-1">
+                            <div className="text-xs uppercase tracking-wide text-amber-700 dark:text-amber-300 mb-1 text-center">
                               Offene interne Notizen ({m.openInternal})
                             </div>
                             <ul className="space-y-1">
-                              {m.internalPreview.map(p => (
-                                <li key={String(p.id)} className="text-sm text-amber-900 dark:text-amber-200">
+                              {(m.internalPreview ?? []).map(p => (
+                                <li key={String(p.id)} className="text-sm text-amber-900 dark:text-amber-200 text-center">
                                   <span className="font-medium">{p.date}</span>
                                   <span className="text-amber-700/70 dark:text-amber-300/70"> · {p.label} · </span>
                                   <span className="opacity-90">{p.excerpt}{p.excerpt.length >= 90 ? '…' : ''}</span>
                                 </li>
                               ))}
                             </ul>
-                            <div className="mt-1 text-[11px] text-amber-700/80 dark:text-amber-300/80">
-                              Details bei den jeweiligen Tagen.
-                            </div>
                           </div>
                         )}
 
                         {/* KPI per type for this month */}
                         <div className="grid gap-3 sm:grid-cols-2">
-                          {Array.from(m.byType.entries()).sort((a,b)=>a[0].localeCompare(b[0])).map(([type, v])=>{
+                          {Array.from(m.byType?.entries?.() ?? []).sort((a,b)=>a[0].localeCompare(b[0])).map(([type, v])=>{
                             const label = typeLabel[type] ?? type;
                             const target = targets[type] ?? targets.unknown;
                             const pct = Math.max(0, Math.min(100, (v.avg/target)*100));
@@ -1604,18 +1594,18 @@ function FeedbackSection() {
                               </div>
                             );
                           })}
-                          {m.byType.size === 0 && <div className="text-sm text-gray-500">Keine Bewertungen in diesem Monat.</div>}
+                          {(!m.byType || m.byType.size === 0) && <div className="text-sm text-gray-500">Keine Bewertungen in diesem Monat.</div>}
                         </div>
 
-                        {/* Days accordion */}
+                        {/* Days accordion (standard: zugeklappt) */}
                         <div className="mt-4">
                           <div className="text-sm font-medium mb-1">Tage</div>
                           <ul className="space-y-2">
-                            {m.days.map(d=>{
+                            {(m.days ?? []).map(d=>{
                               const dKey = `${m.monthKey}:${d.key}`;
                               const dOpen = !!openDays[dKey];
                               const pct = Math.max(0, Math.min(100, d.normAvg*100));
-                              const openInternal = d.items.filter(x =>
+                              const openInternal = (d.items ?? []).filter(x =>
                                 (x.internal_note?.trim() ?? '').length > 0 && !isTrueish(x.internal_checked)
                               ).length;
                               const head = new Date(d.key+'T00:00:00Z').toLocaleDateString('de-DE', { weekday:'short', day:'2-digit', month:'2-digit' });
@@ -1637,24 +1627,24 @@ function FeedbackSection() {
                                       <div className="w-24 h-1.5 bg-gray-200 dark:bg-gray-800 rounded-full overflow-hidden">
                                         <div className="h-full bg-blue-500" style={{ width: `${pct}%` }} />
                                       </div>
-                                      <span className="text-xs text-gray-500">{d.items.length}x</span>
+                                      <span className="text-xs text-gray-500">{(d.items ?? []).length}x</span>
                                       <span className="text-gray-400">{dOpen ? '▾' : '▸'}</span>
                                     </div>
                                   </button>
 
-                                  {/* 🆕 Tages-Scores-Tabelle ohne "Zeit" */}
+                                  {/* 🆕 Tages-Scores: alle Teilnoten + Ø (Zeitspalte entfernt) */}
                                   {dOpen && (
                                     <div className="px-3 pb-3">
-                                      <DayScoresTable items={d.items} />
+                                      <DayScoresTable items={d.items ?? []} />
                                     </div>
                                   )}
 
-                                  {/* Detailkarten pro Eintrag */}
+                                  {/* Detailkarten – inkl. internem Kommentar */}
                                   {dOpen && (
                                     <ul className="divide-y divide-gray-200 dark:divide-gray-800">
-                                      {d.items.map((f)=> (
+                                      {(d.items ?? []).map((f)=> (
                                         <FeedbackItemRow
-                                          key={String(f.id)}
+                                          key={String(f.id ?? Math.random())}
                                           f={f}
                                           avg={avgScore(f)}
                                           labelMap={typeLabel}
@@ -1681,85 +1671,90 @@ function FeedbackSection() {
   );
 }
 
-/* ====== Tages-Scores-Tabelle (ohne Zeit-Spalte) ====== */
-function ScoreCell({ v }: { v: number | null }) {
-  if (v == null) {
-    return (
-      <span className="text-gray-400 line-through" title="nicht vorhanden">
-        n. v.
-      </span>
-    );
-  }
-  return <span className="tabular-nums">{v.toFixed(2)}</span>;
-}
+/* ===========================
+   Tages-Tabelle (Kanal + Einzelwerte + Ø) – Nullwerte visuell gestrichen, Ø ignoriert 0
+=========================== */
+function DayScoresTable({ items }: { items: FeedbackItem[] | undefined | null }) {
+  const safe = Array.isArray(items) ? items : [];
 
-function DayScoresTable({ items }: { items: FeedbackItem[] }) {
-  const rows = items.map((f) => ({
-    ch: f.feedbacktyp,
-    label: f.template_name || f.feedbacktyp,
-    hasInternal: (f.internal_note?.trim() ?? '').length > 0,
-    bew: numOrNull(f.bewertung),
-    bf: numOrNull(f.beraterfreundlichkeit),
-    bq: numOrNull(f.beraterqualifikation),
-    ba: numOrNull(f.angebotsattraktivitaet),
-    avg: avgScore(f),
-    raw: f,
-  }));
+  // Spalten ausser Zeit
+  const cols = [
+    { key: 'bewertung',               label: 'Bewertung' },
+    { key: 'beraterfreundlichkeit',   label: 'Beraterfreundlichkeit' },
+    { key: 'beraterqualifikation',    label: 'Beraterqualifikation' },
+    { key: 'angebotsattraktivitaet',  label: 'Beratungsangebotsattraktivität' },
+  ] as const;
 
-  const colAvg = {
-    bew: avgOf(rows.map(r => r.bew)),
-    bf:  avgOf(rows.map(r => r.bf)),
-    bq:  avgOf(rows.map(r => r.bq)),
-    ba:  avgOf(rows.map(r => r.ba)),
-    avg: avgOf(rows.map(r => r.avg)),
+  const numOrNull = (v:any) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 1 ? n : null; // 0 -> n.v.
   };
 
+  const avgOf = (arr:(number|null)[]) => {
+    const nums = arr.filter((x): x is number => Number.isFinite(x as number));
+    return nums.length ? (nums.reduce((s,n)=>s+n,0)/nums.length) : null;
+  };
+
+  const rowData = safe.map((f) => {
+    const v = (k: (typeof cols)[number]['key']) => numOrNull((f as any)[k]);
+    const rowVals = cols.map(c => v(c.key));
+    // Ø Regel: wenn >=2 Teilnoten vorhanden -> deren Ø, sonst Bewertung (>=1) sonst null
+    const parts = [v('beraterfreundlichkeit'), v('beraterqualifikation'), v('angebotsattraktivitaet')]
+      .filter((x): x is number => Number.isFinite(x as number));
+    const rowAvg = parts.length >= 2 ? (parts.reduce((s,n)=>s+n,0)/parts.length) : v('bewertung');
+    return { f, rowVals, rowAvg };
+  });
+
+  const colAvgs = cols.map((c, i) => avgOf(rowData.map(r => r.rowVals[i])));
+  const dayAvg  = avgOf(rowData.map(r => r.rowAvg));
+
+  const fmt = (n: number|null) => Number.isFinite(n as number) ? (n as number).toFixed(2) : '–';
+
   return (
-    <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800">
-      <table className="w-full text-sm">
-        <thead className="bg-gray-50 dark:bg-gray-800/40 text-gray-700 dark:text-gray-200">
-          <tr className="text-left">
-            <th className="px-3 py-2 w-[280px]">Kanal</th>
-            <th className="px-3 py-2 text-right">Bewertung</th>
-            <th className="px-3 py-2 text-right">Beraterfreundlichkeit</th>
-            <th className="px-3 py-2 text-right">Beraterqualifikation</th>
-            <th className="px-3 py-2 text-right">Beratungsangebotsattraktivität</th>
-            <th className="px-3 py-2 text-right">Ø</th>
+    <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900/40 overflow-x-auto">
+      <table className="min-w-[640px] w-full text-sm">
+        <thead className="bg-gray-50 dark:bg-gray-800/60 text-gray-600 dark:text-gray-300">
+          <tr>
+            <th className="text-left px-3 py-2 font-medium">Kanal</th>
+            {cols.map(c => (
+              <th key={c.key} className="text-right px-3 py-2 font-medium">{c.label}</th>
+            ))}
+            <th className="text-right px-3 py-2 font-medium">Ø</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
-          {rows.map((r) => (
-            <tr key={String(r.raw.id)} className="align-middle">
+        <tbody>
+          {rowData.map(({ f, rowVals, rowAvg }) => (
+            <tr key={String(f.id)} className="border-t border-gray-100 dark:border-gray-800">
               <td className="px-3 py-2">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-medium">{r.label}</span>
-                  <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300">{r.ch}</span>
-                  {isTrueish(r.raw.geklaert) ? (
-                    <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200">geklärt</span>
-                  ) : (
-                    <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300">offen</span>
-                  )}
-                  {r.hasInternal && (
-                    <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">intern</span>
-                  )}
-                </div>
+                <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+                  {f.feedbacktyp}
+                </span>
+                {(f.internal_note?.trim()?.length ?? 0) > 0 && (
+                  <span className="ml-2 text-[11px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
+                    intern
+                  </span>
+                )}
               </td>
-              <td className="px-3 py-2 text-right"><ScoreCell v={r.bew} /></td>
-              <td className="px-3 py-2 text-right"><ScoreCell v={r.bf} /></td>
-              <td className="px-3 py-2 text-right"><ScoreCell v={r.bq} /></td>
-              <td className="px-3 py-2 text-right"><ScoreCell v={r.ba} /></td>
-              <td className="px-3 py-2 text-right font-medium"><ScoreCell v={r.avg ?? null} /></td>
+              {rowVals.map((v, i) => (
+                <td key={i} className="px-3 py-2 text-right tabular-nums">
+                  {v === null
+                    ? <span className="text-gray-400 line-through">0.00</span>
+                    : fmt(v)}
+                </td>
+              ))}
+              <td className="px-3 py-2 text-right font-medium tabular-nums">{fmt(rowAvg)}</td>
             </tr>
           ))}
         </tbody>
         <tfoot>
-          <tr className="bg-gray-50/60 dark:bg-gray-800/30 font-semibold">
-            <td className="px-3 py-2 text-gray-600 dark:text-gray-300">Tages-Ø</td>
-            <td className="px-3 py-2 text-right"><ScoreCell v={colAvg.bew} /></td>
-            <td className="px-3 py-2 text-right"><ScoreCell v={colAvg.bf} /></td>
-            <td className="px-3 py-2 text-right"><ScoreCell v={colAvg.bq} /></td>
-            <td className="px-3 py-2 text-right"><ScoreCell v={colAvg.ba} /></td>
-            <td className="px-3 py-2 text-right"><ScoreCell v={colAvg.avg} /></td>
+          <tr className="border-t border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/30">
+            <td className="px-3 py-2 text-right"><span className="text-xs text-gray-500">Tages-Ø</span></td>
+            {colAvgs.map((a, i) => (
+              <td key={i} className="px-3 py-2 text-right font-medium tabular-nums">
+                {fmt(a)}
+              </td>
+            ))}
+            <td className="px-3 py-2 text-right font-semibold tabular-nums">{fmt(dayAvg)}</td>
           </tr>
         </tfoot>
       </table>
@@ -1768,7 +1763,7 @@ function DayScoresTable({ items }: { items: FeedbackItem[] }) {
 }
 
 /* ===========================
-   Einzelzeile – Kommentar-Toggle, interne Notiz, „erledigt“ + Highlight
+   Einzelzeile – Kommentar-Toggle, interne Notiz (zentriert), „erledigt“-Toggle
 =========================== */
 function FeedbackItemRow({
   f,
@@ -1786,7 +1781,6 @@ function FeedbackItemRow({
 
   const lbl = labelMap[f.feedbacktyp] ?? f.feedbacktyp ?? '—';
   const ch = f.feedbacktyp;
-  const dt = f.ts ? new Date(f.ts).toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' }) : '—';
 
   const hasInternal = !!(f.internal_note && f.internal_note.trim());
   const highlight = hasInternal && !internalChecked
@@ -1814,26 +1808,25 @@ function FeedbackItemRow({
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-medium">{lbl}</span>
           <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300" title="Kanal">{ch}</span>
+
           {isTrueish(f.rekla) && (
             <span className="text-[11px] px-1.5 py-0.5 rounded-full border border-amber-300 text-amber-700 dark:border-amber-900 dark:text-amber-300">
               Rekla
             </span>
           )}
+
           <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${isTrueish(f.geklaert)
             ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200'
             : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'}`}>
             {isTrueish(f.geklaert) ? 'geklärt' : 'offen'}
           </span>
+
           {hasInternal && (
             <span className={`text-[11px] px-1.5 py-0.5 rounded-full
               ${internalChecked ? 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300' : 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200'}`}>
               intern
             </span>
           )}
-        </div>
-
-        <div className="text-xs text-gray-500">
-          {dt}{f.template_name ? ` · ${f.template_name}` : ''}
         </div>
 
         {/* Kundenkommentar: auf/zu */}
@@ -1856,34 +1849,29 @@ function FeedbackItemRow({
           </div>
         )}
 
-        {/* Interner Kommentar + Abhaken (zentriert in der Karte) */}
+        {/* Interner Kommentar (zentriert) + schöner Toggle */}
         {hasInternal && (
-          <div className="mt-2 flex justify-center">
-            <div className="w-full md:w-3/4 rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50/40 dark:bg-transparent p-3">
-              <div className="text-xs uppercase tracking-wide text-amber-700 dark:text-amber-300 mb-1">
-                Interner Kommentar
-              </div>
-              <p className="text-sm text-amber-900 dark:text-amber-200 whitespace-pre-wrap">{f.internal_note}</p>
-
-              {/* hübscher Toggle */}
-              <div className="mt-3">
-                <button
-                  type="button"
-                  onClick={toggleInternalChecked}
-                  aria-pressed={internalChecked}
-                  className={[
-                    "inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors",
-                    internalChecked
-                      ? "bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700"
-                      : "bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-200 dark:border-amber-900"
-                  ].join(' ')}
-                  title={internalChecked ? "als erledigt markiert" : "als erledigt markieren"}
-                >
-                  <span className="text-base leading-none">{internalChecked ? '✓' : '◻︎'}</span>
-                  {internalChecked ? "Erledigt" : "Als erledigt markieren"}
-                </button>
-              </div>
+          <div className="mt-3 rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50/40 dark:bg-transparent p-4 grid place-items-center text-center">
+            <div className="text-xs uppercase tracking-wide text-amber-700 dark:text-amber-300 mb-1">
+              Interner Kommentar
             </div>
+            <p className="text-sm text-amber-900 dark:text-amber-200 whitespace-pre-wrap max-w-3xl">{f.internal_note}</p>
+
+            <button
+              type="button"
+              onClick={toggleInternalChecked}
+              aria-pressed={internalChecked}
+              className={[
+                "mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors",
+                internalChecked
+                  ? "bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700"
+                  : "bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-200 dark:border-amber-900"
+              ].join(' ')}
+              title={internalChecked ? "als erledigt markiert" : "als erledigt markieren"}
+            >
+              <span className="text-base leading-none">{internalChecked ? '✓' : '◻︎'}</span>
+              {internalChecked ? "Erledigt" : "Als erledigt markieren"}
+            </button>
           </div>
         )}
       </div>
@@ -1897,7 +1885,3 @@ function FeedbackItemRow({
     </li>
   );
 }
-function avgScore(f: FeedbackItem): any {
-  throw new Error('Function not implemented.');
-}
-
