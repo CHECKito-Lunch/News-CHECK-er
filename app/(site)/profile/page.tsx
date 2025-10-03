@@ -1122,17 +1122,16 @@ function UnreadCard() {
 =========================== */
 
 /* ===========================
-   Helpers (Timezone & Truthy)
+   Helpers (Timezone & Truthy) – NICHT exportieren!
 =========================== */
-
 const FE_TZ = 'Europe/Berlin';
 
-export function isTrueish(v: unknown) {
+function isTrueish(v: unknown) {
   const s = String(v ?? '').trim().toLowerCase();
   return s === 'ja' || s === 'true' || s === '1' || s === 'y' || s === 'yes';
 }
 
-// "Zoned" Date -> Y-M (Berlin)
+// "Zoned" Date -> YYYY-MM (Berlin)
 function ymKeyBerlin(d: Date) {
   const z = new Date(d.toLocaleString('en-US', { timeZone: FE_TZ }));
   const y = z.getFullYear();
@@ -1140,7 +1139,7 @@ function ymKeyBerlin(d: Date) {
   return `${y}-${m}`;
 }
 
-// "Zoned" Date -> Y-M-D (Berlin)
+// "Zoned" Date -> YYYY-MM-DD (Berlin)
 function ymdBerlin(d: Date) {
   const z = new Date(d.toLocaleString('en-US', { timeZone: FE_TZ }));
   const y = z.getFullYear();
@@ -1149,13 +1148,14 @@ function ymdBerlin(d: Date) {
   return `${y}-${m}-${dd}`;
 }
 
-// YYYY-MM -> nächsten Monat (UTC-basiert, nur zum Zählen der Monate)
+// YYYY-MM -> nächster Monat
 function incMonthKey(key: string) {
   const [y, m] = key.split('-').map(Number);
   const dt = new Date(Date.UTC(y, (m || 1) - 1, 1));
   dt.setUTCMonth(dt.getUTCMonth() + 1);
   return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}`;
 }
+
 
 
 function FeedbackSection() {
