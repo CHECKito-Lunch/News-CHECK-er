@@ -62,11 +62,13 @@ type FeedbackItem = {
   internal_note?: string | null;
   internal_checked?: boolean | null;
   template_name?: string | null;
-  rekla?: string | null;        // "ja"/"nein"
-  geklaert?: string | null;     // "ja"/"nein"
+  rekla?: string | boolean | number | null;
+  geklaert?: string | boolean | number | null;
   feedbacktyp: 'service_mail' | 'service_mail_rekla' | 'service_phone' | 'sales_phone' | 'sales_lead' | string;
 };
 type FeedbackRes = { ok: boolean; items: FeedbackItem[] };
+
+
 
 /* ===========================
    UI Tokens
@@ -1118,6 +1120,44 @@ function UnreadCard() {
 /* ===========================
    🆕 Kunden-Feedback – Vollbreite, Monats-/Tages-Accordion, Streaks, XP
 =========================== */
+
+/* ===========================
+   Helpers (Timezone & Truthy)
+=========================== */
+
+const FE_TZ = 'Europe/Berlin';
+
+export function isTrueish(v: unknown) {
+  const s = String(v ?? '').trim().toLowerCase();
+  return s === 'ja' || s === 'true' || s === '1' || s === 'y' || s === 'yes';
+}
+
+// "Zoned" Date -> Y-M (Berlin)
+function ymKeyBerlin(d: Date) {
+  const z = new Date(d.toLocaleString('en-US', { timeZone: FE_TZ }));
+  const y = z.getFullYear();
+  const m = String(z.getMonth() + 1).padStart(2, '0');
+  return `${y}-${m}`;
+}
+
+// "Zoned" Date -> Y-M-D (Berlin)
+function ymdBerlin(d: Date) {
+  const z = new Date(d.toLocaleString('en-US', { timeZone: FE_TZ }));
+  const y = z.getFullYear();
+  const m = String(z.getMonth() + 1).padStart(2, '0');
+  const dd = String(z.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
+}
+
+// YYYY-MM -> nächsten Monat (UTC-basiert, nur zum Zählen der Monate)
+function incMonthKey(key: string) {
+  const [y, m] = key.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, (m || 1) - 1, 1));
+  dt.setUTCMonth(dt.getUTCMonth() + 1);
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+
 function FeedbackSection() {
   const [from, setFrom] = useState<string>('');
   const [to, setTo] = useState<string>('');
@@ -1202,94 +1242,126 @@ function FeedbackSection() {
   };
 
   const months: MonthAgg[] = useMemo(() => {
-    // partition by YYYY-MM
-    const map = new Map<string, FeedbackItem[]>();
-    for (const f of items) {
+  // partition by YYYY-MM (Berlin)
+  const map = new Map<string, FeedbackItem[]>();
+  for (const f of items) {
+    const d = f.ts ? new Date(f.ts) : null;
+    if (!d || isNaN(d.getTime())) continue;
+    const key = ymKeyBerlin(d);
+    const arr = map.get(key) ?? [];
+    arr.push(f); map.set(key, arr);
+  }
+
+  // initial Aggregate aus vorhandenen Monaten bauen
+  const base: MonthAgg[] = [];
+  for (const [monthKey, arr] of map.entries()) {
+    // pro Type aggregieren
+    const byType = new Map<string, { count:number; sum:number; avg:number; pass:boolean }>();
+    const vals:number[] = [];
+    const reklaVals:number[] = [];
+
+    arr.forEach(f => {
+      const t = f.feedbacktyp || 'unknown';
+      const a = avgScore(f);
+      if (!Number.isFinite(a as any)) return;
+      vals.push(a as number);
+      if (isTrueish(f.rekla)) reklaVals.push(a as number);
+      const prev = byType.get(t) ?? { count:0, sum:0, avg:0, pass:false };
+      prev.count++; prev.sum += a as number;
+      byType.set(t, prev);
+    });
+
+    byType.forEach((v, t) => {
+      v.avg = v.count ? v.sum / v.count : 0;
+      const goal = targets[t] ?? targets.unknown;
+      v.pass = v.count > 0 && v.avg >= goal;
+    });
+
+    const overallAvg = vals.length ? vals.reduce((s,n)=>s+n,0)/vals.length : 0;
+    const overallCount = vals.length;
+
+    const overallPass = Array.from(byType.entries()).every(([t, v]) => {
+      const goal = targets[t] ?? targets.unknown;
+      return v.count === 0 ? true : v.avg >= goal;
+    });
+
+    // Tage (Berlin)
+    const byDay = new Map<string, FeedbackItem[]>();
+    arr.forEach(f => {
       const d = f.ts ? new Date(f.ts) : null;
-      if (!d || isNaN(d.getTime())) continue;
-      const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}`;
-      const arr = map.get(key) ?? [];
-      arr.push(f); map.set(key, arr);
+      if (!d) return;
+      const k = ymdBerlin(d);
+      const a = byDay.get(k) ?? []; a.push(f); byDay.set(k, a);
+    });
+    const days: DayGroup[] = [];
+    for (const [k, list] of byDay.entries()) {
+      const ratios:number[] = [];
+      list.forEach(f=>{
+        const s = avgScore(f);
+        if (!Number.isFinite(s as any)) return;
+        const t = targets[f.feedbacktyp] ?? targets.unknown;
+        ratios.push(Number(s)/t);
+      });
+      const normAvg = ratios.length ? ratios.reduce((a,b)=>a+b,0)/ratios.length : 0;
+      days.push({ key:k, items:list, normAvg, pass: normAvg >= 1 });
+    }
+    days.sort((a,b)=> a.key < b.key ? 1 : -1);
+
+    // Badges
+    const badges:string[] = [];
+    if (overallAvg >= 4.9 && overallCount >= 5) badges.push('🌟 Perfekter Monat');
+    if (reklaVals.length >= 3) {
+      const avgRekla = reklaVals.reduce((s,n)=>s+n,0)/reklaVals.length;
+      const targetRekla = targets.service_mail_rekla ?? 4.0;
+      if (avgRekla >= targetRekla) badges.push('🛡️ Hero of Rekla');
     }
 
-    const result: MonthAgg[] = [];
-    for (const [monthKey, arr] of map.entries()) {
-      // per type agg
-      const byType = new Map<string, { count:number; sum:number; avg:number; pass:boolean }>();
-      const vals:number[] = [];
-      let reklaVals:number[] = []; // für "Hero of Rekla"
-      arr.forEach(f => {
-        const t = f.feedbacktyp || 'unknown';
-        const a = avgScore(f);
-        if (!Number.isFinite(a as any)) return;
-        vals.push(a as number);
-        if ((f.rekla ?? '').toLowerCase() === 'ja') reklaVals.push(a as number);
-        const prev = byType.get(t) ?? { count:0, sum:0, avg:0, pass:false };
-        prev.count++; prev.sum += a as number;
-        byType.set(t, prev);
-      });
-      byType.forEach((v, t) => {
-        v.avg = v.count ? v.sum / v.count : 0;
-        const goal = targets[t] ?? targets.unknown;
-        v.pass = v.count > 0 && v.avg >= goal;
-      });
-      const overallAvg = vals.length ? vals.reduce((s,n)=>s+n,0)/vals.length : 0;
-      const overallCount = vals.length;
-      // overallPass = alle Typen, die im Monat vorkamen, >= Ziel
-      const overallPass = Array.from(byType.entries()).every(([t, v]) => {
-        const goal = targets[t] ?? targets.unknown;
-        return v.count === 0 ? true : v.avg >= goal;
-      });
+    const [y,m] = monthKey.split('-');
+    base.push({
+      monthKey,
+      label: `${m}/${y}`,
+      items: arr,
+      byType,
+      overallAvg,
+      overallCount,
+      overallPass,
+      days,
+      badges,
+      xp: 0,
+    });
+  }
 
-      // days
-      const byDay = new Map<string, FeedbackItem[]>();
-      arr.forEach(f => {
-        const d = f.ts ? new Date(f.ts) : null;
-        if (!d) return;
-        const k = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())).toISOString().slice(0,10);
-        const a = byDay.get(k) ?? []; a.push(f); byDay.set(k, a);
-      });
-      const days: DayGroup[] = [];
-      for (const [k, list] of byDay.entries()) {
-        const ratios:number[] = [];
-        list.forEach(f=>{
-          const s = avgScore(f);
-          if (!Number.isFinite(s as any)) return;
-          const t = targets[f.feedbacktyp] ?? targets.unknown;
-          ratios.push(Number(s)/t);
-        });
-        const normAvg = ratios.length ? ratios.reduce((a,b)=>a+b,0)/ratios.length : 0;
-        days.push({ key:k, items:list, normAvg, pass: normAvg >= 1 });
-      }
-      days.sort((a,b)=> a.key < b.key ? 1 : -1);
+  if (base.length === 0) return base;
 
-      // Badges
-      const badges:string[] = [];
-      if (overallAvg >= 4.9 && overallCount >= 5) badges.push('🌟 Perfekter Monat');
-      // Rekla-„Hero“
-      if (reklaVals.length >= 3) {
-        const avgRekla = reklaVals.reduce((s,n)=>s+n,0)/reklaVals.length;
-        const targetRekla = targets.service_mail_rekla ?? 4.0;
-        if (avgRekla >= targetRekla) badges.push('🛡️ Hero of Rekla');
-      }
+  // fehlende Monate (zwischen min..max) auffüllen
+  const asc = [...base].sort((a,b)=> a.monthKey.localeCompare(b.monthKey)); // älteste -> neueste
+  let cur = asc[0].monthKey;
+  const end = asc[asc.length-1].monthKey;
+  const have = new Set(base.map(m => m.monthKey));
 
-      const [y,m] = monthKey.split('-');
-      result.push({
-        monthKey,
+  const filled = [...base];
+  while (cur !== end) {
+    cur = incMonthKey(cur);
+    if (!have.has(cur)) {
+      const [y,m] = cur.split('-');
+      filled.push({
+        monthKey: cur,
         label: `${m}/${y}`,
-        items: arr,
-        byType,
-        overallAvg,
-        overallCount,
-        overallPass,
-        days,
-        badges,
-        xp: 0, // wird später berechnet
+        items: [],
+        byType: new Map(),
+        overallAvg: 0,
+        overallCount: 0,
+        overallPass: false,
+        days: [],
+        badges: [],
+        xp: 0,
       });
     }
-    // sort months newest first
-    return result.sort((a,b)=> a.monthKey < b.monthKey ? 1 : -1);
-  }, [items]);
+  }
+
+  // neueste zuerst zurückgeben
+  return filled.sort((a,b)=> a.monthKey < b.monthKey ? 1 : -1);
+}, [items]);
 
   /* ------- XP & Combo (Monate chronologisch berechnen) ------- */
   // Punkte pro Eintrag: max(0, round((score - target) * 20))
@@ -1480,7 +1552,9 @@ function FeedbackSection() {
                               const dKey = `${m.monthKey}:${d.key}`;
                               const dOpen = !!openDays[dKey];
                               const pct = Math.max(0, Math.min(100, d.normAvg*100));
-                              const openInternal = d.items.filter(x => (x.internal_note?.trim() ?? '') && !x.internal_checked).length;
+                              const openInternal = d.items.filter(x =>
+  (x.internal_note?.trim() ?? '').length > 0 && !isTrueish(x.internal_checked)
+).length;
                               const head = new Date(d.key+'T00:00:00Z').toLocaleDateString('de-DE', { weekday:'short', day:'2-digit', month:'2-digit' });
                               return (
                                 <li key={dKey} className="rounded-lg border border-gray-200 dark:border-gray-800">
@@ -1583,14 +1657,17 @@ function FeedbackItemRow({
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-medium">{lbl}</span>
           <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300" title="Kanal">{ch}</span>
-          {(f.rekla ?? '').toLowerCase()==='ja' && (
-            <span className="text-[11px] px-1.5 py-0.5 rounded-full border border-amber-300 text-amber-700 dark:border-amber-900 dark:text-amber-300">
-              Rekla
-            </span>
-          )}
-          <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${((f.geklaert ?? '').toLowerCase()==='ja') ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200' : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'}`}>
-            {((f.geklaert ?? '').toLowerCase()==='ja') ? 'geklärt' : 'offen'}
-          </span>
+          {isTrueish(f.rekla) && (
+  <span className="text-[11px] px-1.5 py-0.5 rounded-full border border-amber-300 text-amber-700 dark:border-amber-900 dark:text-amber-300">
+    Rekla
+  </span>
+)}
+
+<span className={`text-[11px] px-1.5 py-0.5 rounded-full ${isTrueish(f.geklaert)
+  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200'
+  : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'}`}>
+  {isTrueish(f.geklaert) ? 'geklärt' : 'offen'}
+</span>
           {hasInternal && (
             <span className={`text-[11px] px-1.5 py-0.5 rounded-full
               ${internalChecked ? 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300' : 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200'}`}>
