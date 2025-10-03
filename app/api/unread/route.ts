@@ -1,4 +1,4 @@
-// app/api/unread/route.ts (GET)
+// app/api/unread/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -16,11 +16,13 @@ export async function GET(req: NextRequest) {
       return json({ ok:true, unread:0, breakdown:{ invites:0, groups:0, news:0, events:0 }, preview:[] });
     }
 
+    // last_seen_at robust laden (Fallback: Unix-Start)
     const lsRow = await sql<{ last_seen_at: string | null }[]>`
       select last_seen_at from public.user_states where user_id = ${me.sub}::text limit 1
     `;
     const lastSeen = lsRow[0]?.last_seen_at ?? '1970-01-01T00:00:00Z';
 
+    // Einladungen
     const [{ invites }] = await sql<{ invites:number }[]>`
       select count(*)::int invites
       from public.group_invitations gi
@@ -28,12 +30,14 @@ export async function GET(req: NextRequest) {
         and gi.accepted_at is null and gi.declined_at is null and gi.revoked_at is null
     `;
 
+    // Meine Gruppen
     const myGroupIds = (await sql<{ group_id:number }[]>`
       select gm.group_id
       from public.group_members gm
       where gm.user_id = ${me.sub}::uuid
     `).map((r: { group_id: any; }) => r.group_id);
 
+    // Neue Gruppen-Posts seit lastSeen
     const [{ groups }] = await sql<{ groups:number }[]>`
       select count(*)::int groups
       from public.group_posts gp
@@ -41,19 +45,22 @@ export async function GET(req: NextRequest) {
         and ${myGroupIds.length ? sql`gp.group_id = any(${myGroupIds})` : sql`false`}
     `;
 
+    // ✅ News: published + „neu“ nach effective_from/updated_at/created_at
     const [{ news }] = await sql<{ news:number }[]>`
       select count(*)::int news
       from public.posts p
-      where coalesce(p.published_at, p.created_at) > ${lastSeen}::timestamptz
-        and coalesce(p.is_draft, false) = false
+      where p.status = 'published'::post_status
+        and coalesce(p.effective_from, p.updated_at, p.created_at) > ${lastSeen}::timestamptz
     `;
 
+    // Events (Termine)
     const [{ events }] = await sql<{ events:number }[]>`
       select count(*)::int events
       from public.termine t
       where coalesce(t.updated_at, t.created_at, t.starts_at) > ${lastSeen}::timestamptz
     `;
 
+    // Vorschau: letzte Gruppenposts (nur in meinen Gruppen)
     const previewRows = await sql<any[]>`
       select gp.id, gp.group_id, gp.title, gp.hero_image_url, gp.created_at,
              g.name as group_name, g.is_private

@@ -6,7 +6,7 @@ import { NextResponse } from 'next/server';
 export async function GET() {
   // Semikolon-getrennt (de-DE kompatibel)
   const csv =
-`Bewertung;Beraterfreundlichkeit;Beraterqualifikation;Beratungsangebotsattraktivität;Kommentar;Template Name;Rekla;Anliegen geklärt?;Feedbacktyp;Datum
+`Bewertung;Beraterfreundlichkeit;Beraterqualifikation;Beratungsangebotsattraktivität;Kommentar;Template Name;Rekla;Anliegen geklaert?;Feedbacktyp;Datum
 5;5;5;5;Sehr gut.;02. KD GS Hinterlegung Bestätigung;nein;ja;service_phone;2025-09-08`;
   return new NextResponse(csv, {
     status: 200,
