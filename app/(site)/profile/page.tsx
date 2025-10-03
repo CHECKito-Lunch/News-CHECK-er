@@ -1131,6 +1131,16 @@ function isTrueish(v: unknown) {
   return s === 'ja' || s === 'true' || s === '1' || s === 'y' || s === 'yes';
 }
 
+// 0 = "kein Wert"
+const numOrNull = (x: unknown): number | null => {
+  const n = Number(x);
+  return Number.isFinite(n) && n > 0 ? n : null;
+};
+const avgOf = (arr: Array<number | null | undefined>) => {
+  const vals = arr.map(numOrNull).filter((n): n is number => n != null);
+  return vals.length ? vals.reduce((s, n) => s + n, 0) / vals.length : null;
+};
+
 // "Zoned" Date -> YYYY-MM (Berlin)
 function ymKeyBerlin(d: Date) {
   const z = new Date(d.toLocaleString('en-US', { timeZone: FE_TZ }));
@@ -1156,8 +1166,6 @@ function incMonthKey(key: string) {
   return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
-
-
 function FeedbackSection() {
   const [from, setFrom] = useState<string>('');
   const [to, setTo] = useState<string>('');
@@ -1180,27 +1188,27 @@ function FeedbackSection() {
     sales_lead: 'Sales Lead',
   };
 
+  // Ø-Regel: wenn ≥2 Teilnoten (ohne 0/n.v.) vorhanden -> Mittel dieser Teilnoten, sonst Bewertung (wenn >0)
   function avgScore(f: FeedbackItem) {
     const parts = [
-      f.beraterfreundlichkeit,
-      f.beraterqualifikation,
-      f.angebotsattraktivitaet,
-    ].filter((n): n is number => Number.isFinite(n as number));
+      numOrNull(f.beraterfreundlichkeit),
+      numOrNull(f.beraterqualifikation),
+      numOrNull(f.angebotsattraktivitaet),
+    ].filter((n): n is number => n != null);
     if (parts.length >= 2) return parts.reduce((s, n) => s + n, 0) / parts.length;
-    if (typeof f.bewertung === 'number') return f.bewertung;
-    return null;
+    return numOrNull(f.bewertung);
   }
 
   const noteColor = (v: number | null | undefined) =>
     !Number.isFinite(v as any) ? 'text-gray-500'
-    : (v as number) >= 4.75 ? 'text-emerald-600'
-    : (v as number) >= 4.5  ? 'text-green-600'
-    : (v as number) >= 4.0  ? 'text-amber-600'
-    : 'text-red-600';
+      : (v as number) >= 4.75 ? 'text-emerald-600'
+      : (v as number) >= 4.5  ? 'text-green-600'
+      : (v as number) >= 4.0  ? 'text-amber-600'
+      : 'text-red-600';
 
   /* ---- Gamification: Level ---- */
   function levelFor(avg: number, target: number) {
-    const d = avg - target;          // wie weit über Ziel?
+    const d = avg - target;
     if (d >= 0.35) return { name:'Diamant', class:'bg-cyan-300 text-cyan-900', icon:'💎' };
     if (d >= 0.20) return { name:'Platin',  class:'bg-indigo-300 text-indigo-900', icon:'🏅' };
     if (d >= 0.00) return { name:'Gold',    class:'bg-yellow-400 text-yellow-900', icon:'🏆' };
@@ -1228,167 +1236,163 @@ function FeedbackSection() {
 
   /* ------- Monats-Aggregation ------- */
   type DayGroup = { key: string; items: FeedbackItem[]; normAvg: number; pass: boolean };
- type MonthAgg = {
-  monthKey: string; // YYYY-MM
-  label: string;    // z.B. "03/2025"
-  items: FeedbackItem[];
-  byType: Map<string, { count:number; sum:number; avg:number; pass:boolean }>;
-  overallAvg: number;
-  overallCount: number;
-  overallPass: boolean;
-  days: DayGroup[];
-  badges: string[];
-  xp: number;
+  type MonthAgg = {
+    monthKey: string; // YYYY-MM
+    label: string;    // z.B. "03/2025"
+    items: FeedbackItem[];
+    byType: Map<string, { count:number; sum:number; avg:number; pass:boolean }>;
+    overallAvg: number;
+    overallCount: number;
+    overallPass: boolean;
+    days: DayGroup[];
+    badges: string[];
+    xp: number;
 
-  // 🆕 Interne-Notizen-Infos pro Monat
-  openInternal: number;
-  internalPreview: { id: string|number; date: string; label: string; excerpt: string }[];
-};
+    // 🆕 Interne-Notizen-Infos pro Monat
+    openInternal: number;
+    internalPreview: { id: string|number; date: string; label: string; excerpt: string }[];
+  };
 
   const months: MonthAgg[] = useMemo(() => {
-  // partition by YYYY-MM (Berlin)
-  const map = new Map<string, FeedbackItem[]>();
-  for (const f of items) {
-    const d = f.ts ? new Date(f.ts) : null;
-    if (!d || isNaN(d.getTime())) continue;
-    const key = ymKeyBerlin(d);
-    const arr = map.get(key) ?? [];
-    arr.push(f); map.set(key, arr);
-  }
-
-  // initial Aggregate aus vorhandenen Monaten bauen
-  const base: MonthAgg[] = [];
-  for (const [monthKey, arr] of map.entries()) {
-    // pro Type aggregieren
-    const byType = new Map<string, { count:number; sum:number; avg:number; pass:boolean }>();
-    const vals:number[] = [];
-    const reklaVals:number[] = [];
-
-    arr.forEach(f => {
-      const t = f.feedbacktyp || 'unknown';
-      const a = avgScore(f);
-      if (!Number.isFinite(a as any)) return;
-      vals.push(a as number);
-      if (isTrueish(f.rekla)) reklaVals.push(a as number);
-      const prev = byType.get(t) ?? { count:0, sum:0, avg:0, pass:false };
-      prev.count++; prev.sum += a as number;
-      byType.set(t, prev);
-    });
-
-    byType.forEach((v, t) => {
-      v.avg = v.count ? v.sum / v.count : 0;
-      const goal = targets[t] ?? targets.unknown;
-      v.pass = v.count > 0 && v.avg >= goal;
-    });
-
-    const overallAvg = vals.length ? vals.reduce((s,n)=>s+n,0)/vals.length : 0;
-    const overallCount = vals.length;
-
-    const overallPass = Array.from(byType.entries()).every(([t, v]) => {
-      const goal = targets[t] ?? targets.unknown;
-      return v.count === 0 ? true : v.avg >= goal;
-    });
-
-    // Tage (Berlin)
-    const byDay = new Map<string, FeedbackItem[]>();
-    arr.forEach(f => {
+    // partition by YYYY-MM (Berlin)
+    const map = new Map<string, FeedbackItem[]>();
+    for (const f of items) {
       const d = f.ts ? new Date(f.ts) : null;
-      if (!d) return;
-      const k = ymdBerlin(d);
-      const a = byDay.get(k) ?? []; a.push(f); byDay.set(k, a);
-    });
-    const days: DayGroup[] = [];
-    for (const [k, list] of byDay.entries()) {
-      const ratios:number[] = [];
-      list.forEach(f=>{
-        const s = avgScore(f);
-        if (!Number.isFinite(s as any)) return;
-        const t = targets[f.feedbacktyp] ?? targets.unknown;
-        ratios.push(Number(s)/t);
+      if (!d || isNaN(d.getTime())) continue;
+      const key = ymKeyBerlin(d);
+      const arr = map.get(key) ?? [];
+      arr.push(f); map.set(key, arr);
+    }
+
+    // initial Aggregate aus vorhandenen Monaten bauen
+    const base: MonthAgg[] = [];
+    for (const [monthKey, arr] of map.entries()) {
+      // pro Type aggregieren
+      const byType = new Map<string, { count:number; sum:number; avg:number; pass:boolean }>();
+      const vals:number[] = [];
+      const reklaVals:number[] = [];
+
+      arr.forEach(f => {
+        const t = f.feedbacktyp || 'unknown';
+        const a = avgScore(f);
+        if (!Number.isFinite(a as any)) return;
+        vals.push(a as number);
+        if (isTrueish(f.rekla)) reklaVals.push(a as number);
+        const prev = byType.get(t) ?? { count:0, sum:0, avg:0, pass:false };
+        prev.count++; prev.sum += a as number;
+        byType.set(t, prev);
       });
-      const normAvg = ratios.length ? ratios.reduce((a,b)=>a+b,0)/ratios.length : 0;
-      days.push({ key:k, items:list, normAvg, pass: normAvg >= 1 });
-    }
-    days.sort((a,b)=> a.key < b.key ? 1 : -1);
 
-    // Badges
-    const badges:string[] = [];
-    if (overallAvg >= 4.9 && overallCount >= 5) badges.push('🌟 Perfekter Monat');
-    if (reklaVals.length >= 3) {
-      const avgRekla = reklaVals.reduce((s,n)=>s+n,0)/reklaVals.length;
-      const targetRekla = targets.service_mail_rekla ?? 4.0;
-      if (avgRekla >= targetRekla) badges.push('🛡️ Hero of Rekla');
-    }
+      byType.forEach((v, t) => {
+        v.avg = v.count ? v.sum / v.count : 0;
+        const goal = targets[t] ?? targets.unknown;
+        v.pass = v.count > 0 && v.avg >= goal;
+      });
 
-// 🆕 Offene interne Notizen im Monat & kleine Vorschau
-    const openInternalItems = arr.filter(x =>
-      (x.internal_note?.trim() ?? '').length > 0 && !isTrueish(x.internal_checked)
-    );
+      const overallAvg = vals.length ? vals.reduce((s,n)=>s+n,0)/vals.length : 0;
+      const overallCount = vals.length;
 
-    const openInternal = openInternalItems.length;
-    const internalPreview = openInternalItems.slice(0, 3).map(i => {
-      const d = i.ts ? new Date(i.ts) : null;
-      const date = d ? ymdBerlin(d) : '';
-      const label =
-        i.template_name ??
-        (typeLabel[i.feedbacktyp] ?? i.feedbacktyp ?? '—');
-      const excerpt = (i.internal_note ?? '').trim().slice(0, 90);
-      return { id: i.id, date, label, excerpt };
-    });
+      const overallPass = Array.from(byType.entries()).every(([t, v]) => {
+        const goal = targets[t] ?? targets.unknown;
+        return v.count === 0 ? true : v.avg >= goal;
+      });
 
-    const [y,m] = monthKey.split('-');
- base.push({
-      monthKey,
-      label: `${m}/${y}`,
-      items: arr,
-      byType,
-      overallAvg,
-      overallCount,
-      overallPass,
-      days,
-      badges,
-      xp: 0,
+      // Tage (Berlin)
+      const byDay = new Map<string, FeedbackItem[]>();
+      arr.forEach(f => {
+        const d = f.ts ? new Date(f.ts) : null;
+        if (!d) return;
+        const k = ymdBerlin(d);
+        const a = byDay.get(k) ?? []; a.push(f); byDay.set(k, a);
+      });
+      const days: DayGroup[] = [];
+      for (const [k, list] of byDay.entries()) {
+        const ratios:number[] = [];
+        list.forEach(f=>{
+          const s = avgScore(f);
+          if (!Number.isFinite(s as any)) return;
+          const t = targets[f.feedbacktyp] ?? targets.unknown;
+          ratios.push(Number(s)/t);
+        });
+        const normAvg = ratios.length ? ratios.reduce((a,b)=>a+b,0)/ratios.length : 0;
+        days.push({ key:k, items:list, normAvg, pass: normAvg >= 1 });
+      }
+      days.sort((a,b)=> a.key < b.key ? 1 : -1);
 
-      // 🆕
-      openInternal,
-      internalPreview,
-    });
-  }
+      // Badges
+      const badges:string[] = [];
+      if (overallAvg >= 4.9 && overallCount >= 5) badges.push('🌟 Perfekter Monat');
+      if (reklaVals.length >= 3) {
+        const avgRekla = reklaVals.reduce((s,n)=>s+n,0)/reklaVals.length;
+        const targetRekla = targets.service_mail_rekla ?? 4.0;
+        if (avgRekla >= targetRekla) badges.push('🛡️ Hero of Rekla');
+      }
 
-  if (base.length === 0) return base;
+      // 🆕 Offene interne Notizen im Monat & kleine Vorschau
+      const openInternalItems = arr.filter(x =>
+        (x.internal_note?.trim() ?? '').length > 0 && !isTrueish(x.internal_checked)
+      );
+      const openInternal = openInternalItems.length;
+      const internalPreview = openInternalItems.slice(0, 3).map(i => {
+        const d = i.ts ? new Date(i.ts) : null;
+        const date = d ? ymdBerlin(d) : '';
+        const label =
+          i.template_name ??
+          (typeLabel[i.feedbacktyp] ?? i.feedbacktyp ?? '—');
+        const excerpt = (i.internal_note ?? '').trim().slice(0, 90);
+        return { id: i.id, date, label, excerpt };
+      });
 
-  // fehlende Monate (zwischen min..max) auffüllen
-  const asc = [...base].sort((a,b)=> a.monthKey.localeCompare(b.monthKey)); // älteste -> neueste
-  let cur = asc[0].monthKey;
-  const end = asc[asc.length-1].monthKey;
-  const have = new Set(base.map(m => m.monthKey));
-
-  const filled = [...base];
-  while (cur !== end) {
-    cur = incMonthKey(cur);
-    if (!have.has(cur)) {
-      const [y,m] = cur.split('-');
-     filled.push({
-        monthKey: cur,
+      const [y,m] = monthKey.split('-');
+      base.push({
+        monthKey,
         label: `${m}/${y}`,
-        items: [],
-        byType: new Map(),
-        overallAvg: 0,
-        overallCount: 0,
-        overallPass: false,
-        days: [],
-        badges: [],
+        items: arr,
+        byType,
+        overallAvg,
+        overallCount,
+        overallPass,
+        days,
+        badges,
         xp: 0,
-        // 🆕
-        openInternal: 0,
-        internalPreview: [],
+        openInternal,
+        internalPreview,
       });
     }
-  }
 
-  // neueste zuerst zurückgeben
-  return filled.sort((a,b)=> a.monthKey < b.monthKey ? 1 : -1);
-}, [items]);
+    if (base.length === 0) return base;
+
+    // fehlende Monate (zwischen min..max) auffüllen
+    const asc = [...base].sort((a,b)=> a.monthKey.localeCompare(b.monthKey)); // älteste -> neueste
+    let cur = asc[0].monthKey;
+    const end = asc[asc.length-1].monthKey;
+    const have = new Set(base.map(m => m.monthKey));
+
+    const filled = [...base];
+    while (cur !== end) {
+      cur = incMonthKey(cur);
+      if (!have.has(cur)) {
+        const [y,m] = cur.split('-');
+        filled.push({
+          monthKey: cur,
+          label: `${m}/${y}`,
+          items: [],
+          byType: new Map(),
+          overallAvg: 0,
+          overallCount: 0,
+          overallPass: false,
+          days: [],
+          badges: [],
+          xp: 0,
+          openInternal: 0,
+          internalPreview: [],
+        });
+      }
+    }
+
+    // neueste zuerst zurückgeben
+    return filled.sort((a,b)=> a.monthKey < b.monthKey ? 1 : -1);
+  }, [items]);
 
   /* ------- XP & Combo (Monate chronologisch berechnen) ------- */
   // Punkte pro Eintrag: max(0, round((score - target) * 20))
@@ -1481,26 +1485,25 @@ function FeedbackSection() {
           {/* Übersicht + Streaks + Season-XP */}
           <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-3 bg-gray-50 dark:bg-gray-800/40 mb-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-end gap-4">
-  <div>
-    <div className="text-xs text-gray-500">Monate im Zeitraum</div>
-    <div className="text-xl font-semibold">{withXp.length}</div>
-  </div>
-  <div>
-    <div className="text-xs text-gray-500">Gesamt-Streak (alle Ziele)</div>
-    <div className="text-xl font-semibold">
-      {overallStreak.current} <span className="text-sm text-gray-500">/ best {overallStreak.best}</span>
-    </div>
-  </div>
-  {/* 🆕 Offene interne Notizen im Zeitraum */}
-  <div>
-    <div className="text-xs text-gray-500">Offene interne Notizen</div>
-    <div className="text-xl font-semibold text-amber-600">
-      {withXp.reduce((s,m)=> s + (m.openInternal||0), 0)}
-    </div>
-  </div>
-</div>
-
+              <div className="flex items-end gap-4">
+                <div>
+                  <div className="text-xs text-gray-500">Monate im Zeitraum</div>
+                  <div className="text-xl font-semibold">{withXp.length}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-gray-500">Gesamt-Streak (alle Ziele)</div>
+                  <div className="text-xl font-semibold">
+                    {overallStreak.current} <span className="text-sm text-gray-500">/ best {overallStreak.best}</span>
+                  </div>
+                </div>
+                {/* 🆕 Offene interne Notizen im Zeitraum */}
+                <div>
+                  <div className="text-xs text-gray-500">Offene interne Notizen</div>
+                  <div className="text-xl font-semibold text-amber-600">
+                    {withXp.reduce((s,m)=> s + (m.openInternal||0), 0)}
+                  </div>
+                </div>
+              </div>
 
               {/* Season XP */}
               <div className="min-w-[260px]">
@@ -1541,43 +1544,41 @@ function FeedbackSection() {
                           {m.overallPass ? 'alle Ziele erreicht' : 'unter Ziel'}
                         </span>
                         <span className="text-xs text-gray-500">{m.overallCount} Feedbacks</span>
-  {/* 🆕 Badge für offene interne Notizen */}
-  {m.openInternal > 0 && (
-    <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
-      {m.openInternal} intern
-    </span>
-  )}
-
-  {m.badges.length > 0 && (
-    <span className="text-xs text-amber-700 dark:text-amber-300">· {m.badges.join(' · ')}</span>
-  )}
-</div>
-
+                        {/* 🆕 Badge für offene interne Notizen */}
+                        {m.openInternal > 0 && (
+                          <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
+                            {m.openInternal} intern
+                          </span>
+                        )}
+                        {m.badges.length > 0 && (
+                          <span className="text-xs text-amber-700 dark:text-amber-300">· {m.badges.join(' · ')}</span>
+                        )}
+                      </div>
                     </button>
 
                     {/* Month body */}
                     {mOpen && (
                       <div className="px-3 pb-3">
-{/* 🆕 Interne Notizen Preview */}
-{m.openInternal > 0 && (
-  <div className="mb-3 rounded-xl border border-amber-200 dark:border-amber-900/50 bg-amber-50/60 dark:bg-amber-900/10 p-3">
-    <div className="text-xs uppercase tracking-wide text-amber-700 dark:text-amber-300 mb-1">
-      Offene interne Notizen ({m.openInternal})
-    </div>
-    <ul className="space-y-1">
-      {m.internalPreview.map(p => (
-        <li key={String(p.id)} className="text-sm text-amber-900 dark:text-amber-200">
-          <span className="font-medium">{p.date}</span>
-          <span className="text-amber-700/70 dark:text-amber-300/70"> · {p.label} · </span>
-          <span className="opacity-90">{p.excerpt}{p.excerpt.length >= 90 ? '…' : ''}</span>
-        </li>
-      ))}
-    </ul>
-    <div className="mt-1 text-[11px] text-amber-700/80 dark:text-amber-300/80">
-      Details bei den jeweiligen Tagen.
-    </div>
-  </div>
-)}
+                        {/* 🆕 Interne Notizen Preview */}
+                        {m.openInternal > 0 && (
+                          <div className="mb-3 rounded-xl border border-amber-200 dark:border-amber-900/50 bg-amber-50/60 dark:bg-amber-900/10 p-3">
+                            <div className="text-xs uppercase tracking-wide text-amber-700 dark:text-amber-300 mb-1">
+                              Offene interne Notizen ({m.openInternal})
+                            </div>
+                            <ul className="space-y-1">
+                              {m.internalPreview.map(p => (
+                                <li key={String(p.id)} className="text-sm text-amber-900 dark:text-amber-200">
+                                  <span className="font-medium">{p.date}</span>
+                                  <span className="text-amber-700/70 dark:text-amber-300/70"> · {p.label} · </span>
+                                  <span className="opacity-90">{p.excerpt}{p.excerpt.length >= 90 ? '…' : ''}</span>
+                                </li>
+                              ))}
+                            </ul>
+                            <div className="mt-1 text-[11px] text-amber-700/80 dark:text-amber-300/80">
+                              Details bei den jeweiligen Tagen.
+                            </div>
+                          </div>
+                        )}
 
                         {/* KPI per type for this month */}
                         <div className="grid gap-3 sm:grid-cols-2">
@@ -1615,8 +1616,8 @@ function FeedbackSection() {
                               const dOpen = !!openDays[dKey];
                               const pct = Math.max(0, Math.min(100, d.normAvg*100));
                               const openInternal = d.items.filter(x =>
-  (x.internal_note?.trim() ?? '').length > 0 && !isTrueish(x.internal_checked)
-).length;
+                                (x.internal_note?.trim() ?? '').length > 0 && !isTrueish(x.internal_checked)
+                              ).length;
                               const head = new Date(d.key+'T00:00:00Z').toLocaleDateString('de-DE', { weekday:'short', day:'2-digit', month:'2-digit' });
                               return (
                                 <li key={dKey} className="rounded-lg border border-gray-200 dark:border-gray-800">
@@ -1641,93 +1642,15 @@ function FeedbackSection() {
                                     </div>
                                   </button>
 
-{/* 🆕 Tages-Scores: alle Teilnoten + Ø */}
-<div className="mb-3 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900/40 overflow-x-auto">
-  {(() => {
-    // Spalten-Setup
-    const cols = [
-      { key: 'bewertung',               label: 'Bewertung' },
-      { key: 'beraterfreundlichkeit',   label: 'Beraterfreundlichkeit' },
-      { key: 'beraterqualifikation',    label: 'Beraterqualifikation' },
-      { key: 'angebotsattraktivitaet',  label: 'Beratungsangebotsattraktivität' },
-    ] as const;
-
-    const val = (f: any, k: string) =>
-      Number.isFinite(Number(f?.[k])) ? Number(f[k]) as number : null;
-
-    const avg = (arr: (number|null)[]) => {
-      const nums = arr.filter((x): x is number => Number.isFinite(x as number));
-      return nums.length ? (nums.reduce((s,n)=>s+n,0) / nums.length) : null;
-    };
-
-    const dayRows = d.items.map(f => {
-      const rowVals = cols.map(c => val(f, c.key));
-      const rowAvg  = (() => {
-        const parts = [
-          val(f,'beraterfreundlichkeit'),
-          val(f,'beraterqualifikation'),
-          val(f,'angebotsattraktivitaet'),
-        ].filter((n): n is number => Number.isFinite(n as number));
-        if (parts.length >= 2) return parts.reduce((s,n)=>s+n,0) / parts.length;
-        return val(f,'bewertung');
-      })();
-      return { f, rowVals, rowAvg };
-    });
-
-    const colAvgs = cols.map((c,i) => avg(dayRows.map(r => r.rowVals[i])));
-    const dayAvg  = avg(dayRows.map(r => r.rowAvg));
-
-    const fmt = (n: number|null) => Number.isFinite(n as number) ? (n as number).toFixed(2) : '–';
-    const timeOf = (iso?: string|null) =>
-      iso ? new Date(iso).toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' }) : '–';
-
-    return (
-      <table className="min-w-[640px] w-full text-sm">
-        <thead className="bg-gray-50 dark:bg-gray-800/60 text-gray-600 dark:text-gray-300">
-          <tr>
-            <th className="text-left px-3 py-2 font-medium">Zeit</th>
-            <th className="text-left px-3 py-2 font-medium">Kanal</th>
-            {cols.map(c => (
-              <th key={c.key} className="text-right px-3 py-2 font-medium">{c.label}</th>
-            ))}
-            <th className="text-right px-3 py-2 font-medium">Ø</th>
-          </tr>
-        </thead>
-        <tbody>
-          {dayRows.map(({ f, rowVals, rowAvg }) => (
-            <tr key={String(f.id)} className="border-t border-gray-100 dark:border-gray-800">
-              <td className="px-3 py-2">{timeOf(f.ts)}</td>
-              <td className="px-3 py-2">
-                <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300">
-                  {f.feedbacktyp}
-                </span>
-              </td>
-              {rowVals.map((v, i) => (
-                <td key={i} className="px-3 py-2 text-right tabular-nums">{fmt(v)}</td>
-              ))}
-              <td className="px-3 py-2 text-right font-medium tabular-nums">{fmt(rowAvg)}</td>
-            </tr>
-          ))}
-        </tbody>
-        <tfoot>
-          <tr className="border-t border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/30">
-            <td className="px-3 py-2 text-right" colSpan={2}><span className="text-xs text-gray-500">Tages-Ø</span></td>
-            {colAvgs.map((a, i) => (
-              <td key={i} className="px-3 py-2 text-right font-medium tabular-nums">{fmt(a)}</td>
-            ))}
-            <td className="px-3 py-2 text-right font-semibold tabular-nums">{fmt(dayAvg)}</td>
-          </tr>
-        </tfoot>
-      </table>
-    );
-  })()}
-</div>
-
-
-
+                                  {/* 🆕 Tages-Scores-Tabelle ohne "Zeit" */}
                                   {dOpen && (
+                                    <div className="px-3 pb-3">
+                                      <DayScoresTable items={d.items} />
+                                    </div>
+                                  )}
 
-
+                                  {/* Detailkarten pro Eintrag */}
+                                  {dOpen && (
                                     <ul className="divide-y divide-gray-200 dark:divide-gray-800">
                                       {d.items.map((f)=> (
                                         <FeedbackItemRow
@@ -1755,6 +1678,92 @@ function FeedbackSection() {
         </>
       )}
     </section>
+  );
+}
+
+/* ====== Tages-Scores-Tabelle (ohne Zeit-Spalte) ====== */
+function ScoreCell({ v }: { v: number | null }) {
+  if (v == null) {
+    return (
+      <span className="text-gray-400 line-through" title="nicht vorhanden">
+        n. v.
+      </span>
+    );
+  }
+  return <span className="tabular-nums">{v.toFixed(2)}</span>;
+}
+
+function DayScoresTable({ items }: { items: FeedbackItem[] }) {
+  const rows = items.map((f) => ({
+    ch: f.feedbacktyp,
+    label: f.template_name || f.feedbacktyp,
+    hasInternal: (f.internal_note?.trim() ?? '').length > 0,
+    bew: numOrNull(f.bewertung),
+    bf: numOrNull(f.beraterfreundlichkeit),
+    bq: numOrNull(f.beraterqualifikation),
+    ba: numOrNull(f.angebotsattraktivitaet),
+    avg: avgScore(f),
+    raw: f,
+  }));
+
+  const colAvg = {
+    bew: avgOf(rows.map(r => r.bew)),
+    bf:  avgOf(rows.map(r => r.bf)),
+    bq:  avgOf(rows.map(r => r.bq)),
+    ba:  avgOf(rows.map(r => r.ba)),
+    avg: avgOf(rows.map(r => r.avg)),
+  };
+
+  return (
+    <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800">
+      <table className="w-full text-sm">
+        <thead className="bg-gray-50 dark:bg-gray-800/40 text-gray-700 dark:text-gray-200">
+          <tr className="text-left">
+            <th className="px-3 py-2 w-[280px]">Kanal</th>
+            <th className="px-3 py-2 text-right">Bewertung</th>
+            <th className="px-3 py-2 text-right">Beraterfreundlichkeit</th>
+            <th className="px-3 py-2 text-right">Beraterqualifikation</th>
+            <th className="px-3 py-2 text-right">Beratungsangebotsattraktivität</th>
+            <th className="px-3 py-2 text-right">Ø</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
+          {rows.map((r) => (
+            <tr key={String(r.raw.id)} className="align-middle">
+              <td className="px-3 py-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-medium">{r.label}</span>
+                  <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300">{r.ch}</span>
+                  {isTrueish(r.raw.geklaert) ? (
+                    <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200">geklärt</span>
+                  ) : (
+                    <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300">offen</span>
+                  )}
+                  {r.hasInternal && (
+                    <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">intern</span>
+                  )}
+                </div>
+              </td>
+              <td className="px-3 py-2 text-right"><ScoreCell v={r.bew} /></td>
+              <td className="px-3 py-2 text-right"><ScoreCell v={r.bf} /></td>
+              <td className="px-3 py-2 text-right"><ScoreCell v={r.bq} /></td>
+              <td className="px-3 py-2 text-right"><ScoreCell v={r.ba} /></td>
+              <td className="px-3 py-2 text-right font-medium"><ScoreCell v={r.avg ?? null} /></td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr className="bg-gray-50/60 dark:bg-gray-800/30 font-semibold">
+            <td className="px-3 py-2 text-gray-600 dark:text-gray-300">Tages-Ø</td>
+            <td className="px-3 py-2 text-right"><ScoreCell v={colAvg.bew} /></td>
+            <td className="px-3 py-2 text-right"><ScoreCell v={colAvg.bf} /></td>
+            <td className="px-3 py-2 text-right"><ScoreCell v={colAvg.bq} /></td>
+            <td className="px-3 py-2 text-right"><ScoreCell v={colAvg.ba} /></td>
+            <td className="px-3 py-2 text-right"><ScoreCell v={colAvg.avg} /></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
   );
 }
 
@@ -1806,16 +1815,15 @@ function FeedbackItemRow({
           <span className="font-medium">{lbl}</span>
           <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300" title="Kanal">{ch}</span>
           {isTrueish(f.rekla) && (
-  <span className="text-[11px] px-1.5 py-0.5 rounded-full border border-amber-300 text-amber-700 dark:border-amber-900 dark:text-amber-300">
-    Rekla
-  </span>
-)}
-
-<span className={`text-[11px] px-1.5 py-0.5 rounded-full ${isTrueish(f.geklaert)
-  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200'
-  : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'}`}>
-  {isTrueish(f.geklaert) ? 'geklärt' : 'offen'}
-</span>
+            <span className="text-[11px] px-1.5 py-0.5 rounded-full border border-amber-300 text-amber-700 dark:border-amber-900 dark:text-amber-300">
+              Rekla
+            </span>
+          )}
+          <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${isTrueish(f.geklaert)
+            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200'
+            : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'}`}>
+            {isTrueish(f.geklaert) ? 'geklärt' : 'offen'}
+          </span>
           {hasInternal && (
             <span className={`text-[11px] px-1.5 py-0.5 rounded-full
               ${internalChecked ? 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300' : 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200'}`}>
@@ -1848,35 +1856,36 @@ function FeedbackItemRow({
           </div>
         )}
 
-{/* Interner Kommentar + Abhaken */}
-{hasInternal && (
-  <div className="mt-2 rounded-lg border border-amber-200 dark:border-amber-900/50 bg-white/60 dark:bg-transparent p-3">
-    <div className="text-xs uppercase tracking-wide text-amber-700 dark:text-amber-300 mb-1">
-      Interner Kommentar
-    </div>
+        {/* Interner Kommentar + Abhaken (zentriert in der Karte) */}
+        {hasInternal && (
+          <div className="mt-2 flex justify-center">
+            <div className="w-full md:w-3/4 rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50/40 dark:bg-transparent p-3">
+              <div className="text-xs uppercase tracking-wide text-amber-700 dark:text-amber-300 mb-1">
+                Interner Kommentar
+              </div>
+              <p className="text-sm text-amber-900 dark:text-amber-200 whitespace-pre-wrap">{f.internal_note}</p>
 
-    <p className="text-sm text-amber-900 dark:text-amber-200 whitespace-pre-wrap">{f.internal_note}</p>
-
-    {/* 🆕 schöner Toggle */}
-    <div className="mt-3">
-      <button
-        type="button"
-        onClick={toggleInternalChecked}
-        aria-pressed={internalChecked}
-        className={[
-          "inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors",
-          internalChecked
-            ? "bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700"
-            : "bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-200 dark:border-amber-900"
-        ].join(' ')}
-        title={internalChecked ? "als erledigt markiert" : "als erledigt markieren"}
-      >
-        <span className="text-base leading-none">{internalChecked ? '✓' : '◻︎'}</span>
-        {internalChecked ? "Erledigt" : "Als erledigt markieren"}
-      </button>
-    </div>
-  </div>
-)}
+              {/* hübscher Toggle */}
+              <div className="mt-3">
+                <button
+                  type="button"
+                  onClick={toggleInternalChecked}
+                  aria-pressed={internalChecked}
+                  className={[
+                    "inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors",
+                    internalChecked
+                      ? "bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700"
+                      : "bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-200 dark:border-amber-900"
+                  ].join(' ')}
+                  title={internalChecked ? "als erledigt markiert" : "als erledigt markieren"}
+                >
+                  <span className="text-base leading-none">{internalChecked ? '✓' : '◻︎'}</span>
+                  {internalChecked ? "Erledigt" : "Als erledigt markieren"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="shrink-0 text-right">
@@ -1888,3 +1897,7 @@ function FeedbackItemRow({
     </li>
   );
 }
+function avgScore(f: FeedbackItem): any {
+  throw new Error('Function not implemented.');
+}
+
