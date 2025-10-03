@@ -1237,10 +1237,15 @@ function FeedbackSection() {
     days: DayGroup[];
     badges: string[];
     xp: number;
-
     // 🆕 Interne-Notizen-Infos pro Monat
     openInternal: number;
-    internalPreview: { id: string|number; date: string; label: string; excerpt: string }[];
+    internalPreview: {
+      id: string|number;
+      dayKey: string;       // YYYY-MM-DD (Berlin)
+      dateDisplay: string;  // dd.mm.yyyy (DE)
+      label: string;
+      excerpt: string;
+    }[];
   };
 
   const months: MonthAgg[] = useMemo(() => {
@@ -1326,12 +1331,13 @@ function FeedbackSection() {
       const openInternal = openInternalItems.length;
       const internalPreview = openInternalItems.slice(0, 3).map(i => {
         const d = i.ts ? new Date(i.ts) : null;
-        const date = d ? ymdBerlin(d) : '';
-        const label =
-          i.template_name ??
-          (typeLabel[i.feedbacktyp] ?? i.feedbacktyp ?? '—');
+        const dayKey = d ? ymdBerlin(d) : '';
+        const dateDisplay = d
+          ? new Intl.DateTimeFormat('de-DE', { timeZone: FE_TZ, day:'2-digit', month:'2-digit', year:'numeric' }).format(d)
+          : '';
+        const label = i.template_name ?? (typeLabel[i.feedbacktyp] ?? i.feedbacktyp ?? '—');
         const excerpt = (i.internal_note ?? '').trim().slice(0, 90);
-        return { id: i.id, date, label, excerpt };
+        return { id: i.id, dayKey, dateDisplay, label, excerpt };
       });
 
       const [y,m] = monthKey.split('-');
@@ -1346,7 +1352,6 @@ function FeedbackSection() {
         days,
         badges,
         xp: 0,
-
         // 🆕
         openInternal,
         internalPreview,
@@ -1552,18 +1557,32 @@ function FeedbackSection() {
                     {/* Month body */}
                     {mOpen && (
                       <div className="px-3 pb-3">
-                        {/* 🆕 Interne Notizen Preview */}
+                        {/* 🆕 Interne Notizen Preview (klickbar: öffnet Tag & scrollt zum Feedback) */}
                         {m.openInternal > 0 && (
                           <div className="mb-3 rounded-xl border border-amber-200 dark:border-amber-900/50 bg-amber-50/60 dark:bg-amber-900/10 p-3">
                             <div className="text-xs uppercase tracking-wide text-amber-700 dark:text-amber-300 mb-1 text-center">
                               Offene interne Notizen ({m.openInternal})
                             </div>
-                            <ul className="space-y-1">
+                            <ul className="space-y-1 text-center">
                               {(m.internalPreview ?? []).map(p => (
-                                <li key={String(p.id)} className="text-sm text-amber-900 dark:text-amber-200 text-center">
-                                  <span className="font-medium">{p.date}</span>
-                                  <span className="text-amber-700/70 dark:text-amber-300/70"> · {p.label} · </span>
-                                  <span className="opacity-90">{p.excerpt}{p.excerpt.length >= 90 ? '…' : ''}</span>
+                                <li key={String(p.id)} className="text-sm text-amber-900 dark:text-amber-200">
+                                  <button
+                                    className="inline-flex items-baseline gap-2 hover:opacity-90"
+                                    onClick={()=>{
+                                      setOpenMonths(prev=>({ ...prev, [m.monthKey]: true }));
+                                      const dayOpenKey = `${m.monthKey}:${p.dayKey}`;
+                                      setOpenDays(prev=>({ ...prev, [dayOpenKey]: true }));
+                                      setTimeout(()=>{
+                                        const el = document.getElementById(`fb-${String(p.id)}`);
+                                        if (el) el.scrollIntoView({ behavior:'smooth', block:'start' });
+                                      }, 50);
+                                    }}
+                                    title="Zum Feedback springen"
+                                  >
+                                    <span className="font-semibold">{p.dateDisplay}</span>
+                                    <span className="text-amber-700/70 dark:text-amber-300/70"> · {p.label} · </span>
+                                    <span className="opacity-90">{p.excerpt}{p.excerpt.length >= 90 ? '…' : ''}</span>
+                                  </button>
                                 </li>
                               ))}
                             </ul>
@@ -1688,7 +1707,7 @@ function DayScoresTable({ items }: { items: FeedbackItem[] | undefined | null })
   const numOrNull = (v:any) => {
     const n = Number(v);
     return Number.isFinite(n) && n >= 1 ? n : null; // 0 -> n.v.
-  };
+    };
 
   const avgOf = (arr:(number|null)[]) => {
     const nums = arr.filter((x): x is number => Number.isFinite(x as number));
@@ -1781,6 +1800,7 @@ function FeedbackItemRow({
 
   const lbl = labelMap[f.feedbacktyp] ?? f.feedbacktyp ?? '—';
   const ch = f.feedbacktyp;
+  const dt = f.ts ? new Date(f.ts).toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' }) : '—';
 
   const hasInternal = !!(f.internal_note && f.internal_note.trim());
   const highlight = hasInternal && !internalChecked
@@ -1803,8 +1823,9 @@ function FeedbackItemRow({
   }
 
   return (
-    <li className={`px-3 py-3 flex items-start justify-between gap-3 ${highlight}`}>
-      <div className="min-w-0">
+    <li id={`fb-${String(f.id)}`} className={`px-3 py-3 flex items-start justify-between gap-3 ${highlight}`}>
+      {/* linke Spalte */}
+      <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-medium">{lbl}</span>
           <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300" title="Kanal">{ch}</span>
@@ -1829,6 +1850,10 @@ function FeedbackItemRow({
           )}
         </div>
 
+        <div className="text-xs text-gray-500">
+          {dt}{f.template_name ? ` · ${f.template_name}` : ''}
+        </div>
+
         {/* Kundenkommentar: auf/zu */}
         {f.kommentar && (
           <div className="mt-1">
@@ -1849,34 +1874,42 @@ function FeedbackItemRow({
           </div>
         )}
 
-        {/* Interner Kommentar (zentriert) + schöner Toggle */}
+        {/* ===== Interner Kommentar – ZENTRIERT ===== */}
         {hasInternal && (
-          <div className="mt-3 rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50/40 dark:bg-transparent p-4 grid place-items-center text-center">
-            <div className="text-xs uppercase tracking-wide text-amber-700 dark:text-amber-300 mb-1">
-              Interner Kommentar
-            </div>
-            <p className="text-sm text-amber-900 dark:text-amber-200 whitespace-pre-wrap max-w-3xl">{f.internal_note}</p>
+          <div className="mt-3 flex justify-center">
+            <div className="w-full max-w-2xl rounded-xl border border-amber-200 dark:border-amber-900/50 bg-amber-50/60 dark:bg-amber-900/10 p-4 text-center">
+              <div className="text-xs uppercase tracking-wide text-amber-700 dark:text-amber-300 mb-2">
+                Interner Kommentar
+              </div>
 
-            <button
-              type="button"
-              onClick={toggleInternalChecked}
-              aria-pressed={internalChecked}
-              className={[
-                "mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors",
-                internalChecked
-                  ? "bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700"
-                  : "bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-200 dark:border-amber-900"
-              ].join(' ')}
-              title={internalChecked ? "als erledigt markiert" : "als erledigt markieren"}
-            >
-              <span className="text-base leading-none">{internalChecked ? '✓' : '◻︎'}</span>
-              {internalChecked ? "Erledigt" : "Als erledigt markieren"}
-            </button>
+              <p className="text-base text-amber-900 dark:text-amber-200 whitespace-pre-wrap leading-relaxed">
+                {f.internal_note}
+              </p>
+
+              <div className="mt-4 flex justify-center">
+                <button
+                  type="button"
+                  onClick={toggleInternalChecked}
+                  aria-pressed={internalChecked}
+                  className={[
+                    "inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium border transition-colors",
+                    internalChecked
+                      ? "bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700"
+                      : "bg-white text-amber-800 border-amber-300 hover:bg-amber-50 dark:bg-transparent dark:text-amber-200 dark:border-amber-900"
+                  ].join(' ')}
+                  title={internalChecked ? "als erledigt markiert" : "als erledigt markieren"}
+                >
+                  <span className="text-lg leading-none">{internalChecked ? '✓' : '◻︎'}</span>
+                  {internalChecked ? "Erledigt" : "Als erledigt markieren"}
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>
 
-      <div className="shrink-0 text-right">
+      {/* rechte Spalte (Score) */}
+      <div className="shrink-0 text-right pl-2">
         <div className={`text-lg font-semibold ${noteColor(avg)}`}>
           {Number.isFinite(avg as any) ? (avg as number).toFixed(2) : '–'}
         </div>
