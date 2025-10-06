@@ -9,8 +9,8 @@ import { getAdminFromCookies } from '@/lib/admin-auth';
 type IncomingRow = Record<string, any>;
 
 type NormalizedRow = {
-  ts_iso: string;
-  feedback_at: string;
+  ts_iso: string;             // volle Zeit (ISO)
+  feedback_at: string;        // YYYY-MM-DD
   channel: string | null;
   rating_overall: number | null;
   rating_friend: number | null;
@@ -42,7 +42,6 @@ const headerMap: Record<string, string> = {
   'Anliegen gekl√§rt?': 'geklaert',
   'Feedbacktyp': 'feedbacktyp',
   'Interner Kommentar': 'note',
-
   // Exportspalten
   'Erhalten': 'ts',
   'Buchungsnummer': 'booking_number',
@@ -202,7 +201,7 @@ export async function POST(req: NextRequest) {
   if (normalized.length === 0) return NextResponse.json({ ok: true, inserted: 0, skipped });
 
   try {
-    // Upsert via import_fp – inkl. Buchungsnummer-Hash/Encryption & Agenten-Match
+    // Upsert via import_fp – inkl. Buchungsnummer-Hash/Encryption, Agenten-Match und feedback_ts
     const res = await sql<{ inserted: number }[]>`
 with src as (
   select *
@@ -248,6 +247,7 @@ prep as (
   select
     coalesce(m.matched_user_id, ${user_id}::uuid) as user_id,
     m.feedback_at,
+    m.ts_iso as feedback_ts,  -- ✨ volle Zeit für das Modal
     nullif(m.channel,'') as channel,
     case when m.rating_overall between 1 and 5 then m.rating_overall else null end as rating_overall,
     case when m.rating_friend  between 1 and 5 then m.rating_friend  else null end as rating_friend,
@@ -262,17 +262,17 @@ prep as (
     -- Hash (deterministisch) + Verschlüsselung (pgcrypto) der Buchungsnummer
     case
       when m.booking_number is not null and m.booking_number <> ''
-      then encode(digest(m.booking_number || '|' || ${process.env.BOOKING_KEY}, 'sha256'),'hex')
+      then encode(digest(m.booking_number || '|' || ${BOOKING_KEY}, 'sha256'),'hex')
       else null
     end as booking_number_hash,
 
     case
       when m.booking_number is not null and m.booking_number <> ''
-      then pgp_sym_encrypt(m.booking_number, ${process.env.BOOKING_KEY})
+      then pgp_sym_encrypt(m.booking_number, ${BOOKING_KEY})
       else null
     end as booking_number_enc,
 
-    -- Fingerprint inkl. Buchungs-Hash
+    -- Fingerprint inkl. Buchungs-Hash (auf Minuten gerundet)
     md5(
       coalesce(to_char(date_trunc('minute', m.ts_iso),'YYYY-MM-DD HH24:MI'),'') || '|' ||
       coalesce(m.channel,'')           || '|' ||
@@ -286,21 +286,21 @@ prep as (
       coalesce(m.resolved::text,'')    || '|' ||
       coalesce(
         case when m.booking_number is not null and m.booking_number <> ''
-             then encode(digest(m.booking_number || '|' || ${process.env.BOOKING_KEY}, 'sha256'),'hex')
+             then encode(digest(m.booking_number || '|' || ${BOOKING_KEY}, 'sha256'),'hex')
              else '' end
       ,'')
     ) as import_fp
   from matched m
 )
 insert into public.user_feedback (
-  user_id, feedback_at, channel,
+  user_id, feedback_at, feedback_ts, channel,                -- ✨ feedback_ts neu
   rating_overall, rating_friend, rating_qual, rating_offer,
   comment_raw, template_name, reklamation, resolved, note,
   booking_number_hash, booking_number_enc,
   import_fp
 )
 select
-  p.user_id, p.feedback_at, p.channel,
+  p.user_id, p.feedback_at, p.feedback_ts, p.channel,
   p.rating_overall, p.rating_friend, p.rating_qual, p.rating_offer,
   p.comment_raw, p.template_name, p.reklamation, p.resolved, p.note,
   p.booking_number_hash, p.booking_number_enc,

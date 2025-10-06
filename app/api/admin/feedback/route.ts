@@ -24,11 +24,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok:false, error:'user_id_must_be_uuid' }, { status:400 });
   }
 
-  // booking_number_hash wird jetzt mit selektiert
   let q = sql`
     select
       id,
       feedback_at,
+      feedback_ts,              -- ✨ volle Zeit (timestamptz) falls vorhanden
       channel,
       rating_overall,
       rating_friend,
@@ -39,19 +39,19 @@ export async function GET(req: NextRequest) {
       reklamation,
       resolved,
       note,
-      booking_number_hash
+      booking_number_hash       -- ✨ für den BO-Link
     from public.user_feedback
     where user_id = ${user_id}::uuid
   `;
   if (from) q = sql`${q} and feedback_at >= ${from}::date`;
   if (to)   q = sql`${q} and feedback_at < (${to}::date + interval '1 day')`;
-  q = sql`${q} order by feedback_at desc, id desc limit 1000`;
+  q = sql`${q} order by coalesce(feedback_ts, feedback_at::timestamp) desc, id desc limit 1000`;
 
   const rows = await q;
 
   const items = rows.map((r: any) => ({
     id: r.id,
-    ts: r.feedback_at,               // Alias, damit dein UI ts||feedback_at anzeigen kann
+    ts: r.feedback_ts ?? r.feedback_at, // ✨ Frontend-Feld „ts“ für Modal (mit Uhrzeit)
     feedback_at: r.feedback_at,
     channel: r.channel,
     rating_overall: r.rating_overall,
@@ -63,7 +63,7 @@ export async function GET(req: NextRequest) {
     reklamation: r.reklamation,
     resolved: r.resolved,
     note: r.note,
-    booking_number_hash: r.booking_number_hash ?? null, // ✨ wichtig für /api/bo-Link
+    booking_number_hash: r.booking_number_hash ?? null, // ✨ BO-Link-Daten
   }));
 
   return NextResponse.json({ ok:true, items });
