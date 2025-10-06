@@ -140,14 +140,10 @@ export default function AdminFeedbackPage(){
         const j = await r.json().catch(()=>({}));
         const items: ExistingRow[] = Array.isArray(j?.items) ? j.items : [];
         items.sort((a,b)=> parseTsToMs(b.ts, b.feedback_at) - parseTsToMs(a.ts, a.feedback_at));
-        setExisting(items);
-        if (items.length>0) {
-          setModalDraft({ ...items[0] });
-          setOpenId(items[0].id);
-        } else {
-          setOpenId(null);
-          setModalDraft({});
-        }
+      setExisting(items);
+// kein Auto-Open – Modal bleibt zu, bis man in der Liste klickt
+setOpenId(null);
+setModalDraft({});
       } finally {
         setLoadingExisting(false);
       }
@@ -447,14 +443,20 @@ export default function AdminFeedbackPage(){
             <div className="grid gap-2">
               <UserSelect users={users} value={viewUserId} onChange={setViewUserId} placeholder="– Mitarbeiter wählen –" />
               <div className="inline-flex rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden self-start">
-                <button
-                  onClick={()=>setTab('existing')}
-                  className={`px-4 py-2 text-sm ${tab==='existing'?'bg-blue-600 text-white':'bg-transparent'}`}
-                  disabled={!viewUserId}
-                  title={!viewUserId ? 'Bitte oben Mitarbeiter wählen' : ''}
-                >Bestehende bearbeiten</button>
+         <button
+  onClick={()=>setTab('existing')}
+  disabled={!viewUserId}
+  title={!viewUserId ? 'Bitte oben Mitarbeiter wählen' : ''}
+  className="self-start inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm
+             bg-gradient-to-br from-blue-600 to-blue-700 text-white shadow-sm
+             hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+>
+  bestehende bearbeiten
+</button>
               </div>
-              <p className="text-xs text-gray-500">Nach Auswahl öffnet sich automatisch das jüngste Feedback im Modal.</p>
+              <p className="text-xs text-gray-500">
+  Klicke in der Liste auf einen Eintrag, um das Feedback zu bearbeiten.
+</p>
             </div>
           </fieldset>
         </div>
@@ -613,10 +615,16 @@ export default function AdminFeedbackPage(){
                     <button onClick={goNext} disabled={openIndex<0 || openIndex>=existing.length-1}
                       className="px-3 py-2 rounded-lg text-sm border bg-white hover:bg-gray-50 dark:bg-white/10 dark:hover:bg-white/20 dark:border-gray-700 disabled:opacity-50">Nächstes</button>
                     {openItem?.booking_number_hash ? (
-                      <a href={`/api/bo/${openItem.booking_number_hash}`} target="_blank" rel="noreferrer" className="text-sm text-blue-600 underline">
-                        Im Backoffice suchen
-                      </a>
-                    ) : <span />}
+  <a
+    href={`/api/bo/${openItem.booking_number_hash}`}
+    target="_blank"
+    rel="noreferrer"
+    className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs
+               bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"
+  >
+    Im Backoffice öffnen
+  </a>
+) : <span />}
                   </div>
                   <div className="flex items-center gap-2">
                     <button onClick={deleteModal} className="px-3 py-2 rounded-lg text-sm bg-red-600 hover:bg-red-700 text-white">Löschen</button>
@@ -671,14 +679,30 @@ export default function AdminFeedbackPage(){
                     />
                   </Field>
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <Field label="Rekla">
-                      <BoolToggle value={!!(modalDraft.reklamation ?? openItem.reklamation)} onChange={(v)=>setModalDraft(d=>({...d, reklamation:v }))}/>
-                    </Field>
-                    <Field label="Geklärt?">
-                      <BoolToggle value={!!(modalDraft.resolved ?? openItem.resolved)} onChange={(v)=>setModalDraft(d=>({...d, resolved:v }))}/>
-                    </Field>
-                  </div>
+               <div className="grid grid-cols-2 gap-3">
+  <Field label="Rekla">
+    <YnToggle
+      value={(modalDraft.reklamation ?? openItem.reklamation) === null
+               ? null
+               : ((modalDraft.reklamation ?? openItem.reklamation) ? 'ja' : 'nein')}
+      onChange={(v)=>setModalDraft(d=>({
+        ...d,
+        reklamation: v === 'ja' ? true : v === 'nein' ? false : null
+      }))}
+    />
+  </Field>
+  <Field label="Geklärt?">
+    <YnToggle
+      value={(modalDraft.resolved ?? openItem.resolved) === null
+               ? null
+               : ((modalDraft.resolved ?? openItem.resolved) ? 'ja' : 'nein')}
+      onChange={(v)=>setModalDraft(d=>({
+        ...d,
+        resolved: v === 'ja' ? true : v === 'nein' ? false : null
+      }))}
+    />
+  </Field>
+</div>
 
                   <Field label="Interne Notiz">
                     <input
@@ -688,13 +712,10 @@ export default function AdminFeedbackPage(){
                     />
                   </Field>
 
-                  {openItem.booking_number_hash ? (
-                    <div className="text-xs text-gray-600">
-                      BO: <a className="underline text-blue-600" target="_blank" rel="noreferrer" href={`/api/bo/${openItem.booking_number_hash}`}>/api/bo/{openItem.booking_number_hash}</a>
-                    </div>
-                  ) : (
-                    <div className="text-xs text-gray-500">Kein BO-Link vorhanden.</div>
-                  )}
+                  {!openItem.booking_number_hash && (
+  <div className="text-xs text-gray-500">Kein BO-Link vorhanden.</div>
+)}
+                  ){'}'}
                 </div>
               )}
             </Modal>
