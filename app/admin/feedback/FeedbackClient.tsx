@@ -27,8 +27,8 @@ type ParsedRow = {
 
 type ExistingRow = {
   id: number;
-  ts?: string | null;
-  feedback_at: string;
+  ts?: string | null;                  // optional (falls später getrennte ts-Spalte kommt)
+  feedback_at: string;                 // YYYY-MM-DD
   channel: string | null;
   rating_overall: number | null;
   rating_friend: number | null;
@@ -53,6 +53,26 @@ const buildAgentKey = (r: ParsedRow) => {
   return normName(r.agent_name || fallback) || '';
 };
 
+const parseTsToMs = (ts?: string | null, fallbackDate?: string) => {
+  const s = (ts ?? fallbackDate ?? '').trim();
+  if (!s) return 0;
+  // Unterstützt ISO oder dd.mm.yy / dd/mm/yy
+  const m1 = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2}|\d{4})(?:[ T](\d{1,2}):(\d{2}))?$/);
+  if (m1) {
+    let [, dd, mm, yy, hh='00', mi='00'] = m1;
+    let year = +yy; if (yy.length===2) year = 2000 + year;
+    return Date.UTC(year, +mm-1, +dd, +hh, +mi, 0);
+  }
+  const m2 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})(?:[ T](\d{1,2}):(\d{2}))?$/);
+  if (m2) {
+    let [, dd, mm, yy, hh='00', mi='00'] = m2;
+    let year = +yy; if (yy.length===2) year = 2000 + year;
+    return Date.UTC(year, +mm-1, +dd, +hh, +mi, 0);
+  }
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? 0 : d.getTime();
+};
+
 /* ===========================
    Page
 =========================== */
@@ -60,11 +80,10 @@ export default function AdminFeedbackPage(){
   const [users,setUsers]=useState<User[]>([]);
   const [assignMode,setAssignMode]=useState<'auto'|'fixed'>('auto');
 
-  // Import: fixed target OR auto-fallback
+  // Import: fixed target
   const [fixedUserId,setFixedUserId]=useState('');
-  const [fallbackUserId,setFallbackUserId]=useState('');
 
-  // Ansicht bestehender Feedbacks (unabhängig)
+  // Ansicht bestehender Feedbacks (rechts)
   const [viewUserId,setViewUserId]=useState('');
 
   const [tab,setTab]=useState<'upload'|'existing'>('upload');
@@ -81,12 +100,17 @@ export default function AdminFeedbackPage(){
 
   // Modal
   const [openId,setOpenId]=useState<number|null>(null);
-  const openItem = useMemo(()=> existing.find(x=>x.id===openId) ?? null, [openId, existing]);
+  const openIndex = useMemo(()=>{
+    if (!openId) return -1;
+    return existing.findIndex(x=>x.id===openId);
+  },[openId, existing]);
+  const openItem = openIndex>=0 ? existing[openIndex] : null;
   const [modalDraft,setModalDraft]=useState<Partial<ExistingRow>>({});
   const [savingModal,setSavingModal]=useState(false);
 
-  // Agent-Mapping (pro erkannter Name → userId|'auto')
+  // Agent-Mapping (pro erkannter Name → userId|'auto'), inkl. globalem Fallback
   const [agentMap, setAgentMap] = useState<Record<string, string|'auto'>>({});
+  const [fallbackUserId,setFallbackUserId]=useState(''); // wird im Mapping-Panel gewählt
 
   /* ---------- Nutzerliste ---------- */
   useEffect(()=>{(async()=>{
@@ -104,7 +128,13 @@ export default function AdminFeedbackPage(){
     }catch{}
   })();},[]);
 
-  /* ---------- Bestehende laden (Ansicht) ---------- */
+  /* ---------- Rechts: Auswahl = sofort „Bestehende bearbeiten“ + Modal öffnen ---------- */
+  useEffect(()=>{
+    if (!viewUserId) return;
+    setTab('existing');
+  },[viewUserId]);
+
+  /* ---------- Bestehende laden ---------- */
   useEffect(()=>{
     if (!viewUserId || tab!=='existing') return;
     (async ()=>{
@@ -113,7 +143,21 @@ export default function AdminFeedbackPage(){
         const r = await fetch(`/api/admin/feedback?user_id=${encodeURIComponent(viewUserId)}`, { cache:'no-store' });
         const j = await r.json().catch(()=>({}));
         const items: ExistingRow[] = Array.isArray(j?.items) ? j.items : [];
+        // jüngsten Eintrag ermitteln (ts oder feedback_at)
+        items.sort((a,b)=>{
+          const ams = parseTsToMs(a.ts, a.feedback_at);
+          const bms = parseTsToMs(b.ts, b.feedback_at);
+          return bms - ams;
+        });
         setExisting(items);
+        // Modal automatisch mit jüngstem öffnen
+        if (items.length>0) {
+          setModalDraft({ ...items[0] });
+          setOpenId(items[0].id);
+        } else {
+          setOpenId(null);
+          setModalDraft({});
+        }
       } finally {
         setLoadingExisting(false);
       }
@@ -158,6 +202,7 @@ export default function AdminFeedbackPage(){
           }));
           setRows(safe);
           setTab('upload');
+
           // Agent-Mapping initialisieren (Auto-Vorschläge)
           const initialMap: Record<string,string|'auto'> = {};
           const unique = new Map<string,{label:string,count:number}>();
@@ -169,7 +214,6 @@ export default function AdminFeedbackPage(){
             cur.count++; cur.label = cur.label || label;
             unique.set(key, cur);
           }
-          // Auto-Suggest: exakter Name (case/space-normalized) → user
           const userIndex = new Map(users.map(u => [normName(u.name), u.id]));
           unique.forEach((_v, key)=>{
             const uId = userIndex.get(key);
@@ -218,7 +262,7 @@ export default function AdminFeedbackPage(){
 
   const rowsForSave = useMemo(()=>{
     const base = dropDupes ? rows.filter((_,i)=> !dupInfo.dupIdx.has(i)) : rows;
-    // Mapping anwenden: Wenn für Agent-Key explizit User gewählt → agent_name auf exakten User-Namen setzen
+    // Mapping anwenden
     const byId = new Map(users.map(u => [u.id, u]));
     return base.map(r=>{
       const key = buildAgentKey(r);
@@ -234,15 +278,17 @@ export default function AdminFeedbackPage(){
   },[rows, dropDupes, dupInfo, agentMap, users]);
 
   /* ---------- Speichern ----------
+     auto   → braucht fallbackUserId (aus Mapping-Panel)
      fixed  → braucht fixedUserId
-     auto   → braucht fallbackUserId
   --------------------------------- */
   async function save(){
-    const effectiveUserId = assignMode==='fixed' ? fixedUserId : fallbackUserId;
+    const needFallback = assignMode==='auto';
+    const effectiveUserId = needFallback ? fallbackUserId : fixedUserId;
+
     if (!effectiveUserId) {
-      alert(assignMode==='fixed'
-        ? 'Bitte Mitarbeiter für feste Zuordnung wählen.'
-        : 'Bitte Fallback-Mitarbeiter für nicht zuordenbare Einträge wählen.');
+      alert(needFallback
+        ? 'Bitte im „Erkannte Bearbeiter“-Panel einen Fallback-Mitarbeiter wählen.'
+        : 'Bitte Mitarbeiter für feste Zuordnung wählen.');
       return;
     }
     if(rowsForSave.length===0) return;
@@ -273,7 +319,7 @@ export default function AdminFeedbackPage(){
     }
   }
 
-  /* ---------- Modal öffnen/schließen ---------- */
+  /* ---------- Modal öffnen/schließen + Paging ---------- */
   function openModal(id:number){
     const row = existing.find(x=>x.id===id);
     if (!row) return;
@@ -284,28 +330,40 @@ export default function AdminFeedbackPage(){
     setOpenId(null);
     setModalDraft({});
   }
+  function goPrev(){
+    if (openIndex<=0) return;
+    const nxt = existing[openIndex-1];
+    setModalDraft({ ...nxt });
+    setOpenId(nxt.id);
+  }
+  function goNext(){
+    if (openIndex<0 || openIndex>=existing.length-1) return;
+    const nxt = existing[openIndex+1];
+    setModalDraft({ ...nxt });
+    setOpenId(nxt.id);
+  }
 
   /* ---------- Modal speichern/löschen ---------- */
-  async function saveModal(){
-    if (!openId) return;
-    setSavingModal(true);
-    try{
-      const r = await fetch(`/api/admin/feedback/${openId}`,{
-        method:'PATCH',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify(modalDraft)
-      });
-      const j = await r.json().catch(()=>({}));
-      if (!r.ok || !j?.ok) throw new Error(j?.error || 'save_failed');
-      setExisting(prev=> prev.map(it => it.id===openId ? { ...it, ...modalDraft } as ExistingRow : it));
-      closeModal();
-    } catch(e:any){
-      console.error(e);
-      alert('Speichern fehlgeschlagen.');
-    } finally {
-      setSavingModal(false);
-    }
+async function saveModal(){
+  if (!openId) return;
+  setSavingModal(true);            // ⬅ hier
+  try{
+    const r = await fetch(`/api/admin/feedback/${openId}`,{
+      method:'PATCH',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(modalDraft)
+    });
+    const j = await r.json().catch(()=>({}));
+    if (!r.ok || !j?.ok) throw new Error(j?.error || 'save_failed');
+    setExisting(prev=> prev.map(it => it.id===openId ? { ...it, ...modalDraft } as ExistingRow : it));
+    // im Modal bleiben
+  } catch(e:any){
+    console.error(e);
+    alert('Speichern fehlgeschlagen.');
+  } finally {
+    setSavingModal(false);         // ⬅ und hier
   }
+}
   async function deleteModal(){
     if (!openId) return;
     if (!confirm('Eintrag wirklich löschen?')) return;
@@ -313,8 +371,16 @@ export default function AdminFeedbackPage(){
       const r = await fetch(`/api/admin/feedback/${openId}`, { method:'DELETE' });
       const j = await r.json().catch(()=>({}));
       if (!r.ok || !j?.ok) throw new Error('delete_failed');
+      // zum nächsten springen (oder schließen)
+      const nextIdx = openIndex < existing.length-1 ? openIndex+1 : openIndex-1;
+      const nextRow = existing[nextIdx];
       setExisting(prev=> prev.filter(x=>x.id!==openId));
-      closeModal();
+      if (nextRow) {
+        setModalDraft({ ...nextRow });
+        setOpenId(nextRow.id);
+      } else {
+        closeModal();
+      }
     } catch(e){
       console.error(e);
       alert('Löschen fehlgeschlagen.');
@@ -350,7 +416,7 @@ export default function AdminFeedbackPage(){
       {/* Kopf: Import-Einstellungen + CSV + Ansichtsauswahl */}
       <section className="rounded-2xl border border-gray-200 dark:border-gray-800 p-4 bg-white dark:bg-gray-900 space-y-4">
         <div className="grid gap-4 lg:grid-cols-2">
-          {/* Import-Einstellungen */}
+          {/* Import-Einstellungen (links) */}
           <fieldset className="rounded-xl border border-gray-200 dark:border-gray-700 p-3">
             <legend className="px-1 text-sm text-gray-600">Zuordnung beim Import</legend>
 
@@ -365,12 +431,7 @@ export default function AdminFeedbackPage(){
               >Fest (alle Zeilen)</button>
             </div>
 
-            {assignMode==='auto' ? (
-              <div className="grid gap-2">
-                <div className="text-sm">Fallback-Mitarbeiter (nur wenn kein Name gematcht wird)</div>
-                <UserSelect users={users} value={fallbackUserId} onChange={setFallbackUserId} placeholder="– Fallback wählen –" />
-              </div>
-            ) : (
+            {assignMode==='fixed' && (
               <div className="grid gap-2">
                 <div className="text-sm">Fest zuordnen zu Mitarbeiter</div>
                 <UserSelect users={users} value={fixedUserId} onChange={setFixedUserId} placeholder="– Mitarbeiter wählen –" />
@@ -387,16 +448,12 @@ export default function AdminFeedbackPage(){
             </div>
           </fieldset>
 
-          {/* Ansicht bestehender Feedbacks */}
+          {/* Ansicht bestehender Feedbacks (rechts) */}
           <fieldset className="rounded-xl border border-gray-200 dark:border-gray-700 p-3">
             <legend className="px-1 text-sm text-gray-600">Bestehende Feedbacks ansehen</legend>
             <div className="grid gap-2">
               <UserSelect users={users} value={viewUserId} onChange={setViewUserId} placeholder="– Mitarbeiter wählen –" />
               <div className="inline-flex rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden self-start">
-                <button
-                  onClick={()=>setTab('upload')}
-                  className={`px-4 py-2 text-sm ${tab==='upload'?'bg-blue-600 text-white':'bg-transparent'}`}
-                >Neu importieren</button>
                 <button
                   onClick={()=>setTab('existing')}
                   className={`px-4 py-2 text-sm ${tab==='existing'?'bg-blue-600 text-white':'bg-transparent'}`}
@@ -404,17 +461,22 @@ export default function AdminFeedbackPage(){
                   title={!viewUserId ? 'Bitte oben Mitarbeiter wählen' : ''}
                 >Bestehende bearbeiten</button>
               </div>
+              <p className="text-xs text-gray-500">
+                Hinweis: Nach Auswahl wird automatisch das jüngste Feedback im Modal geöffnet.
+              </p>
             </div>
           </fieldset>
         </div>
 
-        {/* Agent-Mapping Panel (nur wenn CSV vorhanden & auto/fallback sinnvoll) */}
-        {tab==='upload' && rows.length>0 && (
+        {/* Agent-Mapping Panel (nur wenn CSV vorhanden & Modus auto) */}
+        {tab==='upload' && rows.length>0 && assignMode==='auto' && (
           <AgentMappingPanel
             agents={agentSummary}
             users={users}
             agentMap={agentMap}
             setAgentMap={setAgentMap}
+            fallbackUserId={fallbackUserId}
+            setFallbackUserId={setFallbackUserId}
           />
         )}
 
@@ -511,7 +573,7 @@ export default function AdminFeedbackPage(){
               </>
             ) : (
               <p className="text-sm text-gray-500">
-                Wähle oben den Import-Modus, optional Mitarbeiter/Fallback, und lade dann eine CSV hoch.
+                Wähle oben den Import-Modus und lade dann eine CSV hoch.
               </p>
             )}
           </>
@@ -535,7 +597,7 @@ export default function AdminFeedbackPage(){
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
                         <div className="text-sm font-medium">
-                          {r.feedback_at} · <span className="text-gray-600">{r.channel || '—'}</span>
+                          {(r.ts ?? r.feedback_at)} · <span className="text-gray-600">{r.channel || '—'}</span>
                         </div>
                         <div className="text-xs text-gray-500 line-clamp-1">
                           {r.comment_raw || '—'}
@@ -557,11 +619,23 @@ export default function AdminFeedbackPage(){
             <Modal open={!!openId} title="Feedback bearbeiten" onClose={closeModal}
               footer={
                 <div className="flex items-center justify-between w-full">
-                  {openItem?.booking_number_hash ? (
-                    <a href={`/api/bo/${openItem.booking_number_hash}`} target="_blank" rel="noreferrer" className="text-sm text-blue-600 underline">
-                      Im Backoffice suchen
-                    </a>
-                  ) : <span />}
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={goPrev}
+                      disabled={openIndex<=0}
+                      className="px-3 py-2 rounded-lg text-sm border bg-white hover:bg-gray-50 dark:bg-white/10 dark:hover:bg-white/20 dark:border-gray-700 disabled:opacity-50"
+                    >Vorheriges</button>
+                    <button
+                      onClick={goNext}
+                      disabled={openIndex<0 || openIndex>=existing.length-1}
+                      className="px-3 py-2 rounded-lg text-sm border bg-white hover:bg-gray-50 dark:bg-white/10 dark:hover:bg-white/20 dark:border-gray-700 disabled:opacity-50"
+                    >Nächstes</button>
+                    {openItem?.booking_number_hash ? (
+                      <a href={`/api/bo/${openItem.booking_number_hash}`} target="_blank" rel="noreferrer" className="text-sm text-blue-600 underline">
+                        Im Backoffice suchen
+                      </a>
+                    ) : <span />}
+                  </div>
                   <div className="flex items-center gap-2">
                     <button
                       onClick={deleteModal}
@@ -671,61 +745,76 @@ export default function AdminFeedbackPage(){
    Agent-Mapping Panel
 =========================== */
 function AgentMappingPanel({
-  agents, users, agentMap, setAgentMap
+  agents, users, agentMap, setAgentMap, fallbackUserId, setFallbackUserId
 }:{
   agents: { key:string; label:string; count:number }[];
   users: User[];
   agentMap: Record<string, string|'auto'>;
   setAgentMap: React.Dispatch<React.SetStateAction<Record<string, string|'auto'>>>;
+  fallbackUserId: string;
+  setFallbackUserId: (v:string)=>void;
 }){
-  if (agents.length === 0) return null;
   return (
     <section className="rounded-xl border border-gray-200 dark:border-gray-700 p-3 bg-gray-50/60 dark:bg-gray-800/30">
-      <div className="text-sm font-medium mb-2">Erkannte Bearbeiter in der CSV</div>
-      <div className="overflow-auto">
-        <table className="min-w-[680px] w-full text-sm">
-          <thead className="bg-white/70 dark:bg-gray-900/40">
-            <tr>
-              <th className="text-left px-3 py-2">Name (CSV)</th>
-              <th className="text-left px-3 py-2">Häufigkeit</th>
-              <th className="text-left px-3 py-2 w-[420px]">Zuordnung</th>
-            </tr>
-          </thead>
-          <tbody>
-            {agents.map(a=>{
-              const val = agentMap[a.key] ?? 'auto';
-              return (
-                <tr key={a.key} className="border-t border-gray-200 dark:border-gray-800">
-                  <td className="px-3 py-2">{a.label || '(leer)'}</td>
-                  <td className="px-3 py-2">{a.count}</td>
-                  <td className="px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <select
-                        value={val}
-                        onChange={e=>{
-                          const v = e.target.value as string;
-                          setAgentMap(prev=>({ ...prev, [a.key]: v==='auto' ? 'auto' : v }));
-                        }}
-                        className="px-3 py-2 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10 w-full"
-                      >
-                        <option value="auto">Automatisch (Name matcht zu app_users.name)</option>
-                        {users.map(u=>(
-                          <option key={u.id} value={u.id}>
-                            {u.name || u.email || u.id}
-                          </option>
-                        ))}
-                      </select>
-                      {val!=='auto' && <span className="text-xs text-gray-500">wird erzwungen</span>}
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="text-sm font-medium">Erkannte Bearbeiter in der CSV</div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-600">Fallback-Mitarbeiter (für nicht zuordenbare Zeilen)</span>
+          <UserSelect users={users} value={fallbackUserId} onChange={setFallbackUserId} placeholder="– Fallback wählen –" />
+        </div>
       </div>
+
+      {agents.length===0 ? (
+        <p className="mt-2 text-xs text-gray-600">
+          In der CSV wurden keine Bearbeiter-Namen erkannt. Du kannst trotzdem speichern – nicht zuordenbare Zeilen fallen komplett auf den Fallback.
+        </p>
+      ) : (
+        <div className="overflow-auto mt-2">
+          <table className="min-w-[680px] w-full text-sm">
+            <thead className="bg-white/70 dark:bg-gray-900/40">
+              <tr>
+                <th className="text-left px-3 py-2">Name (CSV)</th>
+                <th className="text-left px-3 py-2">Häufigkeit</th>
+                <th className="text-left px-3 py-2 w-[420px]">Zuordnung</th>
+              </tr>
+            </thead>
+            <tbody>
+              {agents.map(a=>{
+                const val = agentMap[a.key] ?? 'auto';
+                return (
+                  <tr key={a.key} className="border-t border-gray-200 dark:border-gray-800">
+                    <td className="px-3 py-2">{a.label || '(leer)'}</td>
+                    <td className="px-3 py-2">{a.count}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={val}
+                          onChange={e=>{
+                            const v = e.target.value as string;
+                            setAgentMap(prev=>({ ...prev, [a.key]: v==='auto' ? 'auto' : v }));
+                          }}
+                          className="px-3 py-2 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10 w-full"
+                        >
+                          <option value="auto">Automatisch (Name matcht zu app_users.name)</option>
+                          {users.map(u=>(
+                            <option key={u.id} value={u.id}>
+                              {u.name || u.email || u.id}
+                            </option>
+                          ))}
+                        </select>
+                        {val!=='auto' && <span className="text-xs text-gray-500">wird erzwungen</span>}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       <p className="mt-2 text-xs text-gray-600">
-        Hinweis: Manuelle Zuordnung setzt in den betroffenen Zeilen den <code>agent_name</code> auf den exakten Mitarbeiternamen – so greift das Matching sicher. Nicht zuordenbare Einträge fallen im Auto-Modus auf den Fallback.
+        Manuelle Zuordnung setzt in den betroffenen Zeilen den <code>agent_name</code> auf den exakten Mitarbeiternamen. Nicht zuordenbare Zeilen werden dem Fallback zugewiesen.
       </p>
     </section>
   );
@@ -839,8 +928,7 @@ function NumInput({ value, onChange }:{ value:number|null, onChange:(v:number|nu
 }
 
 /* ===========================
-   Deine bestehenden Helpers nutzt der Code weiter
-   (avgOf, numOrNull, strOrNull, ynOrNull, normTs, fixMojibake)
+   Helpers
 =========================== */
 function avgOf(arr:(number|null)[]){
   const xs = arr.filter((n): n is number => Number.isFinite(n as number));
