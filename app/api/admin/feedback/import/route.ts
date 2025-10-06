@@ -1,4 +1,3 @@
-// app/api/admin/feedback/import/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -28,7 +27,6 @@ type NormalizedRow = {
 };
 
 const headerMap: Record<string, string> = {
-  // Standard
   'Datum': 'ts',
   'Bewertung': 'bewertung',
   'Beraterfreundlichkeit': 'beraterfreundlichkeit',
@@ -42,7 +40,6 @@ const headerMap: Record<string, string> = {
   'Anliegen gekl√§rt?': 'geklaert',
   'Feedbacktyp': 'feedbacktyp',
   'Interner Kommentar': 'note',
-  // Exportspalten
   'Erhalten': 'ts',
   'Buchungsnummer': 'booking_number',
   'Beratervorname': 'agent_first',
@@ -75,19 +72,13 @@ const toStr = (v: any) => {
 const fixMojibake = (s: string | null) =>
   s
     ? s
-        .replace(/Ã¤/g, 'ä')
-        .replace(/Ã„/g, 'Ä')
-        .replace(/Ã¶/g, 'ö')
-        .replace(/Ã–/g, 'Ö')
-        .replace(/Ã¼/g, 'ü')
-        .replace(/Ãœ/g, 'Ü')
+        .replace(/Ã¤/g, 'ä').replace(/Ã„/g, 'Ä')
+        .replace(/Ã¶/g, 'ö').replace(/Ã–/g, 'Ö')
+        .replace(/Ã¼/g, 'ü').replace(/Ãœ/g, 'Ü')
         .replace(/ÃŸ/g, 'ß')
-        .replace(/â€“/g, '–')
-        .replace(/â€”/g, '—')
-        .replace(/â€ž/g, '„')
-        .replace(/â€œ/g, '“')
-        .replace(/Â·/g, '·')
-        .replace(/Â /g, ' ')
+        .replace(/â€“/g, '–').replace(/â€”/g, '—')
+        .replace(/â€ž/g, '„').replace(/â€œ/g, '“')
+        .replace(/Â·/g, '·').replace(/Â /g, ' ')
         .replace(/â€¦/g, '…')
         .trim()
     : s;
@@ -95,8 +86,8 @@ const fixMojibake = (s: string | null) =>
 const toBool = (v: any): boolean | null => {
   const s = String(v ?? '').trim().toLowerCase();
   if (!s || s === '–' || s === '-') return null;
-  if (['ja', 'yes', 'y', 'true', '1', 'x', '✓', '✔'].includes(s)) return true;
-  if (['nein', 'no', 'n', 'false', '0'].includes(s)) return false;
+  if (['ja','yes','y','true','1','x','✓','✔'].includes(s)) return true;
+  if (['nein','no','n','false','0'].includes(s)) return false;
   return null;
 };
 
@@ -139,18 +130,14 @@ export async function POST(req: NextRequest) {
   const admin = await getAdminFromCookies(req).catch(() => null);
   if (!admin) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
 
-  // Booking-Key aus ENV (muss gesetzt sein)
   const BOOKING_KEY = process.env.BOOKING_KEY;
   if (!BOOKING_KEY) {
     return NextResponse.json({ ok: false, error: 'booking_key_missing_env' }, { status: 500 });
   }
 
   let body: any = {};
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ ok: false, error: 'invalid_json' }, { status: 400 });
-  }
+  try { body = await req.json(); }
+  catch { return NextResponse.json({ ok: false, error: 'invalid_json' }, { status: 400 }); }
 
   const user_id = String(body?.user_id ?? '').trim();
   if (!isUUID(user_id))
@@ -165,14 +152,9 @@ export async function POST(req: NextRequest) {
 
   for (const r of rows) {
     const ts_iso = toISODateTime(r.ts ?? r.Datum);
-    if (!ts_iso) {
-      skipped++;
-      continue; // ohne Zeitstempel nicht importieren
-    }
+    if (!ts_iso) { skipped++; continue; } // ohne Zeitstempel nicht importieren
 
     const booking = cleanBooking(r.booking_number);
-
-    // Name bauen: "Vorname Nachname" – wenn "Bearbeiter" gesetzt ist, hat das Vorrang.
     const first = toStr(r.agent_first);
     const last = toStr(r.agent_last);
     const fullFromParts = [first, last].filter(Boolean).join(' ').trim() || null;
@@ -201,7 +183,6 @@ export async function POST(req: NextRequest) {
   if (normalized.length === 0) return NextResponse.json({ ok: true, inserted: 0, skipped });
 
   try {
-    // Upsert via import_fp – inkl. Buchungsnummer-Hash/Encryption, Agenten-Match und feedback_ts
     const res = await sql<{ inserted: number }[]>`
 with src as (
   select *
@@ -247,7 +228,7 @@ prep as (
   select
     coalesce(m.matched_user_id, ${user_id}::uuid) as user_id,
     m.feedback_at,
-    m.ts_iso as feedback_ts,  -- ✨ volle Zeit für das Modal
+    m.ts_iso as feedback_ts,
     nullif(m.channel,'') as channel,
     case when m.rating_overall between 1 and 5 then m.rating_overall else null end as rating_overall,
     case when m.rating_friend  between 1 and 5 then m.rating_friend  else null end as rating_friend,
@@ -259,20 +240,18 @@ prep as (
     m.resolved,
     nullif(m.note,'')          as note,
 
-    -- Hash (deterministisch) + Verschlüsselung (pgcrypto) der Buchungsnummer
     case
       when m.booking_number is not null and m.booking_number <> ''
-      then encode(digest(m.booking_number || '|' || ${BOOKING_KEY}, 'sha256'),'hex')
+      then encode(digest(m.booking_number || '|' || ${process.env.BOOKING_KEY}, 'sha256'),'hex')
       else null
     end as booking_number_hash,
 
     case
       when m.booking_number is not null and m.booking_number <> ''
-      then pgp_sym_encrypt(m.booking_number, ${BOOKING_KEY})
+      then pgp_sym_encrypt(m.booking_number, ${process.env.BOOKING_KEY})
       else null
     end as booking_number_enc,
 
-    -- Fingerprint inkl. Buchungs-Hash (auf Minuten gerundet)
     md5(
       coalesce(to_char(date_trunc('minute', m.ts_iso),'YYYY-MM-DD HH24:MI'),'') || '|' ||
       coalesce(m.channel,'')           || '|' ||
@@ -286,14 +265,14 @@ prep as (
       coalesce(m.resolved::text,'')    || '|' ||
       coalesce(
         case when m.booking_number is not null and m.booking_number <> ''
-             then encode(digest(m.booking_number || '|' || ${BOOKING_KEY}, 'sha256'),'hex')
+             then encode(digest(m.booking_number || '|' || ${process.env.BOOKING_KEY}, 'sha256'),'hex')
              else '' end
       ,'')
     ) as import_fp
   from matched m
 )
 insert into public.user_feedback (
-  user_id, feedback_at, feedback_ts, channel,                -- ✨ feedback_ts neu
+  user_id, feedback_at, feedback_ts, channel,
   rating_overall, rating_friend, rating_qual, rating_offer,
   comment_raw, template_name, reklamation, resolved, note,
   booking_number_hash, booking_number_enc,
@@ -309,7 +288,6 @@ from prep p
 on conflict (user_id, import_fp) do nothing
 returning 1 as inserted
 `;
-
     return NextResponse.json({ ok: true, inserted: res.length, skipped });
   } catch (e: any) {
     console.error('[feedback/import]', e);
