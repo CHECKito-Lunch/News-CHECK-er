@@ -90,24 +90,89 @@ export default function ProfilePage() {
       </header>
 
       {/* 2-spaltig ab md */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="space-y-6">
-          <TeamsAndGroups />
-          <ProfileSecurityCard onOpen={() => setPsOpen(true)} />
-        </div>
+<div className="space-y-6">
+  <SectionAccordion title="Teams & Gruppen">
+    <TeamsAndGroups />
+  </SectionAccordion>
 
-        <div className="space-y-6">
-          <InvitesCard />
-          <MyEventsCard />
-          <UnreadCard />
-        </div>
-      </div>
+  <SectionAccordion title="Profil & Sicherheit">
+    <ProfileSecurityCard onOpen={() => setPsOpen(true)} />
+  </SectionAccordion>
 
-      {/* 🔽 Vollbreite, ganz unten */}
-      <FeedbackSection />
+  <SectionAccordion title="Einladungen">
+    <InvitesCard />
+  </SectionAccordion>
+
+  <SectionAccordion title="Meine Events">
+    <MyEventsCard />
+  </SectionAccordion>
+
+  <SectionAccordion title="Verpasst seit letztem Besuch">
+    <UnreadCard />
+  </SectionAccordion>
+
+  {/* Der große Feedback-Block ist ebenfalls einklappbar */}
+  <SectionAccordion title="Kunden-Feedback" defaultOpen={false}>
+    <FeedbackSection />
+  </SectionAccordion>
+</div>
 
       <ProfileSecurityModal open={psOpen} onClose={() => setPsOpen(false)} />
     </div>
+  );
+}
+
+/* ===========================
+   Accordion Wrapper (A11y + Tailwind)
+   - standardmäßig zugeklappt (defaultOpen = false)
+=========================== */
+function SectionAccordion({
+  title,
+  badge,
+  children,
+  defaultOpen = false,
+}: {
+  title: React.ReactNode;
+  badge?: React.ReactNode;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(!!defaultOpen);
+
+  return (
+    <section className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="w-full px-4 py-3 flex items-center justify-between gap-3 hover:bg-gray-50 dark:hover:bg-gray-800/50"
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-base font-semibold">{title}</span>
+          {badge}
+        </div>
+        <span
+          className="inline-block text-gray-500 transition-transform"
+          style={{ transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}
+          aria-hidden
+        >
+          ▸
+        </span>
+      </button>
+
+      <div
+        className={`transition-[grid-template-rows] duration-200 ease-out grid ${
+          open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+        }`}
+      >
+        <div className="min-h-0 overflow-hidden">
+          {/* Inhalt behält deine bestehende Card-Optik */}
+          <div className="p-5 border-t border-gray-100 dark:border-gray-800">
+            {children}
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 
