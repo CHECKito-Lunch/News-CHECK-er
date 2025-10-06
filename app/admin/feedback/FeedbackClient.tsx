@@ -27,8 +27,8 @@ type ParsedRow = {
 
 type ExistingRow = {
   id: number;
-  ts?: string | null;                  // optional (falls später getrennte ts-Spalte kommt)
-  feedback_at: string;                 // YYYY-MM-DD
+  ts?: string | null;
+  feedback_at: string;
   channel: string | null;
   rating_overall: number | null;
   rating_friend: number | null;
@@ -56,7 +56,6 @@ const buildAgentKey = (r: ParsedRow) => {
 const parseTsToMs = (ts?: string | null, fallbackDate?: string) => {
   const s = (ts ?? fallbackDate ?? '').trim();
   if (!s) return 0;
-  // Unterstützt ISO oder dd.mm.yy / dd/mm/yy
   const m1 = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2}|\d{4})(?:[ T](\d{1,2}):(\d{2}))?$/);
   if (m1) {
     let [, dd, mm, yy, hh='00', mi='00'] = m1;
@@ -80,7 +79,7 @@ export default function AdminFeedbackPage(){
   const [users,setUsers]=useState<User[]>([]);
   const [assignMode,setAssignMode]=useState<'auto'|'fixed'>('auto');
 
-  // Import: fixed target
+  // Import (fest)
   const [fixedUserId,setFixedUserId]=useState('');
 
   // Ansicht bestehender Feedbacks (rechts)
@@ -108,9 +107,14 @@ export default function AdminFeedbackPage(){
   const [modalDraft,setModalDraft]=useState<Partial<ExistingRow>>({});
   const [savingModal,setSavingModal]=useState(false);
 
-  // Agent-Mapping (pro erkannter Name → userId|'auto'), inkl. globalem Fallback
+  // Agent-Zuordnung: pro erkannter Name → 'auto' | userId
   const [agentMap, setAgentMap] = useState<Record<string, string|'auto'>>({});
-  const [fallbackUserId,setFallbackUserId]=useState(''); // wird im Mapping-Panel gewählt
+  // Per-Agent-Fallback (nur relevant, wenn agentMap[key] === 'auto' UND kein exakter Match existiert)
+  const [agentFallback, setAgentFallback] = useState<Record<string,string>>({});
+
+  // User-Index (normalisierter Name → userId) + schneller Zugriff id→User
+  const userIndex = useMemo(()=> new Map(users.map(u => [normName(u.name), u.id])),[users]);
+  const usersById = useMemo(()=> new Map(users.map(u=>[u.id, u])), [users]);
 
   /* ---------- Nutzerliste ---------- */
   useEffect(()=>{(async()=>{
@@ -143,14 +147,12 @@ export default function AdminFeedbackPage(){
         const r = await fetch(`/api/admin/feedback?user_id=${encodeURIComponent(viewUserId)}`, { cache:'no-store' });
         const j = await r.json().catch(()=>({}));
         const items: ExistingRow[] = Array.isArray(j?.items) ? j.items : [];
-        // jüngsten Eintrag ermitteln (ts oder feedback_at)
         items.sort((a,b)=>{
           const ams = parseTsToMs(a.ts, a.feedback_at);
           const bms = parseTsToMs(b.ts, b.feedback_at);
           return bms - ams;
         });
         setExisting(items);
-        // Modal automatisch mit jüngstem öffnen
         if (items.length>0) {
           setModalDraft({ ...items[0] });
           setOpenId(items[0].id);
@@ -203,7 +205,7 @@ export default function AdminFeedbackPage(){
           setRows(safe);
           setTab('upload');
 
-          // Agent-Mapping initialisieren (Auto-Vorschläge)
+          // Agent-Mapping initialisieren
           const initialMap: Record<string,string|'auto'> = {};
           const unique = new Map<string,{label:string,count:number}>();
           for (const r of safe) {
@@ -214,12 +216,12 @@ export default function AdminFeedbackPage(){
             cur.count++; cur.label = cur.label || label;
             unique.set(key, cur);
           }
-          const userIndex = new Map(users.map(u => [normName(u.name), u.id]));
           unique.forEach((_v, key)=>{
             const uId = userIndex.get(key);
             initialMap[key] = uId || 'auto';
           });
           setAgentMap(initialMap);
+          setAgentFallback({}); // reset
         } else {
           alert(j?.error||'CSV konnte nicht gelesen werden');
         }
@@ -260,38 +262,83 @@ export default function AdminFeedbackPage(){
     return { dupIdx, duplicates: map };
   },[rows]);
 
+  // Übersicht erkannter Agenten (für Panel + Validierung)
+  const agentSummary = useMemo(()=>{
+    const map = new Map<string,{label:string,count:number}>();
+    for (const r of rows) {
+      const key = buildAgentKey(r);
+      if (!key) continue;
+      const label = (r.agent_name || [r.agent_first, r.agent_last].filter(Boolean).join(' ').trim() || '').trim();
+      const cur = map.get(key) ?? { label, count: 0 };
+      cur.count++; cur.label = cur.label || label;
+      map.set(key, cur);
+    }
+    return Array.from(map.entries()).map(([key, v])=>({ key, label: v.label || key, count: v.count }));
+  }, [rows]);
+
+  // Kann gespeichert werden? (Auto-Modus): Für jeden Agent-Key muss es exakten Match ODER erzwungene Zuordnung ODER Fallback geben
+  const canSaveAuto = useMemo(()=>{
+    if (assignMode !== 'auto') return true;
+    for (const a of agentSummary) {
+      const manual = agentMap[a.key] && agentMap[a.key] !== 'auto';
+      const exact = userIndex.has(a.key);
+      const fb = !!agentFallback[a.key];
+      if (!manual && !exact && !fb) return false;
+    }
+    return true;
+  }, [assignMode, agentSummary, agentMap, agentFallback, userIndex]);
+
+  // Rows, die wirklich gespeichert werden (Dupe-Drop + erzwungene / Fallback-Zuordnung via agent_name)
   const rowsForSave = useMemo(()=>{
     const base = dropDupes ? rows.filter((_,i)=> !dupInfo.dupIdx.has(i)) : rows;
-    // Mapping anwenden
-    const byId = new Map(users.map(u => [u.id, u]));
     return base.map(r=>{
       const key = buildAgentKey(r);
-      const mapChoice = key ? agentMap[key] : undefined;
-      if (mapChoice && mapChoice !== 'auto') {
-        const u = byId.get(mapChoice);
-        if (u?.name) {
-          return { ...r, agent_name: u.name, agent_first: null, agent_last: null };
-        }
+      if (!key) return r;
+
+      // 1) Manuelle Zuordnung → setze agent_name auf exakten Usernamen
+      const manual = agentMap[key] && agentMap[key] !== 'auto' ? String(agentMap[key]) : null;
+      if (manual) {
+        const u = usersById.get(manual);
+        if (u?.name) return { ...r, agent_name: u.name, agent_first: null, agent_last: null };
+        return r;
       }
+
+      // 2) Exakter Treffer vorhanden → nichts tun (Backend matcht per Name)
+      if (userIndex.has(key)) return r;
+
+      // 3) Kein Treffer, aber per-Agent Fallback gesetzt → agent_name auf Fallback-User setzen
+      const fb = agentFallback[key];
+      if (fb) {
+        const u = usersById.get(fb);
+        if (u?.name) return { ...r, agent_name: u.name, agent_first: null, agent_last: null };
+      }
+
+      // 4) Sonst unverändert (wird später ohnehin durch Save-Guard blockiert)
       return r;
     });
-  },[rows, dropDupes, dupInfo, agentMap, users]);
+  }, [rows, dropDupes, dupInfo, agentMap, agentFallback, usersById, userIndex]);
 
   /* ---------- Speichern ----------
-     auto   → braucht fallbackUserId (aus Mapping-Panel)
      fixed  → braucht fixedUserId
+     auto   → kein globaler Fallback; wir wählen ein gültiges user_id für die API (z.B. erste genutzte ID)
   --------------------------------- */
   async function save(){
-    const needFallback = assignMode==='auto';
-    const effectiveUserId = needFallback ? fallbackUserId : fixedUserId;
+    if (rowsForSave.length===0) return;
 
-    if (!effectiveUserId) {
-      alert(needFallback
-        ? 'Bitte im „Erkannte Bearbeiter“-Panel einen Fallback-Mitarbeiter wählen.'
-        : 'Bitte Mitarbeiter für feste Zuordnung wählen.');
-      return;
+    let effectiveUserId = '';
+    if (assignMode==='fixed') {
+      if (!fixedUserId) { alert('Bitte Mitarbeiter für feste Zuordnung wählen.'); return; }
+      effectiveUserId = fixedUserId;
+    } else {
+      if (!canSaveAuto) { alert('Bitte Zuordnungen/Fallbacks für alle erkannten Bearbeiter setzen.'); return; }
+      // irgendein gültiger UUID für das API-Feld (nicht relevant, weil wir agent_name erzwingen)
+      const firstId =
+        Object.values(agentMap).find(v=>v && v!=='auto') as string
+        || Object.values(agentFallback).find(Boolean)
+        || users[0]?.id;
+      if (!firstId) { alert('Kein Benutzer vorhanden.'); return; }
+      effectiveUserId = firstId;
     }
-    if(rowsForSave.length===0) return;
 
     setSaving(true);
     try{
@@ -307,6 +354,7 @@ export default function AdminFeedbackPage(){
       if(r.ok && j?.ok){
         setRows([]);
         setAgentMap({});
+        setAgentFallback({});
         alert(`Import ok – ${j.inserted ?? 0} Zeilen${j.skipped? ` (übersprungen: ${j.skipped})` : ''}`);
       } else {
         alert(j?.error||'Import fehlgeschlagen');
@@ -344,26 +392,25 @@ export default function AdminFeedbackPage(){
   }
 
   /* ---------- Modal speichern/löschen ---------- */
-async function saveModal(){
-  if (!openId) return;
-  setSavingModal(true);            // ⬅ hier
-  try{
-    const r = await fetch(`/api/admin/feedback/${openId}`,{
-      method:'PATCH',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify(modalDraft)
-    });
-    const j = await r.json().catch(()=>({}));
-    if (!r.ok || !j?.ok) throw new Error(j?.error || 'save_failed');
-    setExisting(prev=> prev.map(it => it.id===openId ? { ...it, ...modalDraft } as ExistingRow : it));
-    // im Modal bleiben
-  } catch(e:any){
-    console.error(e);
-    alert('Speichern fehlgeschlagen.');
-  } finally {
-    setSavingModal(false);         // ⬅ und hier
+  async function saveModal(){
+    if (!openId) return;
+    setSavingModal(true);
+    try{
+      const r = await fetch(`/api/admin/feedback/${openId}`,{
+        method:'PATCH',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(modalDraft)
+      });
+      const j = await r.json().catch(()=>({}));
+      if (!r.ok || !j?.ok) throw new Error(j?.error || 'save_failed');
+      setExisting(prev=> prev.map(it => it.id===openId ? { ...it, ...modalDraft } as ExistingRow : it));
+    } catch(e:any){
+      console.error(e);
+      alert('Speichern fehlgeschlagen.');
+    } finally {
+      setSavingModal(false);
+    }
   }
-}
   async function deleteModal(){
     if (!openId) return;
     if (!confirm('Eintrag wirklich löschen?')) return;
@@ -371,7 +418,6 @@ async function saveModal(){
       const r = await fetch(`/api/admin/feedback/${openId}`, { method:'DELETE' });
       const j = await r.json().catch(()=>({}));
       if (!r.ok || !j?.ok) throw new Error('delete_failed');
-      // zum nächsten springen (oder schließen)
       const nextIdx = openIndex < existing.length-1 ? openIndex+1 : openIndex-1;
       const nextRow = existing[nextIdx];
       setExisting(prev=> prev.filter(x=>x.id!==openId));
@@ -386,20 +432,6 @@ async function saveModal(){
       alert('Löschen fehlgeschlagen.');
     }
   }
-
-  /* ---------- Agent-Übersicht (CSV) ---------- */
-  const agentSummary = useMemo(()=>{
-    const map = new Map<string,{label:string,count:number}>();
-    for (const r of rows) {
-      const key = buildAgentKey(r);
-      if (!key) continue;
-      const label = (r.agent_name || [r.agent_first, r.agent_last].filter(Boolean).join(' ').trim() || '').trim();
-      const cur = map.get(key) ?? { label, count: 0 };
-      cur.count++; cur.label = cur.label || label;
-      map.set(key, cur);
-    }
-    return Array.from(map.entries()).map(([key, v])=>({ key, label: v.label || key, count: v.count }));
-  }, [rows]);
 
   /* ===========================
      UI
@@ -475,8 +507,9 @@ async function saveModal(){
             users={users}
             agentMap={agentMap}
             setAgentMap={setAgentMap}
-            fallbackUserId={fallbackUserId}
-            setFallbackUserId={setFallbackUserId}
+            agentFallback={agentFallback}
+            setAgentFallback={setAgentFallback}
+            userIndex={userIndex}
           />
         )}
 
@@ -564,7 +597,11 @@ async function saveModal(){
                 <div className="mt-3 flex justify-end">
                   <button
                     onClick={save}
-                    disabled={(assignMode==='fixed' ? !fixedUserId : !fallbackUserId) || rowsForSave.length===0 || saving}
+                    disabled={
+                      saving
+                      || rowsForSave.length===0
+                      || (assignMode==='fixed' ? !fixedUserId : !canSaveAuto)
+                    }
                     className="inline-flex items-center gap-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white px-4 py-2 text-sm"
                   >
                     {saving ? 'Speichere…' : `Speichern (${rowsForSave.length})`}
@@ -742,79 +779,100 @@ async function saveModal(){
 }
 
 /* ===========================
-   Agent-Mapping Panel
+   Agent-Mapping Panel (mit per-Agent-Fallback)
 =========================== */
 function AgentMappingPanel({
-  agents, users, agentMap, setAgentMap, fallbackUserId, setFallbackUserId
+  agents, users, agentMap, setAgentMap, agentFallback, setAgentFallback, userIndex
 }:{
   agents: { key:string; label:string; count:number }[];
   users: User[];
   agentMap: Record<string, string|'auto'>;
   setAgentMap: React.Dispatch<React.SetStateAction<Record<string, string|'auto'>>>;
-  fallbackUserId: string;
-  setFallbackUserId: (v:string)=>void;
+  agentFallback: Record<string,string>;
+  setAgentFallback: React.Dispatch<React.SetStateAction<Record<string,string>>>;
+  userIndex: Map<string,string>;
 }){
+  if (agents.length === 0) return null;
   return (
     <section className="rounded-xl border border-gray-200 dark:border-gray-700 p-3 bg-gray-50/60 dark:bg-gray-800/30">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="text-sm font-medium">Erkannte Bearbeiter in der CSV</div>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-600">Fallback-Mitarbeiter (für nicht zuordenbare Zeilen)</span>
-          <UserSelect users={users} value={fallbackUserId} onChange={setFallbackUserId} placeholder="– Fallback wählen –" />
-        </div>
+      <div className="text-sm font-medium mb-2">Erkannte Bearbeiter in der CSV</div>
+      <div className="overflow-auto">
+        <table className="min-w-[820px] w-full text-sm">
+          <thead className="bg-white/70 dark:bg-gray-900/40">
+            <tr>
+              <th className="text-left px-3 py-2">Name (CSV)</th>
+              <th className="text-left px-3 py-2">Häufigkeit</th>
+              <th className="text-left px-3 py-2 w-[360px]">Zuordnung</th>
+              <th className="text-left px-3 py-2 w-[360px]">Fallback (wenn nicht gematcht)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {agents.map(a=>{
+              const val = agentMap[a.key] ?? 'auto';
+              const exactId = userIndex.get(a.key);
+              const exactUser = users.find(u=>u.id===exactId);
+              const fb = agentFallback[a.key] ?? '';
+              return (
+                <tr key={a.key} className="border-t border-gray-200 dark:border-gray-800">
+                  <td className="px-3 py-2">{a.label || '(leer)'}</td>
+                  <td className="px-3 py-2">{a.count}</td>
+                  <td className="px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={val}
+                        onChange={e=>{
+                          const v = e.target.value as string;
+                          setAgentMap(prev=>({ ...prev, [a.key]: v==='auto' ? 'auto' : v }));
+                        }}
+                        className="px-3 py-2 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10 w-full"
+                      >
+                        <option value="auto">Automatisch (Name matcht zu app_users.name)</option>
+                        {users.map(u=>(
+                          <option key={u.id} value={u.id}>
+                            {u.name || u.email || u.id}
+                          </option>
+                        ))}
+                      </select>
+                      {val==='auto' && exactUser && (
+                        <span className="text-xs px-2 py-1 rounded bg-emerald-50 border border-emerald-200 text-emerald-700">
+                          exakter Treffer: {exactUser.name || exactUser.email}
+                        </span>
+                      )}
+                      {val!=='auto' && <span className="text-xs text-gray-500">wird erzwungen</span>}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={fb}
+                        onChange={e=>{
+                          const v = e.target.value as string;
+                          setAgentFallback(prev=>({ ...prev, [a.key]: v }));
+                        }}
+                        disabled={val!=='auto' || !!exactUser}
+                        title={val!=='auto' ? 'Nicht nötig: manuelle Zuordnung aktiv' : (exactUser ? 'Nicht nötig: exakter Match vorhanden' : '')}
+                        className="px-3 py-2 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10 w-full disabled:opacity-60"
+                      >
+                        <option value="">— keinen Fallback —</option>
+                        {users.map(u=>(
+                          <option key={u.id} value={u.id}>
+                            {u.name || u.email || u.id}
+                          </option>
+                        ))}
+                      </select>
+                      {val==='auto' && !exactUser && !fb && (
+                        <span className="text-xs text-amber-600">Bitte Fallback setzen oder Zuordnung wählen</span>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
-
-      {agents.length===0 ? (
-        <p className="mt-2 text-xs text-gray-600">
-          In der CSV wurden keine Bearbeiter-Namen erkannt. Du kannst trotzdem speichern – nicht zuordenbare Zeilen fallen komplett auf den Fallback.
-        </p>
-      ) : (
-        <div className="overflow-auto mt-2">
-          <table className="min-w-[680px] w-full text-sm">
-            <thead className="bg-white/70 dark:bg-gray-900/40">
-              <tr>
-                <th className="text-left px-3 py-2">Name (CSV)</th>
-                <th className="text-left px-3 py-2">Häufigkeit</th>
-                <th className="text-left px-3 py-2 w-[420px]">Zuordnung</th>
-              </tr>
-            </thead>
-            <tbody>
-              {agents.map(a=>{
-                const val = agentMap[a.key] ?? 'auto';
-                return (
-                  <tr key={a.key} className="border-t border-gray-200 dark:border-gray-800">
-                    <td className="px-3 py-2">{a.label || '(leer)'}</td>
-                    <td className="px-3 py-2">{a.count}</td>
-                    <td className="px-3 py-2">
-                      <div className="flex items-center gap-2">
-                        <select
-                          value={val}
-                          onChange={e=>{
-                            const v = e.target.value as string;
-                            setAgentMap(prev=>({ ...prev, [a.key]: v==='auto' ? 'auto' : v }));
-                          }}
-                          className="px-3 py-2 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10 w-full"
-                        >
-                          <option value="auto">Automatisch (Name matcht zu app_users.name)</option>
-                          {users.map(u=>(
-                            <option key={u.id} value={u.id}>
-                              {u.name || u.email || u.id}
-                            </option>
-                          ))}
-                        </select>
-                        {val!=='auto' && <span className="text-xs text-gray-500">wird erzwungen</span>}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-
       <p className="mt-2 text-xs text-gray-600">
-        Manuelle Zuordnung setzt in den betroffenen Zeilen den <code>agent_name</code> auf den exakten Mitarbeiternamen. Nicht zuordenbare Zeilen werden dem Fallback zugewiesen.
+        Hinweis: Wenn „Zuordnung“ auf <em>Automatisch</em> bleibt und kein exakter Name gefunden wird, weist der Fallback (pro Zeile) die Bewertung dem gewählten Mitarbeiter zu.
       </p>
     </section>
   );

@@ -11,7 +11,6 @@ export async function GET() {
     'Buchungsnummer',                 // wird bereinigt + gehasht/verschlüsselt
     'Beratervorname',
     'Beraternachname',
-    'Bearbeiter',                     // hat Vorrang, wenn befüllt (voller Name)
     'Bewertung',
     'Beraterfreundlichkeit',
     'Beraterqualifikation',
@@ -20,7 +19,8 @@ export async function GET() {
     'Template Name',
     'Rekla',
     'Anliegen geklärt?',
-    'Feedbacktyp'
+    'Feedbacktyp',
+    'Berater'                     // hat Vorrang, wenn befüllt (voller Name)
   ].join(';');
 
   // Beispielzeile – gerne anpassen/duplizieren
@@ -29,7 +29,6 @@ export async function GET() {
     '5546684681',                     // Buchungsnummer (nur Ziffern werden übernommen)
     'Max',                            // Beratervorname
     'Mustermann',                     // Beraternachname
-    'Max Mustermann',                 // Bearbeiter (voller Name; überschreibt Vor-/Nachname)
     '5',                              // Bewertung (1..5)
     '5',                              // Beraterfreundlichkeit (1..5)
     '5',                              // Beraterqualifikation (1..5)
@@ -38,7 +37,8 @@ export async function GET() {
     '02. KD GS Hinterlegung Bestätigung', // Template Name
     'nein',                           // Rekla (ja/nein)
     'ja',                             // Anliegen geklärt? (ja/nein)
-    'service_phone'                   // Feedbacktyp
+    'service_phone',                   // Feedbacktyp
+    'Max Mustermann'                 // Berater (voller Name; überschreibt Vor-/Nachname)
   ].join(';');
 
   const csv = `${header}\n${example}\n`;

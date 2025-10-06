@@ -48,7 +48,7 @@ const headerMap: Record<string, string> = {
   'Buchungsnummer': 'booking_number',
   'Beratervorname': 'agent_first',
   'Beraternachname': 'agent_last',
-  'Bearbeiter': 'agent_name',
+  'Berater': 'agent_name',
 };
 
 function mapHeaders(r: Record<string, any>) {

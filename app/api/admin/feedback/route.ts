@@ -24,6 +24,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok:false, error:'user_id_must_be_uuid' }, { status:400 });
   }
 
+  // booking_number_hash wird jetzt mit selektiert
   let q = sql`
     select
       id,
@@ -37,7 +38,8 @@ export async function GET(req: NextRequest) {
       template_name,
       reklamation,
       resolved,
-      note
+      note,
+      booking_number_hash
     from public.user_feedback
     where user_id = ${user_id}::uuid
   `;
@@ -46,10 +48,10 @@ export async function GET(req: NextRequest) {
   q = sql`${q} order by feedback_at desc, id desc limit 1000`;
 
   const rows = await q;
-  // Frontend erwartet "ExistingRow"
-  const items = rows.map((r: { id: any; feedback_at: any; channel: any; rating_overall: any; rating_friend: any; rating_qual: any; rating_offer: any; comment_raw: any; template_name: any; reklamation: any; resolved: any; note: any; }) => ({
+
+  const items = rows.map((r: any) => ({
     id: r.id,
-    ts: r.feedback_at,                // optional Alias
+    ts: r.feedback_at,               // Alias, damit dein UI ts||feedback_at anzeigen kann
     feedback_at: r.feedback_at,
     channel: r.channel,
     rating_overall: r.rating_overall,
@@ -61,6 +63,7 @@ export async function GET(req: NextRequest) {
     reklamation: r.reklamation,
     resolved: r.resolved,
     note: r.note,
+    booking_number_hash: r.booking_number_hash ?? null, // ✨ wichtig für /api/bo-Link
   }));
 
   return NextResponse.json({ ok:true, items });
