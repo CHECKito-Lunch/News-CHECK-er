@@ -715,7 +715,7 @@ setModalDraft({});
                   {!openItem.booking_number_hash && (
   <div className="text-xs text-gray-500">Kein BO-Link vorhanden.</div>
 )}
-                  ){'}'}
+                  {}
                 </div>
               )}
             </Modal>
