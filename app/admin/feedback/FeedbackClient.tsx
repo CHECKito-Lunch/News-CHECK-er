@@ -27,8 +27,8 @@ type ParsedRow = {
 
 type ExistingRow = {
   id: number;
-  ts?: string | null;
-  feedback_at: string;
+  ts?: string | null;                  // optional Alias
+  feedback_at: string;                 // YYYY-MM-DD
   channel: string | null;
   rating_overall: number | null;
   rating_friend: number | null;
@@ -43,7 +43,7 @@ type ExistingRow = {
 };
 
 /* ===========================
-   Helpers (lokal)
+   Helpers
 =========================== */
 const normName = (s?: string|null) =>
   (s ?? '').toLowerCase().replace(/\s+/g,' ').trim();
@@ -77,14 +77,13 @@ const parseTsToMs = (ts?: string | null, fallbackDate?: string) => {
 =========================== */
 export default function AdminFeedbackPage(){
   const [users,setUsers]=useState<User[]>([]);
-  const [assignMode,setAssignMode]=useState<'auto'|'fixed'>('auto');
+  const [assignMode,setAssignMode]=useState<'auto'|'fixed'>('auto'); // 'auto' = manuelle Zuordnung pro Berater
 
-  // Import (fest)
+  // Import: fixed target (alle Zeilen auf einen Mitarbeiter)
   const [fixedUserId,setFixedUserId]=useState('');
 
-  // Ansicht bestehender Feedbacks (rechts)
+  // Rechts: bestehende Feedbacks
   const [viewUserId,setViewUserId]=useState('');
-
   const [tab,setTab]=useState<'upload'|'existing'>('upload');
 
   // Upload-Vorschau
@@ -99,21 +98,15 @@ export default function AdminFeedbackPage(){
 
   // Modal
   const [openId,setOpenId]=useState<number|null>(null);
-  const openIndex = useMemo(()=>{
-    if (!openId) return -1;
-    return existing.findIndex(x=>x.id===openId);
-  },[openId, existing]);
+  const openIndex = useMemo(()=> openId ? existing.findIndex(x=>x.id===openId) : -1,[openId, existing]);
   const openItem = openIndex>=0 ? existing[openIndex] : null;
   const [modalDraft,setModalDraft]=useState<Partial<ExistingRow>>({});
   const [savingModal,setSavingModal]=useState(false);
 
-  // Agent-Zuordnung: pro erkannter Name → 'auto' | userId
-  const [agentMap, setAgentMap] = useState<Record<string, string|'auto'>>({});
-  // Per-Agent-Fallback (nur relevant, wenn agentMap[key] === 'auto' UND kein exakter Match existiert)
-  const [agentFallback, setAgentFallback] = useState<Record<string,string>>({});
+  // Manuelles Agent-Mapping: erkannter Name-Key → userId (leer = noch nicht zugeordnet)
+  const [agentMap, setAgentMap] = useState<Record<string, string>>({});
 
-  // User-Index (normalisierter Name → userId) + schneller Zugriff id→User
-  const userIndex = useMemo(()=> new Map(users.map(u => [normName(u.name), u.id])),[users]);
+  // schneller Zugriff id→User
   const usersById = useMemo(()=> new Map(users.map(u=>[u.id, u])), [users]);
 
   /* ---------- Nutzerliste ---------- */
@@ -132,10 +125,9 @@ export default function AdminFeedbackPage(){
     }catch{}
   })();},[]);
 
-  /* ---------- Rechts: Auswahl = sofort „Bestehende bearbeiten“ + Modal öffnen ---------- */
+  /* ---------- Rechts: Auswahl schaltet auf „existing“ ---------- */
   useEffect(()=>{
-    if (!viewUserId) return;
-    setTab('existing');
+    if (viewUserId) setTab('existing');
   },[viewUserId]);
 
   /* ---------- Bestehende laden ---------- */
@@ -147,11 +139,7 @@ export default function AdminFeedbackPage(){
         const r = await fetch(`/api/admin/feedback?user_id=${encodeURIComponent(viewUserId)}`, { cache:'no-store' });
         const j = await r.json().catch(()=>({}));
         const items: ExistingRow[] = Array.isArray(j?.items) ? j.items : [];
-        items.sort((a,b)=>{
-          const ams = parseTsToMs(a.ts, a.feedback_at);
-          const bms = parseTsToMs(b.ts, b.feedback_at);
-          return bms - ams;
-        });
+        items.sort((a,b)=> parseTsToMs(b.ts, b.feedback_at) - parseTsToMs(a.ts, a.feedback_at));
         setExisting(items);
         if (items.length>0) {
           setModalDraft({ ...items[0] });
@@ -205,23 +193,17 @@ export default function AdminFeedbackPage(){
           setRows(safe);
           setTab('upload');
 
-          // Agent-Mapping initialisieren
-          const initialMap: Record<string,string|'auto'> = {};
-          const unique = new Map<string,{label:string,count:number}>();
+          // erkannte Agenten sammeln & Mapping leeren
+          const unique = new Map<string,string>(); // key -> label
           for (const r of safe) {
             const key = buildAgentKey(r);
             if (!key) continue;
             const label = (r.agent_name || [r.agent_first, r.agent_last].filter(Boolean).join(' ').trim() || '').trim();
-            const cur = unique.get(key) ?? { label, count:0 };
-            cur.count++; cur.label = cur.label || label;
-            unique.set(key, cur);
+            if (!unique.has(key)) unique.set(key, label || key);
           }
-          unique.forEach((_v, key)=>{
-            const uId = userIndex.get(key);
-            initialMap[key] = uId || 'auto';
-          });
-          setAgentMap(initialMap);
-          setAgentFallback({}); // reset
+          const emptyMap: Record<string,string> = {};
+          unique.forEach((_label, key)=>{ emptyMap[key] = ''; });
+          setAgentMap(emptyMap);
         } else {
           alert(j?.error||'CSV konnte nicht gelesen werden');
         }
@@ -262,7 +244,7 @@ export default function AdminFeedbackPage(){
     return { dupIdx, duplicates: map };
   },[rows]);
 
-  // Übersicht erkannter Agenten (für Panel + Validierung)
+  // Übersicht erkannter Agenten (Label + Häufigkeit)
   const agentSummary = useMemo(()=>{
     const map = new Map<string,{label:string,count:number}>();
     for (const r of rows) {
@@ -276,51 +258,32 @@ export default function AdminFeedbackPage(){
     return Array.from(map.entries()).map(([key, v])=>({ key, label: v.label || key, count: v.count }));
   }, [rows]);
 
-  // Kann gespeichert werden? (Auto-Modus): Für jeden Agent-Key muss es exakten Match ODER erzwungene Zuordnung ODER Fallback geben
+  // Speichern erlaubt? → Jede erkannte Person MUSS gemappt sein
   const canSaveAuto = useMemo(()=>{
     if (assignMode !== 'auto') return true;
     for (const a of agentSummary) {
-      const manual = agentMap[a.key] && agentMap[a.key] !== 'auto';
-      const exact = userIndex.has(a.key);
-      const fb = !!agentFallback[a.key];
-      if (!manual && !exact && !fb) return false;
+      if (!agentMap[a.key]) return false;
     }
     return true;
-  }, [assignMode, agentSummary, agentMap, agentFallback, userIndex]);
+  }, [assignMode, agentSummary, agentMap]);
 
-  // Rows, die wirklich gespeichert werden (Dupe-Drop + erzwungene / Fallback-Zuordnung via agent_name)
+  // Rows für Save: setze agent_name auf den gewählten Mitarbeiter-Namen
   const rowsForSave = useMemo(()=>{
     const base = dropDupes ? rows.filter((_,i)=> !dupInfo.dupIdx.has(i)) : rows;
     return base.map(r=>{
       const key = buildAgentKey(r);
       if (!key) return r;
-
-      // 1) Manuelle Zuordnung → setze agent_name auf exakten Usernamen
-      const manual = agentMap[key] && agentMap[key] !== 'auto' ? String(agentMap[key]) : null;
-      if (manual) {
-        const u = usersById.get(manual);
-        if (u?.name) return { ...r, agent_name: u.name, agent_first: null, agent_last: null };
-        return r;
-      }
-
-      // 2) Exakter Treffer vorhanden → nichts tun (Backend matcht per Name)
-      if (userIndex.has(key)) return r;
-
-      // 3) Kein Treffer, aber per-Agent Fallback gesetzt → agent_name auf Fallback-User setzen
-      const fb = agentFallback[key];
-      if (fb) {
-        const u = usersById.get(fb);
-        if (u?.name) return { ...r, agent_name: u.name, agent_first: null, agent_last: null };
-      }
-
-      // 4) Sonst unverändert (wird später ohnehin durch Save-Guard blockiert)
+      const chosenId = agentMap[key];
+      if (!chosenId) return r;
+      const u = usersById.get(chosenId);
+      if (u?.name) return { ...r, agent_name: u.name, agent_first: null, agent_last: null };
       return r;
     });
-  }, [rows, dropDupes, dupInfo, agentMap, agentFallback, usersById, userIndex]);
+  }, [rows, dropDupes, dupInfo, agentMap, usersById]);
 
   /* ---------- Speichern ----------
      fixed  → braucht fixedUserId
-     auto   → kein globaler Fallback; wir wählen ein gültiges user_id für die API (z.B. erste genutzte ID)
+     auto   → nutze eine beliebige der gewählten IDs für das Pflichtfeld user_id
   --------------------------------- */
   async function save(){
     if (rowsForSave.length===0) return;
@@ -330,12 +293,8 @@ export default function AdminFeedbackPage(){
       if (!fixedUserId) { alert('Bitte Mitarbeiter für feste Zuordnung wählen.'); return; }
       effectiveUserId = fixedUserId;
     } else {
-      if (!canSaveAuto) { alert('Bitte Zuordnungen/Fallbacks für alle erkannten Bearbeiter setzen.'); return; }
-      // irgendein gültiger UUID für das API-Feld (nicht relevant, weil wir agent_name erzwingen)
-      const firstId =
-        Object.values(agentMap).find(v=>v && v!=='auto') as string
-        || Object.values(agentFallback).find(Boolean)
-        || users[0]?.id;
+      if (!canSaveAuto) { alert('Bitte alle erkannten Bearbeiter zuordnen.'); return; }
+      const firstId = Object.values(agentMap).find(Boolean) || users[0]?.id;
       if (!firstId) { alert('Kein Benutzer vorhanden.'); return; }
       effectiveUserId = firstId;
     }
@@ -354,7 +313,6 @@ export default function AdminFeedbackPage(){
       if(r.ok && j?.ok){
         setRows([]);
         setAgentMap({});
-        setAgentFallback({});
         alert(`Import ok – ${j.inserted ?? 0} Zeilen${j.skipped? ` (übersprungen: ${j.skipped})` : ''}`);
       } else {
         alert(j?.error||'Import fehlgeschlagen');
@@ -445,7 +403,6 @@ export default function AdminFeedbackPage(){
         </a>
       </div>
 
-      {/* Kopf: Import-Einstellungen + CSV + Ansichtsauswahl */}
       <section className="rounded-2xl border border-gray-200 dark:border-gray-800 p-4 bg-white dark:bg-gray-900 space-y-4">
         <div className="grid gap-4 lg:grid-cols-2">
           {/* Import-Einstellungen (links) */}
@@ -456,11 +413,15 @@ export default function AdminFeedbackPage(){
               <button
                 onClick={()=>setAssignMode('auto')}
                 className={`px-4 py-2 text-sm ${assignMode==='auto'?'bg-blue-600 text-white':'bg-transparent'}`}
-              >Automatisch (per Bearbeiter-Name)</button>
+              >
+                Manuell (pro Bearbeiter)
+              </button>
               <button
                 onClick={()=>setAssignMode('fixed')}
                 className={`px-4 py-2 text-sm ${assignMode==='fixed'?'bg-blue-600 text-white':'bg-transparent'}`}
-              >Fest (alle Zeilen)</button>
+              >
+                Fest (alle Zeilen)
+              </button>
             </div>
 
             {assignMode==='fixed' && (
@@ -480,7 +441,7 @@ export default function AdminFeedbackPage(){
             </div>
           </fieldset>
 
-          {/* Ansicht bestehender Feedbacks (rechts) */}
+          {/* Rechts: bestehende Feedbacks */}
           <fieldset className="rounded-xl border border-gray-200 dark:border-gray-700 p-3">
             <legend className="px-1 text-sm text-gray-600">Bestehende Feedbacks ansehen</legend>
             <div className="grid gap-2">
@@ -493,27 +454,22 @@ export default function AdminFeedbackPage(){
                   title={!viewUserId ? 'Bitte oben Mitarbeiter wählen' : ''}
                 >Bestehende bearbeiten</button>
               </div>
-              <p className="text-xs text-gray-500">
-                Hinweis: Nach Auswahl wird automatisch das jüngste Feedback im Modal geöffnet.
-              </p>
+              <p className="text-xs text-gray-500">Nach Auswahl öffnet sich automatisch das jüngste Feedback im Modal.</p>
             </div>
           </fieldset>
         </div>
 
-        {/* Agent-Mapping Panel (nur wenn CSV vorhanden & Modus auto) */}
+        {/* Agent-Mapping Panel (nur bei CSV & manuellem Modus) */}
         {tab==='upload' && rows.length>0 && assignMode==='auto' && (
           <AgentMappingPanel
             agents={agentSummary}
             users={users}
             agentMap={agentMap}
             setAgentMap={setAgentMap}
-            agentFallback={agentFallback}
-            setAgentFallback={setAgentFallback}
-            userIndex={userIndex}
           />
         )}
 
-        {/* ---------- Upload Vorschau ---------- */}
+        {/* Upload-Vorschau */}
         {tab==='upload' && (
           <>
             {rows.length>0 ? (
@@ -609,19 +565,15 @@ export default function AdminFeedbackPage(){
                 </div>
               </>
             ) : (
-              <p className="text-sm text-gray-500">
-                Wähle oben den Import-Modus und lade dann eine CSV hoch.
-              </p>
+              <p className="text-sm text-gray-500">Wähle oben den Modus und lade anschließend eine CSV hoch.</p>
             )}
           </>
         )}
 
-        {/* ---------- Bestehende: kompakte Liste + Modal ---------- */}
+        {/* Bestehende + Modal */}
         {tab==='existing' && (
           <>
-            {!viewUserId && (
-              <div className="text-sm text-amber-700">Bitte oben „Mitarbeiter wählen“.</div>
-            )}
+            {!viewUserId && <div className="text-sm text-amber-700">Bitte oben „Mitarbeiter wählen“.</div>}
             {loadingExisting && <div className="text-sm text-gray-500">Lade…</div>}
             {!loadingExisting && viewUserId && existing.length===0 && (
               <div className="text-sm text-gray-500">Keine Feedbacks gefunden.</div>
@@ -652,21 +604,14 @@ export default function AdminFeedbackPage(){
               </ul>
             )}
 
-            {/* Modal */}
             <Modal open={!!openId} title="Feedback bearbeiten" onClose={closeModal}
               footer={
                 <div className="flex items-center justify-between w-full">
                   <div className="flex items-center gap-2">
-                    <button
-                      onClick={goPrev}
-                      disabled={openIndex<=0}
-                      className="px-3 py-2 rounded-lg text-sm border bg-white hover:bg-gray-50 dark:bg-white/10 dark:hover:bg-white/20 dark:border-gray-700 disabled:opacity-50"
-                    >Vorheriges</button>
-                    <button
-                      onClick={goNext}
-                      disabled={openIndex<0 || openIndex>=existing.length-1}
-                      className="px-3 py-2 rounded-lg text-sm border bg-white hover:bg-gray-50 dark:bg-white/10 dark:hover:bg-white/20 dark:border-gray-700 disabled:opacity-50"
-                    >Nächstes</button>
+                    <button onClick={goPrev} disabled={openIndex<=0}
+                      className="px-3 py-2 rounded-lg text-sm border bg-white hover:bg-gray-50 dark:bg-white/10 dark:hover:bg-white/20 dark:border-gray-700 disabled:opacity-50">Vorheriges</button>
+                    <button onClick={goNext} disabled={openIndex<0 || openIndex>=existing.length-1}
+                      className="px-3 py-2 rounded-lg text-sm border bg-white hover:bg-gray-50 dark:bg-white/10 dark:hover:bg-white/20 dark:border-gray-700 disabled:opacity-50">Nächstes</button>
                     {openItem?.booking_number_hash ? (
                       <a href={`/api/bo/${openItem.booking_number_hash}`} target="_blank" rel="noreferrer" className="text-sm text-blue-600 underline">
                         Im Backoffice suchen
@@ -674,15 +619,11 @@ export default function AdminFeedbackPage(){
                     ) : <span />}
                   </div>
                   <div className="flex items-center gap-2">
-                    <button
-                      onClick={deleteModal}
-                      className="px-3 py-2 rounded-lg text-sm bg-red-600 hover:bg-red-700 text-white"
-                    >Löschen</button>
-                    <button
-                      onClick={saveModal}
-                      disabled={savingModal}
-                      className="px-3 py-2 rounded-lg text-sm bg-blue-600 hover:bg-blue-700 text-white"
-                    >{savingModal ? 'Speichere…' : 'Speichern'}</button>
+                    <button onClick={deleteModal} className="px-3 py-2 rounded-lg text-sm bg-red-600 hover:bg-red-700 text-white">Löschen</button>
+                    <button onClick={saveModal} disabled={savingModal}
+                      className="px-3 py-2 rounded-lg text-sm bg-blue-600 hover:bg-blue-700 text-white">
+                      {savingModal ? 'Speichere…' : 'Speichern'}
+                    </button>
                   </div>
                 </div>
               }
@@ -707,18 +648,10 @@ export default function AdminFeedbackPage(){
                   </div>
 
                   <div className="grid grid-cols-4 gap-3">
-                    <Field label="Ø">
-                      <NumInput value={modalDraft.rating_overall ?? openItem.rating_overall} onChange={(v)=>setModalDraft(d=>({...d, rating_overall:v }))}/>
-                    </Field>
-                    <Field label="F">
-                      <NumInput value={modalDraft.rating_friend ?? openItem.rating_friend} onChange={(v)=>setModalDraft(d=>({...d, rating_friend:v }))}/>
-                    </Field>
-                    <Field label="Q">
-                      <NumInput value={modalDraft.rating_qual ?? openItem.rating_qual} onChange={(v)=>setModalDraft(d=>({...d, rating_qual:v }))}/>
-                    </Field>
-                    <Field label="A">
-                      <NumInput value={modalDraft.rating_offer ?? openItem.rating_offer} onChange={(v)=>setModalDraft(d=>({...d, rating_offer:v }))}/>
-                    </Field>
+                    <Field label="Ø"><NumInput value={modalDraft.rating_overall ?? openItem.rating_overall} onChange={(v)=>setModalDraft(d=>({...d, rating_overall:v }))}/></Field>
+                    <Field label="F"><NumInput value={modalDraft.rating_friend ?? openItem.rating_friend} onChange={(v)=>setModalDraft(d=>({...d, rating_friend:v }))}/></Field>
+                    <Field label="Q"><NumInput value={modalDraft.rating_qual ?? openItem.rating_qual} onChange={(v)=>setModalDraft(d=>({...d, rating_qual:v }))}/></Field>
+                    <Field label="A"><NumInput value={modalDraft.rating_offer ?? openItem.rating_offer} onChange={(v)=>setModalDraft(d=>({...d, rating_offer:v }))}/></Field>
                   </div>
 
                   <Field label="Template">
@@ -740,16 +673,10 @@ export default function AdminFeedbackPage(){
 
                   <div className="grid grid-cols-2 gap-3">
                     <Field label="Rekla">
-                      <BoolToggle
-                        value={!!(modalDraft.reklamation ?? openItem.reklamation)}
-                        onChange={(v)=>setModalDraft(d=>({...d, reklamation:v }))}
-                      />
+                      <BoolToggle value={!!(modalDraft.reklamation ?? openItem.reklamation)} onChange={(v)=>setModalDraft(d=>({...d, reklamation:v }))}/>
                     </Field>
                     <Field label="Geklärt?">
-                      <BoolToggle
-                        value={!!(modalDraft.resolved ?? openItem.resolved)}
-                        onChange={(v)=>setModalDraft(d=>({...d, resolved:v }))}
-                      />
+                      <BoolToggle value={!!(modalDraft.resolved ?? openItem.resolved)} onChange={(v)=>setModalDraft(d=>({...d, resolved:v }))}/>
                     </Field>
                   </div>
 
@@ -779,39 +706,32 @@ export default function AdminFeedbackPage(){
 }
 
 /* ===========================
-   Agent-Mapping Panel (mit per-Agent-Fallback)
+   Agent-Mapping Panel (nur manuell)
 =========================== */
 function AgentMappingPanel({
-  agents, users, agentMap, setAgentMap, agentFallback, setAgentFallback, userIndex
+  agents, users, agentMap, setAgentMap
 }:{
   agents: { key:string; label:string; count:number }[];
   users: User[];
-  agentMap: Record<string, string|'auto'>;
-  setAgentMap: React.Dispatch<React.SetStateAction<Record<string, string|'auto'>>>;
-  agentFallback: Record<string,string>;
-  setAgentFallback: React.Dispatch<React.SetStateAction<Record<string,string>>>;
-  userIndex: Map<string,string>;
+  agentMap: Record<string, string>;
+  setAgentMap: React.Dispatch<React.SetStateAction<Record<string, string>>>;
 }){
   if (agents.length === 0) return null;
   return (
     <section className="rounded-xl border border-gray-200 dark:border-gray-700 p-3 bg-gray-50/60 dark:bg-gray-800/30">
-      <div className="text-sm font-medium mb-2">Erkannte Bearbeiter in der CSV</div>
+      <div className="text-sm font-medium mb-2">Erkannte Bearbeiter in der CSV (bitte zuordnen)</div>
       <div className="overflow-auto">
-        <table className="min-w-[820px] w-full text-sm">
+        <table className="min-w-[760px] w-full text-sm">
           <thead className="bg-white/70 dark:bg-gray-900/40">
             <tr>
               <th className="text-left px-3 py-2">Name (CSV)</th>
               <th className="text-left px-3 py-2">Häufigkeit</th>
-              <th className="text-left px-3 py-2 w-[360px]">Zuordnung</th>
-              <th className="text-left px-3 py-2 w-[360px]">Fallback (wenn nicht gematcht)</th>
+              <th className="text-left px-3 py-2 w-[420px]">Zuordnung (erforderlich)</th>
             </tr>
           </thead>
           <tbody>
             {agents.map(a=>{
-              const val = agentMap[a.key] ?? 'auto';
-              const exactId = userIndex.get(a.key);
-              const exactUser = users.find(u=>u.id===exactId);
-              const fb = agentFallback[a.key] ?? '';
+              const val = agentMap[a.key] ?? '';
               return (
                 <tr key={a.key} className="border-t border-gray-200 dark:border-gray-800">
                   <td className="px-3 py-2">{a.label || '(leer)'}</td>
@@ -822,47 +742,18 @@ function AgentMappingPanel({
                         value={val}
                         onChange={e=>{
                           const v = e.target.value as string;
-                          setAgentMap(prev=>({ ...prev, [a.key]: v==='auto' ? 'auto' : v }));
+                          setAgentMap(prev=>({ ...prev, [a.key]: v }));
                         }}
                         className="px-3 py-2 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10 w-full"
                       >
-                        <option value="auto">Automatisch (Name matcht zu app_users.name)</option>
+                        <option value="">– Mitarbeiter wählen –</option>
                         {users.map(u=>(
                           <option key={u.id} value={u.id}>
                             {u.name || u.email || u.id}
                           </option>
                         ))}
                       </select>
-                      {val==='auto' && exactUser && (
-                        <span className="text-xs px-2 py-1 rounded bg-emerald-50 border border-emerald-200 text-emerald-700">
-                          exakter Treffer: {exactUser.name || exactUser.email}
-                        </span>
-                      )}
-                      {val!=='auto' && <span className="text-xs text-gray-500">wird erzwungen</span>}
-                    </div>
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <select
-                        value={fb}
-                        onChange={e=>{
-                          const v = e.target.value as string;
-                          setAgentFallback(prev=>({ ...prev, [a.key]: v }));
-                        }}
-                        disabled={val!=='auto' || !!exactUser}
-                        title={val!=='auto' ? 'Nicht nötig: manuelle Zuordnung aktiv' : (exactUser ? 'Nicht nötig: exakter Match vorhanden' : '')}
-                        className="px-3 py-2 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10 w-full disabled:opacity-60"
-                      >
-                        <option value="">— keinen Fallback —</option>
-                        {users.map(u=>(
-                          <option key={u.id} value={u.id}>
-                            {u.name || u.email || u.id}
-                          </option>
-                        ))}
-                      </select>
-                      {val==='auto' && !exactUser && !fb && (
-                        <span className="text-xs text-amber-600">Bitte Fallback setzen oder Zuordnung wählen</span>
-                      )}
+                      {!val && <span className="text-xs text-amber-600">Pflichtfeld</span>}
                     </div>
                   </td>
                 </tr>
@@ -872,7 +763,7 @@ function AgentMappingPanel({
         </table>
       </div>
       <p className="mt-2 text-xs text-gray-600">
-        Hinweis: Wenn „Zuordnung“ auf <em>Automatisch</em> bleibt und kein exakter Name gefunden wird, weist der Fallback (pro Zeile) die Bewertung dem gewählten Mitarbeiter zu.
+        Beim Speichern wird <code>agent_name</code> auf den gewählten Mitarbeiternamen gesetzt.
       </p>
     </section>
   );
@@ -940,16 +831,10 @@ function Modal({
 function YnToggle({ value, onChange }:{ value:'ja'|'nein'|null, onChange:(v:'ja'|'nein'|null)=>void }) {
   return (
     <div className="inline-flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700">
-      <button
-        type="button"
-        onClick={()=>onChange(value==='ja'? null : 'ja')}
-        className={`px-2 py-1 text-xs ${value==='ja' ? 'bg-emerald-600 text-white' : ''}`}
-      >ja</button>
-      <button
-        type="button"
-        onClick={()=>onChange(value==='nein'? null : 'nein')}
-        className={`px-2 py-1 text-xs ${value==='nein' ? 'bg-red-600 text-white' : ''}`}
-      >nein</button>
+      <button type="button" onClick={()=>onChange(value==='ja'? null : 'ja')}
+        className={`px-2 py-1 text-xs ${value==='ja' ? 'bg-emerald-600 text-white' : ''}`}>ja</button>
+      <button type="button" onClick={()=>onChange(value==='nein'? null : 'nein')}
+        className={`px-2 py-1 text-xs ${value==='nein' ? 'bg-red-600 text-white' : ''}`}>nein</button>
     </div>
   );
 }
