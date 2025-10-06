@@ -1190,10 +1190,16 @@ function UnreadCard() {
    Helpers (Timezone & Truthy) – NICHT exportieren!
 =========================== */
 const FE_TZ = 'Europe/Berlin';
+const BO_BASE = 'https://backoffice.reisen.check24.de/booking/search/';
 
 function isTrueish(v: unknown) {
   const s = String(v ?? '').trim().toLowerCase();
   return s === 'ja' || s === 'true' || s === '1' || s === 'y' || s === 'yes';
+}
+
+// bevorzugt feedback_ts (volle Zeit), sonst ts
+function getTs(f: FeedbackItem): string | null {
+  return (f as any).feedback_ts || (f as any).ts || null;
 }
 
 // "Zoned" Date -> YYYY-MM (Berlin)
@@ -1213,12 +1219,39 @@ function ymdBerlin(d: Date) {
   return `${y}-${m}-${dd}`;
 }
 
+// Formatter (Berlin)
+function fmtTimeBerlin(iso: string | null): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '—';
+  return new Intl.DateTimeFormat('de-DE', {
+    timeZone: FE_TZ, hour: '2-digit', minute: '2-digit'
+  }).format(d);
+}
+function fmtDateBerlin(iso: string | null): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '—';
+  return new Intl.DateTimeFormat('de-DE', {
+    timeZone: FE_TZ, day:'2-digit', month:'2-digit', year:'numeric'
+  }).format(d);
+}
+
 // YYYY-MM -> nächster Monat
 function incMonthKey(key: string) {
   const [y, m] = key.split('-').map(Number);
   const dt = new Date(Date.UTC(y, (m || 1) - 1, 1));
   dt.setUTCMonth(dt.getUTCMonth() + 1);
   return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+// BO-Link: bevorzugt /api/bo/:hash → löst serverseitig auf
+function boLinkFor(f: FeedbackItem): string | null {
+  const hash = (f as any).booking_number_hash as string | undefined;
+  const raw  = (f as any).booking_number as string | undefined;
+  if (hash && /^[0-9a-f]{64}$/i.test(hash)) return `/api/bo/${hash}`;
+  if (raw) return `${BO_BASE}?booking_number=${encodeURIComponent(String(raw).replace(/\D+/g,''))}`;
+  return null;
 }
 
 function FeedbackSection() {
@@ -1317,7 +1350,8 @@ function FeedbackSection() {
     // partition by YYYY-MM (Berlin)
     const map = new Map<string, FeedbackItem[]>();
     for (const f of items) {
-      const d = f.ts ? new Date(f.ts) : null;
+      const iso = getTs(f);
+      const d = iso ? new Date(iso) : null;
       if (!d || isNaN(d.getTime())) continue;
       const key = ymKeyBerlin(d);
       const arr = map.get(key) ?? [];
@@ -1360,7 +1394,8 @@ function FeedbackSection() {
       // Tage (Berlin)
       const byDay = new Map<string, FeedbackItem[]>();
       arr.forEach(f => {
-        const d = f.ts ? new Date(f.ts) : null;
+        const iso = getTs(f);
+        const d = iso ? new Date(iso) : null;
         if (!d) return;
         const k = ymdBerlin(d);
         const a = byDay.get(k) ?? []; a.push(f); byDay.set(k, a);
@@ -1395,7 +1430,8 @@ function FeedbackSection() {
 
       const openInternal = openInternalItems.length;
       const internalPreview = openInternalItems.slice(0, 3).map(i => {
-        const d = i.ts ? new Date(i.ts) : null;
+        const iso = getTs(i);
+        const d = iso ? new Date(iso) : null;
         const dayKey = d ? ymdBerlin(d) : '';
         const dateDisplay = d
           ? new Intl.DateTimeFormat('de-DE', { timeZone: FE_TZ, day:'2-digit', month:'2-digit', year:'numeric' }).format(d)
@@ -1847,7 +1883,7 @@ function DayScoresTable({ items }: { items: FeedbackItem[] | undefined | null })
 }
 
 /* ===========================
-   Einzelzeile – Kommentar-Toggle, interne Notiz (zentriert), „erledigt“-Toggle
+   Einzelzeile – Kommentar-Toggle, interne Notiz (zentriert), „erledigt“-Toggle + BO-Chip + Berlin-Zeit
 =========================== */
 function FeedbackItemRow({
   f,
@@ -1865,12 +1901,16 @@ function FeedbackItemRow({
 
   const lbl = labelMap[f.feedbacktyp] ?? f.feedbacktyp ?? '—';
   const ch = f.feedbacktyp;
-  const dt = f.ts ? new Date(f.ts).toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' }) : '—';
+  const iso = getTs(f);
+  const dt = fmtTimeBerlin(iso);
+  const dd = fmtDateBerlin(iso);
 
   const hasInternal = !!(f.internal_note && f.internal_note.trim());
   const highlight = hasInternal && !internalChecked
     ? 'border-l-4 border-amber-400 pl-2 bg-amber-50 dark:bg-amber-900/10'
     : '';
+
+  const bo = boLinkFor(f);
 
   async function toggleInternalChecked() {
     const next = !internalChecked;
@@ -1891,37 +1931,59 @@ function FeedbackItemRow({
     <li id={`fb-${String(f.id)}`} className={`px-3 py-3 flex items-start justify-between gap-3 ${highlight}`}>
       {/* linke Spalte */}
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-medium">{lbl}</span>
-          <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300" title="Kanal">{ch}</span>
+        {/* Kopfzeile: Label + Chips */}
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="min-w-0 flex items-center gap-2 flex-wrap">
+            <span className="font-medium truncate">{lbl}</span>
+            <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300" title="Kanal">{ch}</span>
 
-          {isTrueish(f.rekla) && (
-            <span className="text-[11px] px-1.5 py-0.5 rounded-full border border-amber-300 text-amber-700 dark:border-amber-900 dark:text-amber-300">
-              Rekla
+            {isTrueish(f.rekla) && (
+              <span className="text-[11px] px-1.5 py-0.5 rounded-full border border-amber-300 text-amber-700 dark:border-amber-900 dark:text-amber-300">
+                Rekla
+              </span>
+            )}
+
+            <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${isTrueish(f.geklaert)
+              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200'
+              : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'}`}>
+              {isTrueish(f.geklaert) ? 'geklärt' : 'offen'}
             </span>
-          )}
 
-          <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${isTrueish(f.geklaert)
-            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200'
-            : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'}`}>
-            {isTrueish(f.geklaert) ? 'geklärt' : 'offen'}
-          </span>
+            {hasInternal && (
+              <span className={`text-[11px] px-1.5 py-0.5 rounded-full
+                ${internalChecked ? 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300' : 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200'}`}>
+                intern
+              </span>
+            )}
+          </div>
 
-          {hasInternal && (
-            <span className={`text-[11px] px-1.5 py-0.5 rounded-full
-              ${internalChecked ? 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300' : 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200'}`}>
-              intern
+          {/* rechte Chip-Gruppe: BO + Zeit/Template */}
+          <div className="shrink-0 flex items-center gap-2">
+            {bo && (
+              <a
+                href={bo}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"
+                title="Im Backoffice suchen"
+              >
+                🔎 Im BO suchen
+              </a>
+            )}
+            <span className="text-[11px] px-2 py-1 rounded-full bg-slate-50 text-slate-700 border border-slate-200">
+              {dd} · {dt}
             </span>
-          )}
-        </div>
-
-        <div className="text-xs text-gray-500">
-          {dt}{f.template_name ? ` · ${f.template_name}` : ''}
+            {f.template_name && (
+              <span className="text-[11px] px-2 py-1 rounded-full bg-slate-50 text-slate-700 border border-slate-200">
+                {f.template_name}
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Kundenkommentar: auf/zu */}
         {f.kommentar && (
-          <div className="mt-1">
+          <div className="mt-2">
             {!openC ? (
               <button onClick={()=>setOpenC(true)} className="text-xs underline text-blue-700 dark:text-blue-400">
                 Kommentar anzeigen
