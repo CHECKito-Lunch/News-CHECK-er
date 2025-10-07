@@ -9,39 +9,86 @@ import {
   Wrench, CalendarDays, Bot, Activity, UserCircle2, Ticket, ChevronLeft
 } from 'lucide-react';
 
-type Item = { href: string; label: string; icon?: React.ComponentType<{ className?: string }> };
+type Role = 'admin' | 'moderator' | 'user';
+type Item = {
+  href: string;
+  label: string;
+  icon?: React.ComponentType<{ className?: string }>;
+  roles?: Role[]; // ⬅️ erlaubt: welche Rollen sehen den Punkt (leer/undef ⇒ alle Admin+Mod)
+};
 type Group = { title: string; items: Item[] };
 
-const NAV: Group[] = [
-  { title: 'Inhalte', items: [
-    { href: '/admin/news', label: 'Beitrag anlegen', icon: Newspaper },
-    { href: '/admin/posts-list', label: 'Beiträge', icon: ListChecks },
-    { href: '/admin/polls', label: 'Abstimmungen', icon: Vote },
-    { href: '/admin/categories', label: 'Kategorien', icon: Tags },
-    { href: '/admin/badges', label: 'Badges', icon: Award },
-    { href: '/admin/termine', label: 'Termine', icon: CalendarDays },
-    { href: '/admin/events', label: 'Events', icon: Ticket },
-    { href: '/admin/checkiade', label: 'CHECKiade', icon: Trophy },
-    { href: '/admin/tools', label: 'Tools', icon: Wrench },
-    { href: '/admin/kpis', label: 'KPIs', icon: Activity },
-    { href: '/admin/feedback', label: 'Feedbacks', icon: Vote },
-  ]},
-  { title: 'Veranstalter', items: [
-    { href: '/admin/vendors', label: 'Veranstalter', icon: Store },
-    { href: '/admin/vendor-groups', label: 'Veranstalter-Gruppen', icon: Users2 },
-  
-  ]},
-  { title: 'System', items: [
-    { href: '/admin/news-agent', label: 'News-Agent', icon: Bot },
-    { href: '/admin/users', label: 'Benutzer und Gruppen', icon: UserCircle2 },
-  ]},
+/** Navigationsdefinition inkl. Rollenrechten */
+const NAV_ALL: Group[] = [
+  {
+    title: 'Inhalte',
+    items: [
+      { href: '/admin/news',         label: 'Beitrag anlegen',   icon: Newspaper,   roles: ['admin','moderator'] },
+      { href: '/admin/posts-list',   label: 'Beiträge',          icon: ListChecks,  roles: ['admin','moderator'] },
+      { href: '/admin/polls',        label: 'Abstimmungen',      icon: Vote,        roles: ['admin','moderator'] },
+      { href: '/admin/categories',   label: 'Kategorien',        icon: Tags,        roles: ['admin','moderator'] },
+      { href: '/admin/badges',       label: 'Badges',            icon: Award,       roles: ['admin','moderator'] },
+      { href: '/admin/termine',      label: 'Termine',           icon: CalendarDays,roles: ['admin','moderator'] },
+      { href: '/admin/events',       label: 'Events',            icon: Ticket,      roles: ['admin','moderator'] },
+      { href: '/admin/checkiade',    label: 'CHECKiade',         icon: Trophy,      roles: ['admin'] },
+      { href: '/admin/tools',        label: 'Tools',             icon: Wrench,      roles: ['admin','moderator'] },
+      { href: '/admin/kpis',         label: 'KPIs',              icon: Activity,    roles: ['admin'] },
+      { href: '/admin/feedback',     label: 'Feedbacks',         icon: Vote,        roles: ['admin'] },
+    ],
+  },
+  {
+    title: 'Veranstalter',
+    items: [
+      { href: '/admin/vendors',        label: 'Veranstalter',          icon: Store,  roles: ['admin','moderator'] },
+      { href: '/admin/vendor-groups',  label: 'Veranstalter-Gruppen',  icon: Users2, roles: ['admin','moderator'] },
+    ],
+  },
+  {
+    title: 'System',
+    items: [
+      { href: '/admin/news-agent', label: 'News-Agent',           icon: Bot,          roles: ['admin'] },
+      { href: '/admin/users',      label: 'Benutzer und Gruppen', icon: UserCircle2,  roles: ['admin','moderator'] },
+    ],
+  },
 ];
 
 export default function AdminTabs() {
   const pathname = usePathname();
   const router = useRouter();
 
-  const flatItems = useMemo(() => NAV.flatMap(g => g.items), []);
+  /** Rolle laden (aus /api/me) */
+  const [role, setRole] = useState<Role | null>(null);
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const r = await fetch('/api/me', { cache: 'no-store' });
+        const j = await r.json().catch(() => ({}));
+        const rr = (j?.user?.role as Role | undefined) ?? null;
+        if (mounted) setRole(rr);
+      } catch {
+        if (mounted) setRole(null);
+      }
+    })();
+    return () => { mounted = false; };
+  }, []);
+
+  /** Sichtbare Navigation anhand der Rolle filtern */
+  const NAV = useMemo<Group[]>(() => {
+    // Standard: wenn Rolle noch nicht bekannt ⇒ Admin-only ausblenden
+    const effectiveRole: Role = role ?? 'user';
+
+    const canSee = (it: Item) =>
+      !it.roles ? (effectiveRole === 'admin' || effectiveRole === 'moderator')
+                : it.roles.includes(effectiveRole);
+
+    return NAV_ALL
+      .map(g => ({ ...g, items: g.items.filter(canSee) }))
+      .filter(g => g.items.length > 0);
+  }, [role]);
+
+  const flatItems = useMemo(() => NAV.flatMap(g => g.items), [NAV]);
+  // Fallback: falls leer (z. B. user), zeigen wir gar nichts
   const current = flatItems.find(i => pathname === i.href || pathname.startsWith(i.href + '/')) ?? flatItems[0];
 
   // --- Collapsed state (persist to localStorage)
@@ -54,6 +101,9 @@ export default function AdminTabs() {
     localStorage.setItem('adminSidebarCollapsed', collapsed ? '1' : '0');
   }, [collapsed]);
 
+  // Wenn keine Items sichtbar sind (z. B. falsche Rolle), nichts rendern
+  if (!NAV.length) return null;
+
   return (
     <>
       {/* Mobile: Select */}
@@ -62,7 +112,7 @@ export default function AdminTabs() {
         <select
           id="admin-nav"
           className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm dark:bg-gray-900 dark:border-gray-700"
-          value={current.href}
+          value={current?.href ?? ''}
           onChange={(e) => router.push(e.target.value)}
         >
           {NAV.map(group => (
@@ -75,16 +125,16 @@ export default function AdminTabs() {
         </select>
       </div>
 
-      {/* Desktop: Sidebar – eine (!) Border rechts */}
+      {/* Desktop: Sidebar */}
       <div className={`hidden md:block ${collapsed ? 'w-16' : 'w-72'} shrink-0`}>
         <aside
           className="
-            h-[calc(100dvh-4rem)]  /* unter dem Header */
-            sticky top-16          /* je nach Headerhöhe anpassen */
+            h-[calc(100dvh-4rem)]
+            sticky top-16
             border-r border-gray-200 dark:border-gray-800
             bg-transparent
             overflow-y-auto
-            pt-6                   /* spacing oben */
+            pt-6
             pr-3
           "
           aria-label="Admin Navigation"

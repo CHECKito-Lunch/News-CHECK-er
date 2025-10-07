@@ -3,33 +3,32 @@ import { NextResponse, NextRequest } from 'next/server';
 
 type Role = 'admin' | 'moderator' | 'user';
 
+/* ----------------------------- Public Paths ----------------------------- */
 const PUBLIC_PATHS = new Set([
   '/login',
   '/register',
   '/api/login',
   '/api/register',
   '/api/logout',
-  '/api/me',          // darf durch; Handler liefert 200/401
-  '/api/unread',      // dito
-  '/api/profile',     // Profil lesen/ändern prüft im Handler Bearer
-  '/api/upload',      // wenn öffentlich gewollt
+  '/api/me',
+  '/api/unread',
+  '/api/profile',
+  '/api/upload',
   '/api/admin/stats',
-  
 ]);
 
 function isPublic(pathname: string) {
   if (PUBLIC_PATHS.has(pathname)) return true;
 
-  // Collections mit Präfix:
-  if (pathname.startsWith('/api/events')) return true;   // öffentlicher Events-Feed
-  if (pathname.startsWith('/api/diag')) return true;     // Diagnose offen
+  if (pathname.startsWith('/api/events')) return true;
+  if (pathname.startsWith('/api/diag')) return true;
   if (pathname.startsWith('/_next')) return true;
   if (pathname === '/favicon.ico' || pathname === '/header.svg') return true;
 
   return false;
 }
 
-// Nur Admin-Zeug zentral in der Middleware schützen
+/* ----------------------------- Role areas ----------------------------- */
 function isAdminArea(pathname: string) {
   return (
     pathname.startsWith('/admin') ||
@@ -38,21 +37,38 @@ function isAdminArea(pathname: string) {
   );
 }
 
+/* ---- Nur Admin-exklusive Seiten/Endpoints ---- */
+const ADMIN_ONLY_PREFIXES = [
+  '/admin/news-agent',
+  '/admin/kpis',
+  '/admin/checkiade',
+  '/admin/feedback',
+  '/api/admin/news-agent',
+  '/api/admin/kpis',
+  '/api/admin/checkiade',
+  '/api/admin/feedback',
+];
+
+function isAdminOnly(pathname: string) {
+  return ADMIN_ONLY_PREFIXES.some(p => pathname.startsWith(p));
+}
+
+/* ----------------------------- Middleware ----------------------------- */
 export function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
 
-  // 1) Öffentliche Pfade nie blocken
+  // 1) Öffentliche Pfade
   if (isPublic(pathname)) return NextResponse.next();
 
-  // 2) Nicht-Admin-APIs: Durchlassen, Route-Handler prüft Bearer (Supabase)
+  // 2) Nicht-Admin-APIs: durchlassen
   if (pathname.startsWith('/api') && !isAdminArea(pathname)) {
     return NextResponse.next();
   }
 
-  // 3) Ab hier Seiten & Admin-APIs: Cookie-basierte Gate
+  // 3) Rolle prüfen (aus Cookies)
   const role = req.cookies.get('user_role')?.value as Role | undefined;
 
-  // a) Keine Rolle ⇒ Login erzwingen (Seiten) oder 401 (Admin-APIs)
+  // a) Keine Rolle → Login / 401
   if (!role) {
     if (pathname.startsWith('/api')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -62,7 +78,7 @@ export function middleware(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // b) Admin-Bereich absichern
+  // b) Adminbereich: nur Admin ODER Moderator
   if (isAdminArea(pathname) && !(role === 'admin' || role === 'moderator')) {
     if (pathname.startsWith('/api')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
@@ -70,9 +86,19 @@ export function middleware(req: NextRequest) {
     return NextResponse.redirect(new URL('/', req.url));
   }
 
+  // c) Admin-only: NUR Admin
+  if (isAdminOnly(pathname) && role !== 'admin') {
+    if (pathname.startsWith('/api')) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+    // UX: Moderator → zurück zum Admin-Dashboard
+    return NextResponse.redirect(new URL('/admin', req.url));
+  }
+
   return NextResponse.next();
 }
 
+/* ----------------------------- Matcher ----------------------------- */
 export const config = {
   matcher: [
     '/((?!_next/static|_next/image|favicon.ico|header.svg).*)',
