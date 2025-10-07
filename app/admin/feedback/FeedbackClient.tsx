@@ -406,20 +406,20 @@ setModalDraft({});
         <div className="grid gap-4 lg:grid-cols-2">
           {/* Import-Einstellungen (links) */}
           <fieldset className="rounded-xl border border-gray-200 dark:border-gray-700 p-3">
-            <legend className="px-1 text-sm text-gray-600">Zuordnung beim Import</legend>
+            <legend className="px-1 text-sm text-gray-600">Wie möchtest du importieren?</legend>
 
             <div className="inline-flex rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden mb-3">
               <button
                 onClick={()=>setAssignMode('auto')}
                 className={`px-4 py-2 text-sm ${assignMode==='auto'?'bg-blue-600 text-white':'bg-transparent'}`}
               >
-                Manuell (pro Bearbeiter)
+                Manuell zuordnen (empfohlen, pro Mitarbeiter)
               </button>
               <button
                 onClick={()=>setAssignMode('fixed')}
                 className={`px-4 py-2 text-sm ${assignMode==='fixed'?'bg-blue-600 text-white':'bg-transparent'}`}
               >
-                Fest (alle Zeilen)
+                alles einem Mitarbeiter (alle Zeilen)
               </button>
             </div>
 
@@ -442,20 +442,10 @@ setModalDraft({});
 
           {/* Rechts: bestehende Feedbacks */}
           <fieldset className="rounded-xl border border-gray-200 dark:border-gray-700 p-3">
-            <legend className="px-1 text-sm text-gray-600">Bestehende Feedbacks ansehen</legend>
+            <legend className="px-1 text-sm text-gray-600">Bestehende Feedbacks ansehen und bearbeiten</legend>
             <div className="grid gap-2">
               <UserSelect users={users} value={viewUserId} onChange={setViewUserId} placeholder="– Mitarbeiter wählen –" />
               <div className="inline-flex rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden self-start">
-         <button
-  onClick={()=>setTab('existing')}
-  disabled={!viewUserId}
-  title={!viewUserId ? 'Bitte oben Mitarbeiter wählen' : ''}
-  className="self-start inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm
-             bg-gradient-to-br from-blue-600 to-blue-700 text-white shadow-sm
-             hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
->
-  bestehende bearbeiten
-</button>
               </div>
               <p className="text-xs text-gray-500">
   Klicke in der Liste auf einen Eintrag, um das Feedback zu bearbeiten.
@@ -488,10 +478,21 @@ setModalDraft({});
                       </span>
                     )}
                   </div>
-                  <label className="inline-flex items-center gap-2">
-                    <input type="checkbox" checked={dropDupes} onChange={e=>setDropDupes(e.target.checked)} />
-                    Duplikate vor dem Speichern entfernen
-                  </label>
+              <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+  <input
+    type="checkbox"
+    checked={dropDupes}
+    onChange={e => setDropDupes(e.target.checked)}
+    className="
+      h-4 w-4 rounded border-gray-300 text-blue-600
+      focus:ring-blue-500 focus:ring-offset-0
+      transition-all duration-150
+    "
+  />
+  <span className="text-sm text-gray-700 dark:text-gray-300">
+    Duplikate vor dem Speichern entfernen
+  </span>
+</label>
                 </div>
 
                 <div className="mt-2 max-h-[60vh] overflow-auto rounded-xl border border-gray-200 dark:border-gray-800">
