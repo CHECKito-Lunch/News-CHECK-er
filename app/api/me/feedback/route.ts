@@ -50,20 +50,22 @@ export async function GET(req: NextRequest) {
     // Basisquery gegen user_feedback, Felder auf Frontend-Shape gemappt
     let q = sql`
       select
-        id,
-        user_id,
-        feedback_at                 as ts,
-        rating_overall              as bewertung,
-        rating_friend               as beraterfreundlichkeit,
-        rating_qual                 as beraterqualifikation,
-        rating_offer                as angebotsattraktivitaet,
-        comment_raw                 as kommentar,
-        template_name,
-        reklamation                 as rekla,
-        resolved                    as geklaert,
-        channel                     as feedbacktyp,
-        note                        as internal_note,       
-        note_checked                as internal_checked 
+          uf.id,
+          uf.user_id,
+          uf.feedback_at,             -- DATE
+          uf.feedback_ts,             -- TIMESTAMPTZ (volle Zeit!)  ✨
+          uf.channel      as feedbacktyp,
+          uf.rating_overall as bewertung,
+          uf.rating_friend as beraterfreundlichkeit,
+          uf.rating_qual   as beraterqualifikation,
+          uf.rating_offer  as angebotsattraktivitaet,
+          uf.comment_raw   as kommentar,
+          uf.template_name,
+          uf.reklamation   as rekla,
+          uf.resolved      as geklaert,
+          uf.note          as internal_note,
+          uf.internal_checked,
+          uf.booking_number_hash       -- ✨ für BO-Link
       from public.user_feedback
       where user_id = ${uuid}::uuid
     `;
