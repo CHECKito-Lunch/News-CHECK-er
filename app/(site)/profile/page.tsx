@@ -65,6 +65,9 @@ type FeedbackItem = {
   rekla?: string | boolean | number | null;
   geklaert?: string | boolean | number | null;
   feedbacktyp: 'service_mail' | 'service_mail_rekla' | 'service_phone' | 'sales_phone' | 'sales_lead' | string;
+  feedback_ts?: string | null;
+  booking_number_hash?: string | null;
+  booking_number?: string | null;
 };
 type FeedbackRes = { ok: boolean; items: FeedbackItem[] };
 
@@ -1395,10 +1398,12 @@ function FeedbackSection() {
       const byDay = new Map<string, FeedbackItem[]>();
       arr.forEach(f => {
         const iso = getTs(f);
-        const d = iso ? new Date(iso) : null;
-        if (!d) return;
-        const k = ymdBerlin(d);
-        const a = byDay.get(k) ?? []; a.push(f); byDay.set(k, a);
+        theDate: {
+          const d = iso ? new Date(iso) : null;
+          if (!d) break theDate;
+          const k = ymdBerlin(d);
+          const a = byDay.get(k) ?? []; a.push(f); byDay.set(k, a);
+        }
       });
       const days: DayGroup[] = [];
       for (const [k, list] of byDay.entries()) {
@@ -1808,7 +1813,7 @@ function DayScoresTable({ items }: { items: FeedbackItem[] | undefined | null })
   const numOrNull = (v:any) => {
     const n = Number(v);
     return Number.isFinite(n) && n >= 1 ? n : null; // 0 -> n.v.
-    };
+  };
 
   const avgOf = (arr:(number|null)[]) => {
     const nums = arr.filter((x): x is number => Number.isFinite(x as number));
