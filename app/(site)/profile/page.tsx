@@ -1206,6 +1206,7 @@ function YearScoreTrend({
   data,
   targets,
   labelMap,
+  colors,
 }: {
   data: Array<{
     monthKey: string;
@@ -1217,12 +1218,11 @@ function YearScoreTrend({
   }>;
   targets: Record<string, number>;
   labelMap: Record<string, string>;
+  colors: Record<string, string>;
 }) {
   if (!data || data.length === 0) {
     return <div className="text-sm text-gray-500">Noch keine Monatsdaten.</div>;
   }
-
-  const tickFmt = (v: string) => v; // "MM/JJJJ" kommt schon formatiert
 
   return (
     <div className="h-56 w-full">
@@ -1232,7 +1232,6 @@ function YearScoreTrend({
           <XAxis
             dataKey="label"
             tick={{ fontSize: 11 }}
-            tickFormatter={tickFmt}
             axisLine={false}
             tickLine={false}
             interval="preserveStartEnd"
@@ -1252,19 +1251,50 @@ function YearScoreTrend({
             ]}
             labelFormatter={(l) => `Monat ${l}`}
           />
-          <Legend wrapperStyle={{ paddingTop: 8 }} />
 
-          {/* Ziel-Linien je Kanal */}
-          <ReferenceLine y={targets.service_mail} strokeDasharray="4 4" />
-          <ReferenceLine y={targets.service_mail_rekla} strokeDasharray="4 4" />
-          <ReferenceLine y={targets.service_phone} strokeDasharray="4 4" />
-          <ReferenceLine y={targets.sales_phone} strokeDasharray="4 4" />
+          {/* Ziel-Linien pro Kanal (gleiche Farbe, gestrichelt, Label rechts) */}
+          <ReferenceLine y={targets.service_mail}
+            stroke={colors.service_mail} strokeOpacity={0.55} strokeDasharray="6 6"
+            label={{ value: `Ziel ${targets.service_mail.toFixed(2)}`, position: 'right', fill: colors.service_mail, fontSize: 10 }}
+          />
+          <ReferenceLine y={targets.service_mail_rekla}
+            stroke={colors.service_mail_rekla} strokeOpacity={0.55} strokeDasharray="6 6"
+            label={{ value: `Ziel ${targets.service_mail_rekla.toFixed(2)}`, position: 'right', fill: colors.service_mail_rekla, fontSize: 10 }}
+          />
+          <ReferenceLine y={targets.service_phone}
+            stroke={colors.service_phone} strokeOpacity={0.55} strokeDasharray="6 6"
+            label={{ value: `Ziel ${targets.service_phone.toFixed(2)}`, position: 'right', fill: colors.service_phone, fontSize: 10 }}
+          />
+          <ReferenceLine y={targets.sales_phone}
+            stroke={colors.sales_phone} strokeOpacity={0.55} strokeDasharray="6 6"
+            label={{ value: `Ziel ${targets.sales_phone.toFixed(2)}`, position: 'right', fill: colors.sales_phone, fontSize: 10 }}
+          />
+          <ReferenceLine y={targets.sales_lead}
+            stroke={colors.sales_lead} strokeOpacity={0.55} strokeDasharray="6 6"
+            label={{ value: `Ziel ${targets.sales_lead.toFixed(2)}`, position: 'right', fill: colors.sales_lead, fontSize: 10 }}
+          />
 
-          {/* 4 Kanäle als Linien (Farben: Recharts-Default) */}
-          <Line type="monotone" dataKey="service_mail"        name={labelMap.service_mail}        dot={false} connectNulls strokeWidth={2} />
-          <Line type="monotone" dataKey="service_mail_rekla"  name={labelMap.service_mail_rekla}  dot={false} connectNulls strokeWidth={2} />
-          <Line type="monotone" dataKey="service_phone"       name={labelMap.service_phone}       dot={false} connectNulls strokeWidth={2} />
-          <Line type="monotone" dataKey="sales_phone"         name={labelMap.sales_phone}         dot={false} connectNulls strokeWidth={2} />
+          {/* Daten-Linien pro Kanal (gleiche Farbe) */}
+          <Line type="monotone" dataKey="service_mail"
+            name={labelMap.service_mail} dot={false} connectNulls strokeWidth={2.2}
+            stroke={colors.service_mail} activeDot={{ r: 3 }}
+          />
+          <Line type="monotone" dataKey="service_mail_rekla"
+            name={labelMap.service_mail_rekla} dot={false} connectNulls strokeWidth={2.2}
+            stroke={colors.service_mail_rekla} activeDot={{ r: 3 }}
+          />
+          <Line type="monotone" dataKey="service_phone"
+            name={labelMap.service_phone} dot={false} connectNulls strokeWidth={2.2}
+            stroke={colors.service_phone} activeDot={{ r: 3 }}
+          />
+          <Line type="monotone" dataKey="sales_phone"
+            name={labelMap.sales_phone} dot={false} connectNulls strokeWidth={2.2}
+            stroke={colors.sales_phone} activeDot={{ r: 3 }}
+
+            <Line type="monotone" dataKey="sales_lead"
+            name={labelMap.sales_lead} dot={false} connectNulls strokeWidth={2.2}
+            stroke={colors.sales_lead} activeDot={{ r: 3 }}
+          />
         </LineChart>
       </ResponsiveContainer>
     </div>
@@ -1362,6 +1392,13 @@ function FeedbackSection() {
     sales_phone: 'Sales Phone',
     sales_lead: 'Sales Lead',
   };
+  const channelColors: Record<string, string> = {
+  service_mail:        '#2563EB', // Blau
+  service_mail_rekla:  '#E11D48', // Rot/Rose
+  service_phone:       '#16A34A', // Grün
+  sales_phone:         '#F59E0B', // Amber
+  sales_lead:          '#ffa1fd', 
+};
   
   function avgScore(f: FeedbackItem) {
     const parts = [
@@ -1772,15 +1809,33 @@ const monthlyTrend = useMemo(() => {
 
 {/* Monats-Verlauf (Ø je Kanal) */}
 <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-3 bg-white dark:bg-gray-900 mb-4">
-  <div className="flex items-baseline justify-between mb-2">
+  <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
     <div className="text-sm font-medium">Verlauf pro Monat (Ø je Kanal)</div>
-    <div className="text-[11px] text-gray-500">
-      Ziel-Linien: SM {targets.service_mail.toFixed(2)} · Rekla {targets.service_mail_rekla.toFixed(2)} ·
-      Service {targets.service_phone.toFixed(2)} · Sales {targets.sales_phone.toFixed(2)}
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
+      {([
+        ['service_mail_rekla', typeLabel.service_mail_rekla],
+        ['service_mail',       typeLabel.service_mail],
+        ['sales_phone',        typeLabel.sales_phone],
+        ['service_phone',      typeLabel.service_phone],
+        ['service_leads',      typeLabel.service_leads],
+      ] as const).map(([k, label]) => (
+        <span key={k} className="inline-flex items-center gap-1">
+          <span className="inline-block w-4 h-1.5 rounded-full" style={{ background: channelColors[k] }} />
+          <span>{label}</span>
+          <span className="opacity-60">· Ziel {targets[k].toFixed(2)}</span>
+        </span>
+      ))}
     </div>
   </div>
-  <YearScoreTrend data={monthlyTrend} targets={targets} labelMap={typeLabel} />
+
+  <YearScoreTrend
+    data={monthlyTrend}
+    targets={targets}
+    labelMap={typeLabel}
+    colors={channelColors}
+  />
 </div>
+
 
           {/* Monate */}
           {(withXp ?? []).length === 0 ? (
