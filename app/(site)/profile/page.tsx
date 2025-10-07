@@ -1817,7 +1817,7 @@ const monthlyTrend = useMemo(() => {
         ['service_mail',       typeLabel.service_mail],
         ['sales_phone',        typeLabel.sales_phone],
         ['service_phone',      typeLabel.service_phone],
-        ['service_leads',      typeLabel.service_leads],
+        ['sales_lead',      typeLabel.sales_lead],
       ] as const).map(([k, label]) => (
         <span key={k} className="inline-flex items-center gap-1">
           <span className="inline-block w-4 h-1.5 rounded-full" style={{ background: channelColors[k] }} />
