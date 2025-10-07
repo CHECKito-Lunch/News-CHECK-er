@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
     const me = await requireUser(req).catch(() => null);
     if (!me) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
 
-    // UUID ermitteln (wie gehabt) …
+    // UUID ermitteln (wie gehabt)
     let uuid: string | null = null;
     const cand = (me as any)?.sub ?? (me as any)?.user?.sub ?? (me as any)?.user?.user_id;
     if (isUUID(cand)) {
@@ -43,25 +43,24 @@ export async function GET(req: NextRequest) {
     const fromISO = toISODate(searchParams.get('from'));
     const toISO   = toISODate(searchParams.get('to'));
 
-    // --- WICHTIG: Alias "uf" setzen
     let q = sql`
       select
         uf.id,
         uf.user_id,
-        uf.feedback_at,             -- DATE
-        uf.feedback_ts,             -- TIMESTAMPTZ (volle Zeit)
-        uf.channel            as feedbacktyp,
-        uf.rating_overall     as bewertung,
-        uf.rating_friend      as beraterfreundlichkeit,
-        uf.rating_qual        as beraterqualifikation,
-        uf.rating_offer       as angebotsattraktivitaet,
-        uf.comment_raw        as kommentar,
+        uf.feedback_at,                             -- DATE
+        uf.feedback_ts,                             -- TIMESTAMPTZ (volle Zeit)
+        uf.channel                 as feedbacktyp,
+        uf.rating_overall          as bewertung,
+        uf.rating_friend           as beraterfreundlichkeit,
+        uf.rating_qual             as beraterqualifikation,
+        uf.rating_offer            as angebotsattraktivitaet,
+        uf.comment_raw             as kommentar,
         uf.template_name,
-        uf.reklamation        as rekla,
-        uf.resolved           as geklaert,
-        uf.note               as internal_note,
-        uf.internal_checked,
-        uf.booking_number_hash       -- für BO-Link
+        uf.reklamation             as rekla,
+        uf.resolved                as geklaert,
+        uf.note                    as internal_note,
+        uf.note_checked            as internal_checked,   -- ✅ richtiges Feld
+        uf.booking_number_hash                              -- für BO-Link
       from public.user_feedback uf
       where uf.user_id = ${uuid}::uuid
     `;
@@ -69,7 +68,6 @@ export async function GET(req: NextRequest) {
     if (fromISO) q = sql`${q} and uf.feedback_at >= ${fromISO}::date`;
     if (toISO)   q = sql`${q} and uf.feedback_at < (${toISO}::date + interval '1 day')`;
 
-    // volle Zeit zuerst, dann fallback auf feedback_at
     q = sql`${q} order by uf.feedback_ts desc nulls last, uf.feedback_at desc, uf.id desc`;
 
     const rows = await q;
