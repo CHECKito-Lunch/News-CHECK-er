@@ -3,6 +3,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { authedFetch } from '@/lib/fetchWithSupabase';
+import {
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ReferenceLine,
+} from 'recharts';
+
 
 /* ===========================
    Types
@@ -1189,6 +1199,65 @@ function UnreadCard() {
    🆕 Kunden-Feedback – Vollbreite, Monats-/Tages-Accordion, Streaks, XP
 =========================== */
 
+function ScoreTrendMini({
+  data,
+  target = 4.5,
+}: {
+  data: { date: string; x: Date; score: number; ma?: number }[];
+  target?: number;
+}) {
+  if (!data || data.length === 0) {
+    return <div className="text-xs text-gray-500">Noch keine Verlaufsdaten.</div>;
+  }
+
+  const tickFormatter = (v: string) => {
+    const d = new Date(v + 'T00:00:00Z');
+    return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' });
+  };
+
+  const tooltipLabel = (label: any) => {
+    const d = new Date(String(label) + 'T00:00:00Z');
+    return d.toLocaleDateString('de-DE', {
+      weekday: 'short', year: 'numeric', month: '2-digit', day: '2-digit'
+    });
+  };
+
+  return (
+    <div className="h-28 w-full">
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={data}>
+          <XAxis
+            dataKey="date"
+            tick={{ fontSize: 10 }}
+            tickFormatter={tickFormatter}
+            axisLine={false}
+            tickLine={false}
+            interval="preserveStartEnd"
+          />
+          <YAxis
+            domain={[3.5, 5]}
+            ticks={[3.5, 4.0, 4.5, 5.0]}
+            width={28}
+            tick={{ fontSize: 10 }}
+            axisLine={false}
+            tickLine={false}
+          />
+          <Tooltip
+            labelFormatter={tooltipLabel}
+            formatter={(val: any, name: string) =>
+              [Number(val).toFixed(2), name === 'ma' ? 'Ø(5T)' : 'Score']
+            }
+          />
+          <ReferenceLine y={target} strokeDasharray="4 4" />
+          <Line type="monotone" dataKey="score" dot={false} strokeWidth={2} isAnimationActive={false} />
+          <Line type="monotone" dataKey="ma" dot={false} strokeWidth={1.5} strokeOpacity={0.6} isAnimationActive={false} />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+
 /* ===========================
    Helpers (Timezone & Truthy) – NICHT exportieren!
 =========================== */
@@ -1563,6 +1632,43 @@ function FeedbackSection() {
     return res;
   }, [withXp]);
 
+  // Tages-Score-Verlauf (Berlin-Zeit, Ø pro Tag) + 5-Tage-Moving-Average
+const trendData = useMemo(() => {
+  const byDay = new Map<string, number[]>();
+  for (const f of items) {
+    const iso = getTs(f);
+    if (!iso) continue;
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) continue;
+    const k = ymdBerlin(d);
+    const s = avgScore(f);
+    if (!Number.isFinite(s as any)) continue;
+    const arr = byDay.get(k) ?? [];
+    arr.push(Number(s));
+    byDay.set(k, arr);
+  }
+  const keys = [...byDay.keys()].sort();               // aufsteigend
+  const base = keys.map(k => {
+    const arr = byDay.get(k) ?? [];
+    const avg = arr.reduce((a,b)=>a+b,0)/Math.max(1,arr.length);
+    // x für Tooltip/Sort, score gerundet
+    return { date: k, x: new Date(k + 'T00:00:00Z'), score: Number(avg.toFixed(2)) };
+  });
+  return base;
+}, [items]);
+
+const trendWithMA = useMemo(() => {
+  const win = 5;
+  const arr = trendData;
+  return arr.map((p, i) => {
+    const s = Math.max(0, i - (win - 1));
+    const slice = arr.slice(s, i + 1);
+    const ma = slice.reduce((sum, c) => sum + c.score, 0) / slice.length;
+    return { ...p, ma: Number(ma.toFixed(2)) };
+  });
+}, [trendData]);
+
+
   // open states
   const [openMonths, setOpenMonths] = useState<Record<string, boolean>>({});
   const [openDays, setOpenDays] = useState<Record<string, boolean>>({});
@@ -1763,6 +1869,17 @@ function FeedbackSection() {
                                       <DayScoresTable items={d.items ?? []} />
                                     </div>
                                   )}
+
+{/* Verlauf (Tages-Ø) */}
+<div className="flex-1 min-w-[280px]">
+  <div className="flex items-baseline justify-between">
+    <div className="text-sm font-medium">Verlauf (Tages-Ø)</div>
+    <div className="text-[11px] text-gray-500">Ziel-Linie 4.50</div>
+  </div>
+  <div className="mt-1 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900/40 p-2">
+    <ScoreTrendMini data={trendWithMA} target={4.5} />
+  </div>
+</div>
 
                                   {/* Detailkarten – inkl. internem Kommentar */}
                                   {dOpen && (
