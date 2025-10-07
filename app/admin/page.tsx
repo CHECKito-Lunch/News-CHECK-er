@@ -1,6 +1,7 @@
 // app/admin/page.tsx
 import Link from 'next/link';
-import { headers as nextHeaders } from 'next/headers';
+import { headers as nextHeaders, cookies } from 'next/headers';
+import { redirect } from 'next/navigation';
 import {
   Newspaper, ListChecks, Vote, Store, Tags, Award, Trophy,
   Users2, Wrench, CalendarDays, Bot, Activity, UserCircle2, Ticket
@@ -8,22 +9,34 @@ import {
 
 export const dynamic = 'force-dynamic';
 
-const tiles = [
-  { href: '/admin/news',          label: 'Beitrag anlegen',    icon: Newspaper },
-  { href: '/admin/posts-list',    label: 'Beiträge',           icon: ListChecks },
-  { href: '/admin/polls',         label: 'Abstimmungen',       icon: Vote },
-  { href: '/admin/vendors',       label: 'Veranstalter',       icon: Store },
-  { href: '/admin/categories',    label: 'Kategorien',         icon: Tags },
-  { href: '/admin/badges',        label: 'Badges',             icon: Award },
-  { href: '/admin/vendor-groups', label: 'Veranstalter-Gruppen', icon: Users2 },
-  { href: '/admin/termine',       label: 'Termine',            icon: CalendarDays },
-  { href: '/admin/events',        label: 'Events',             icon: Ticket },
-  { href: '/admin/tools',         label: 'Tools',              icon: Wrench },
-  { href: '/admin/news-agent',    label: 'News-Agent',         icon: Bot },
-  { href: '/admin/kpis',          label: 'KPIs',               icon: Activity },
-  { href: '/admin/users',         label: 'Benutzer',           icon: UserCircle2 },
-  { href: '/admin/checkiade',     label: 'CHECKiade',          icon: Trophy },
-  { href: '/admin/feedback',     label: 'Feedbacks',          icon: Vote },
+type Role = 'admin' | 'moderator' | 'user' | null;
+
+async function getRole(): Promise<Role> {
+  const c = await cookies();                         // Next 15: async
+  return (c.get('user_role')?.value as Role) ?? null;
+}
+
+/* ---- Kacheln mit Rollen ---- */
+const tiles: Array<{
+  href: string; label: string; icon: any; roles: Array<'admin' | 'moderator'>;
+}> = [
+  { href: '/admin/news',          label: 'Beitrag anlegen',      icon: Newspaper,    roles: ['admin','moderator'] },
+  { href: '/admin/posts-list',    label: 'Beiträge',             icon: ListChecks,   roles: ['admin','moderator'] },
+  { href: '/admin/polls',         label: 'Abstimmungen',         icon: Vote,         roles: ['admin','moderator'] },
+  { href: '/admin/vendors',       label: 'Veranstalter',         icon: Store,        roles: ['admin','moderator'] },
+  { href: '/admin/categories',    label: 'Kategorien',           icon: Tags,         roles: ['admin','moderator'] },
+  { href: '/admin/badges',        label: 'Badges',               icon: Award,        roles: ['admin','moderator'] },
+  { href: '/admin/vendor-groups', label: 'Veranstalter-Gruppen', icon: Users2,       roles: ['admin','moderator'] },
+  { href: '/admin/termine',       label: 'Termine',              icon: CalendarDays, roles: ['admin','moderator'] },
+  { href: '/admin/events',        label: 'Events',               icon: Ticket,       roles: ['admin','moderator'] },
+  { href: '/admin/tools',         label: 'Tools',                icon: Wrench,       roles: ['admin','moderator'] },
+
+  // admin-only
+  { href: '/admin/news-agent',    label: 'News-Agent',           icon: Bot,          roles: ['admin'] },
+  { href: '/admin/kpis',          label: 'KPIs',                 icon: Activity,     roles: ['admin'] },
+  { href: '/admin/users',         label: 'Benutzer',             icon: UserCircle2,  roles: ['admin','moderator'] },
+  { href: '/admin/checkiade',     label: 'CHECKiade',            icon: Trophy,       roles: ['admin'] },
+  { href: '/admin/feedback',      label: 'Feedbacks',            icon: Vote,         roles: ['admin'] },
 ];
 
 async function absoluteUrl(path: string) {
@@ -44,7 +57,7 @@ type StatsResponse = {
   error?: string;
 };
 
-async function getStats() {
+async function getStats(): Promise<StatsResponse | null> {
   try {
     const h = await nextHeaders();
     const host = h.get('x-forwarded-host') ?? h.get('host');
@@ -53,12 +66,10 @@ async function getStats() {
 
     const url = new URL('/api/admin/stats', `${proto}://${host}`).toString();
 
-    // 👉 Cookies/Session an die API durchreichen
     const res = await fetch(url, {
       cache: 'no-store',
       headers: {
         cookie: h.get('cookie') ?? '',
-        // optional passthrough headers, falls dein auth darauf schaut:
         'x-forwarded-host': host,
         'x-forwarded-proto': proto,
       },
@@ -75,7 +86,14 @@ async function getStats() {
 }
 
 export default async function AdminHome() {
+  // Seite selbst absichern (zusätzlich zur Middleware)
+  const role = await getRole();
+  if (role !== 'admin' && role !== 'moderator') {
+    redirect('/login'); // oder redirect('/')
+  }
+
   const data = await getStats();
+  const visibleTiles = tiles.filter(t => t.roles.includes(role));
 
   return (
     <div className="space-y-6">
@@ -86,7 +104,7 @@ export default async function AdminHome() {
       <section>
         <h2 className="mb-3 text-sm font-medium text-gray-600 dark:text-gray-300">Schnellzugriff</h2>
         <ul className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {tiles.map(({ href, label, icon: Icon }) => (
+          {visibleTiles.map(({ href, label, icon: Icon }) => (
             <li key={href}>
               <Link
                 href={href}

@@ -555,6 +555,9 @@ function CalendarModern({ events }: { events: any[] }) {
   const [title, setTitle] = useState<string>('');
 
   const todayStart = useMemo(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }, []);
+  const monthStart = useMemo(() => {
+  const d = new Date(); d.setHours(0,0,0,0); d.setDate(1); return d;
+}, []);
   const api = () => calRef.current?.getApi();
 
   const fmtDate = (d: Date) =>
@@ -589,20 +592,19 @@ function CalendarModern({ events }: { events: any[] }) {
     }
 
     if (view.type === 'dayGridMonth') {
-      return (
-        <div className="w-full px-1 py-0.5">
-          <div className="h-1.5 w-full rounded-full bg-blue-500/15 overflow-hidden border border-blue-500/20">
-            <div className="h-full bg-blue-600" style={{ width: '100%' }} />
-          </div>
-          {isStart && (
-            <div className="mt-1 flex items-center gap-1 text-[11px] font-medium leading-none">
-              <span className="leading-none">{icon}</span>
-              <span className="truncate">{ev.title}</span>
-            </div>
-          )}
-        </div>
-      );
-    }
+  return (
+    <div className="w-full px-1 py-0.5">
+      <div className="h-1.5 w-full rounded-full bg-blue-500/15 overflow-hidden border border-blue-500/20">
+        <div className="h-full bg-blue-600" style={{ width: '100%' }} />
+      </div>
+      {/* Titel IMMER zeigen, nicht nur bei isStart */}
+      <div className="mt-1 flex items-center gap-1 text-[11px] font-medium leading-none">
+        <span className="leading-none">{icon}</span>
+        <span className="truncate">{ev.title}</span>
+      </div>
+    </div>
+  );
+}
 
     let timeText = arg.timeText || '';
     if (isAllDay && start) {
@@ -657,7 +659,7 @@ function CalendarModern({ events }: { events: any[] }) {
         dayMaxEvents
         stickyHeaderDates
         initialDate={todayStart}
-        validRange={{ start: todayStart }}
+        validRange={{ start: monthStart }}
         events={events}
         eventDisplay="block"
         displayEventTime={false}
