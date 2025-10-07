@@ -11,7 +11,10 @@ import {
   YAxis,
   Tooltip,
   ReferenceLine,
+  Legend,
+  CartesianGrid,
 } from 'recharts';
+
 
 
 /* ===========================
@@ -1199,37 +1202,37 @@ function UnreadCard() {
    🆕 Kunden-Feedback – Vollbreite, Monats-/Tages-Accordion, Streaks, XP
 =========================== */
 
-function ScoreTrendMini({
+function YearScoreTrend({
   data,
-  target = 4.5,
+  targets,
+  labelMap,
 }: {
-  data: { date: string; x: Date; score: number; ma?: number }[];
-  target?: number;
+  data: Array<{
+    monthKey: string;
+    label: string;
+    service_mail: number|null;
+    service_mail_rekla: number|null;
+    service_phone: number|null;
+    sales_phone: number|null;
+  }>;
+  targets: Record<string, number>;
+  labelMap: Record<string, string>;
 }) {
   if (!data || data.length === 0) {
-    return <div className="text-xs text-gray-500">Noch keine Verlaufsdaten.</div>;
+    return <div className="text-sm text-gray-500">Noch keine Monatsdaten.</div>;
   }
 
-  const tickFormatter = (v: string) => {
-    const d = new Date(v + 'T00:00:00Z');
-    return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' });
-  };
-
-  const tooltipLabel = (label: any) => {
-    const d = new Date(String(label) + 'T00:00:00Z');
-    return d.toLocaleDateString('de-DE', {
-      weekday: 'short', year: 'numeric', month: '2-digit', day: '2-digit'
-    });
-  };
+  const tickFmt = (v: string) => v; // "MM/JJJJ" kommt schon formatiert
 
   return (
-    <div className="h-28 w-full">
+    <div className="h-56 w-full">
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={data}>
+          <CartesianGrid strokeDasharray="3 3" vertical={false} />
           <XAxis
-            dataKey="date"
-            tick={{ fontSize: 10 }}
-            tickFormatter={tickFormatter}
+            dataKey="label"
+            tick={{ fontSize: 11 }}
+            tickFormatter={tickFmt}
             axisLine={false}
             tickLine={false}
             interval="preserveStartEnd"
@@ -1237,25 +1240,37 @@ function ScoreTrendMini({
           <YAxis
             domain={[3.5, 5]}
             ticks={[3.5, 4.0, 4.5, 5.0]}
-            width={28}
-            tick={{ fontSize: 10 }}
+            width={34}
+            tick={{ fontSize: 11 }}
             axisLine={false}
             tickLine={false}
           />
           <Tooltip
-            labelFormatter={tooltipLabel}
-            formatter={(val: any, name: string) =>
-              [Number(val).toFixed(2), name === 'ma' ? 'Ø(5T)' : 'Score']
-            }
+            formatter={(val: any, name: string) => [
+              val == null ? '–' : Number(val).toFixed(2),
+              labelMap[name] ?? name
+            ]}
+            labelFormatter={(l) => `Monat ${l}`}
           />
-          <ReferenceLine y={target} strokeDasharray="4 4" />
-          <Line type="monotone" dataKey="score" dot={false} strokeWidth={2} isAnimationActive={false} />
-          <Line type="monotone" dataKey="ma" dot={false} strokeWidth={1.5} strokeOpacity={0.6} isAnimationActive={false} />
+          <Legend wrapperStyle={{ paddingTop: 8 }} />
+
+          {/* Ziel-Linien je Kanal */}
+          <ReferenceLine y={targets.service_mail} strokeDasharray="4 4" />
+          <ReferenceLine y={targets.service_mail_rekla} strokeDasharray="4 4" />
+          <ReferenceLine y={targets.service_phone} strokeDasharray="4 4" />
+          <ReferenceLine y={targets.sales_phone} strokeDasharray="4 4" />
+
+          {/* 4 Kanäle als Linien (Farben: Recharts-Default) */}
+          <Line type="monotone" dataKey="service_mail"        name={labelMap.service_mail}        dot={false} connectNulls strokeWidth={2} />
+          <Line type="monotone" dataKey="service_mail_rekla"  name={labelMap.service_mail_rekla}  dot={false} connectNulls strokeWidth={2} />
+          <Line type="monotone" dataKey="service_phone"       name={labelMap.service_phone}       dot={false} connectNulls strokeWidth={2} />
+          <Line type="monotone" dataKey="sales_phone"         name={labelMap.sales_phone}         dot={false} connectNulls strokeWidth={2} />
         </LineChart>
       </ResponsiveContainer>
     </div>
   );
 }
+
 
 
 /* ===========================
@@ -1347,7 +1362,7 @@ function FeedbackSection() {
     sales_phone: 'Sales Phone',
     sales_lead: 'Sales Lead',
   };
-
+  
   function avgScore(f: FeedbackItem) {
     const parts = [
       f.beraterfreundlichkeit,
@@ -1668,6 +1683,24 @@ const trendWithMA = useMemo(() => {
   });
 }, [trendData]);
 
+// Monats-Verlauf: Ø pro Kanal (service_mail, service_mail_rekla, service_phone, sales_phone)
+const monthlyTrend = useMemo(() => {
+  const asc = [...(months ?? [])].sort((a,b)=> a.monthKey.localeCompare(b.monthKey)); // älteste → neueste
+  return asc.map(m => ({
+    monthKey: m.monthKey,
+    label: m.label, // "MM/JJJJ"
+    service_mail: m.byType.get('service_mail')?.avg ?? null,
+    service_mail_rekla: m.byType.get('service_mail_rekla')?.avg ?? null,
+    service_phone: m.byType.get('service_phone')?.avg ?? null,
+    sales_phone: m.byType.get('sales_phone')?.avg ?? null,
+    // optional: count je Kanal, falls du es im Tooltip brauchst
+    c_service_mail: m.byType.get('service_mail')?.count ?? 0,
+    c_service_mail_rekla: m.byType.get('service_mail_rekla')?.count ?? 0,
+    c_service_phone: m.byType.get('service_phone')?.count ?? 0,
+    c_sales_phone: m.byType.get('sales_phone')?.count ?? 0,
+  }));
+}, [months]);
+
 
   // open states
   const [openMonths, setOpenMonths] = useState<Record<string, boolean>>({});
@@ -1736,6 +1769,18 @@ const trendWithMA = useMemo(() => {
               </div>
             </div>
           </div>
+
+{/* Monats-Verlauf (Ø je Kanal) */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 p-3 bg-white dark:bg-gray-900 mb-4">
+  <div className="flex items-baseline justify-between mb-2">
+    <div className="text-sm font-medium">Verlauf pro Monat (Ø je Kanal)</div>
+    <div className="text-[11px] text-gray-500">
+      Ziel-Linien: SM {targets.service_mail.toFixed(2)} · Rekla {targets.service_mail_rekla.toFixed(2)} ·
+      Service {targets.service_phone.toFixed(2)} · Sales {targets.sales_phone.toFixed(2)}
+    </div>
+  </div>
+  <YearScoreTrend data={monthlyTrend} targets={targets} labelMap={typeLabel} />
+</div>
 
           {/* Monate */}
           {(withXp ?? []).length === 0 ? (
@@ -1870,16 +1915,6 @@ const trendWithMA = useMemo(() => {
                                     </div>
                                   )}
 
-{/* Verlauf (Tages-Ø) */}
-<div className="flex-1 min-w-[280px]">
-  <div className="flex items-baseline justify-between">
-    <div className="text-sm font-medium">Verlauf (Tages-Ø)</div>
-    <div className="text-[11px] text-gray-500">Ziel-Linie 4.50</div>
-  </div>
-  <div className="mt-1 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900/40 p-2">
-    <ScoreTrendMini data={trendWithMA} target={4.5} />
-  </div>
-</div>
 
                                   {/* Detailkarten – inkl. internem Kommentar */}
                                   {dOpen && (
