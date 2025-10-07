@@ -1290,7 +1290,7 @@ function YearScoreTrend({
           <Line type="monotone" dataKey="sales_phone"
             name={labelMap.sales_phone} dot={false} connectNulls strokeWidth={2.2}
             stroke={colors.sales_phone} activeDot={{ r: 3 }}
-
+/>
             <Line type="monotone" dataKey="sales_lead"
             name={labelMap.sales_lead} dot={false} connectNulls strokeWidth={2.2}
             stroke={colors.sales_lead} activeDot={{ r: 3 }}
