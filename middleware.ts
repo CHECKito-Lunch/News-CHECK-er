@@ -1,7 +1,7 @@
 // middleware.ts
 import { NextResponse, NextRequest } from 'next/server';
 
-type Role = 'admin' | 'moderator' | 'user';
+type Role = 'admin' | 'moderator' | 'user' | 'teamleiter';
 
 /* ----------------------------- Public Paths ----------------------------- */
 const PUBLIC_PATHS = new Set([
@@ -102,6 +102,6 @@ export function middleware(req: NextRequest) {
 export const config = {
   matcher: [
     '/((?!_next/static|_next/image|favicon.ico|header.svg).*)',
-    '/api/:path*',
+    
   ],
 };
