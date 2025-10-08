@@ -63,27 +63,6 @@ type MyEvent = {
   state: 'confirmed' | 'waitlist';
 };
 
-/* 🆕 Feedback */
-type FeedbackItem = {
-  id: string | number;
-  ts?: string | null;
-  bewertung?: number | null;
-  beraterfreundlichkeit?: number | null;
-  beraterqualifikation?: number | null;
-  angebotsattraktivitaet?: number | null;
-  kommentar?: string | null;
-  internal_note?: string | null;
-  internal_checked?: boolean | null;
-  template_name?: string | null;
-  rekla?: string | boolean | number | null;
-  geklaert?: string | boolean | number | null;
-  feedbacktyp: 'service_mail' | 'service_mail_rekla' | 'service_phone' | 'sales_phone' | 'sales_lead' | string;
-  feedback_ts?: string | null;
-  booking_number_hash?: string | null;
-  booking_number?: string | null;
-};
-type FeedbackRes = { ok: boolean; items: FeedbackItem[] };
-
 
 
 /* ===========================
