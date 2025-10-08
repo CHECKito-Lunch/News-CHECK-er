@@ -26,6 +26,13 @@ type Group = {
   has_password?: boolean;
 };
 
+type Team = {
+  id: number;
+  name: string;
+  memberCount?: number;
+  created_at?: string | null;
+};
+
 const inputClass =
   'w-full rounded-lg px-3 py-2 bg-white text-gray-900 placeholder-gray-500 border border-gray-300 ' +
   'focus:outline-none focus:ring-2 focus:ring-blue-500 ' +
@@ -75,7 +82,248 @@ function Switch({
   );
 }
 
-/* ========= Group Modal (create & edit with members + TEAMLEITER) ========= */
+/* ========= TEAM MODAL (Mitglieder + Teamleiter) ========= */
+function TeamModal({
+  open,
+  onClose,
+  team,
+  allUsers,
+  onSaved,
+}: {
+  open: boolean;
+  onClose: () => void;
+  team: Team | null;     // null = neu
+  allUsers: AppUser[];
+  onSaved: () => void;   // reload callback
+}) {
+  const creating = !team;
+
+  const [name, setName] = useState(team?.name ?? '');
+  const [saving, setSaving] = useState(false);
+
+  // Mitglieder (UUIDs) + Leader-Flags
+  const usersByUuid = useMemo(() => {
+    const m = new Map<string, AppUser>();
+    for (const u of allUsers) if (u.user_id) m.set(u.user_id, u);
+    return m;
+  }, [allUsers]);
+  const [memberUuids, setMemberUuids] = useState<string[]>([]);
+  const [leaders, setLeaders] = useState<Record<string, boolean>>({});
+  const [filter, setFilter] = useState('');
+  const [loadingMembers, setLoadingMembers] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setName(team?.name ?? '');
+    setMemberUuids([]);
+    setLeaders({});
+    setFilter('');
+
+    if (team?.id) {
+      (async () => {
+        setLoadingMembers(true);
+        try {
+          const r = await authedFetch(`/api/teams/${team.id}/members`);
+          const j = await r.json().catch(() => ({}));
+          const arr: any[] = Array.isArray(j?.members) ? j.members : [];
+
+          const uuids = arr.map((m) => String(m.user_id)).filter(Boolean);
+          const lf: Record<string, boolean> = {};
+          for (const m of arr) {
+            const uid = String(m?.user_id ?? '');
+            if (uid) lf[uid] = !!m?.is_teamleiter;
+          }
+          setMemberUuids(uuids);
+          setLeaders(lf);
+        } finally {
+          setLoadingMembers(false);
+        }
+      })();
+    }
+  }, [open, team]);
+
+  const available = useMemo(() => {
+    const f = filter.trim().toLowerCase();
+    return allUsers
+      .filter(u => u.user_id && !memberUuids.includes(u.user_id))
+      .filter(u => {
+        if (!f) return true;
+        const hay = `${u.email} ${u.name ?? ''}`.toLowerCase();
+        return hay.includes(f);
+      });
+  }, [allUsers, memberUuids, filter]);
+
+  const selected = useMemo(
+    () => memberUuids.map(uuid => usersByUuid.get(uuid)).filter((x): x is AppUser => !!x),
+    [memberUuids, usersByUuid]
+  );
+
+  function add(uuid: string) {
+    setMemberUuids(prev => (prev.includes(uuid) ? prev : [...prev, uuid]));
+  }
+  function remove(uuid: string) {
+    setMemberUuids(prev => prev.filter(x => x !== uuid));
+    setLeaders(prev => {
+      const { [uuid]: _drop, ...rest } = prev;
+      return rest;
+    });
+  }
+
+  async function save() {
+    if (!name.trim()) { alert('Name ist erforderlich.'); return; }
+    setSaving(true);
+    try {
+      let teamId = team?.id ?? null;
+
+      if (!teamId) {
+        const r = await authedFetch('/api/teams', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: name.trim() }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j?.error || 'Team anlegen fehlgeschlagen.');
+        teamId = j?.id ?? j?.data?.id;
+      } else {
+        const r = await authedFetch(`/api/teams/${teamId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: name.trim() }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j?.error || 'Team speichern fehlgeschlagen.');
+      }
+
+      // Mitglieder + Leader-Flags als Bulk ersetzen
+      if (teamId) {
+        const members = memberUuids.map(uuid => ({ user_id: uuid, is_teamleiter: !!leaders[uuid] }));
+        const r2 = await authedFetch(`/api/teams/${teamId}/members`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ members }),
+        });
+        const j2 = await r2.json().catch(() => ({}));
+        if (!r2.ok) throw new Error(j2?.error || 'Mitglieder konnten nicht gespeichert werden.');
+      }
+
+      onSaved();
+      onClose();
+    } catch (e: any) {
+      alert(e?.message ?? 'Fehler beim Speichern');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="absolute inset-x-0 top-8 mx-auto max-w-5xl rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-xl">
+        <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+          <div className="text-lg font-semibold">
+            {creating ? 'Neues Team' : `Team bearbeiten: ${team?.name}`}
+          </div>
+          <div className="flex gap-2">
+            <button className={btnBase} onClick={onClose}>Schließen</button>
+            <button className={btnPrimary} onClick={save} disabled={saving}>
+              {saving ? 'Speichern…' : 'Speichern'}
+            </button>
+          </div>
+        </div>
+
+        <div className="p-5 grid md:grid-cols-2 gap-6">
+          {/* Form (Teams haben aktuell nur Name) */}
+          <section className="space-y-3">
+            <div>
+              <label className="form-label">Name</label>
+              <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
+            </div>
+            <p className="text-sm text-gray-500">
+              Tipp: Teamleiter markieren mit dem ★-Button in der Mitgliederliste.
+            </p>
+          </section>
+
+          {/* Members */}
+          <section className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="font-medium">Mitglieder ({selected.length})</div>
+              <input
+                className={inputClass + ' max-w-[220px]'}
+                placeholder="Benutzer suchen…"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+              />
+            </div>
+            <div className="grid md:grid-cols-2 gap-3">
+              <div className="rounded-2xl border border-gray-200 dark:border-gray-800 p-3">
+                <div className="text-sm mb-2 text-gray-500">Verfügbar</div>
+                <div className="max-h-[260px] overflow-auto grid gap-2">
+                  {loadingMembers && <div className="text-sm text-gray-500">lädt…</div>}
+                  {!loadingMembers && available.map(u => (
+                    <button
+                      key={u.id}
+                      onClick={() => u.user_id && add(u.user_id)}
+                      className="flex items-center justify-between rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-white/10 px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-white/20"
+                    >
+                      <span className="truncate">
+                        <span className="font-medium">{u.name ?? u.email}</span>
+                        {u.name ? <span className="text-gray-500 ml-2">{u.email}</span> : null}
+                      </span>
+                      <span className="text-xs text-gray-500">hinzufügen</span>
+                    </button>
+                  ))}
+                  {!loadingMembers && available.length === 0 && (
+                    <div className="text-sm text-gray-500">Keine Treffer.</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-blue-200 dark:border-blue-900 p-3 bg-blue-50/40 dark:bg-blue-900/10">
+                <div className="text-sm mb-2 text-gray-500">Mitglied im Team</div>
+                <div className="max-h-[260px] overflow-auto grid gap-2">
+                  {selected.map(u => {
+                    const uuid = u.user_id!;
+                    const isLeader = !!leaders[uuid];
+                    return (
+                      <div key={uuid ?? `x-${u.id}`} className="flex items-center justify-between rounded-xl border border-blue-200 dark:border-blue-900 bg-white dark:bg-white/10 px-3 py-2">
+                        <span className="truncate flex items-center gap-2">
+                          <button
+                            type="button"
+                            title={isLeader ? 'Teamleiter' : 'Als Teamleiter ernennen'}
+                            onClick={() => setLeaders(prev => ({ ...prev, [uuid]: !prev[uuid] }))}
+                            className={'text-lg leading-none ' + (isLeader ? 'text-amber-500' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300')}
+                          >
+                            ★
+                          </button>
+                          <span>
+                            <span className="font-medium">{u.name ?? u.email}</span>
+                            {u.name ? <span className="text-gray-500 ml-2">{u.email}</span> : null}
+                          </span>
+                          {isLeader && (
+                            <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700">
+                              Teamleiter
+                            </span>
+                          )}
+                        </span>
+                        <button className="text-xs underline" onClick={() => uuid && remove(uuid)}>
+                          entfernen
+                        </button>
+                      </div>
+                    );
+                  })}
+                  {selected.length === 0 && <div className="text-sm text-gray-500">Noch keine Mitglieder.</div>}
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ========= GRUPPEN-MODAL (wie gehabt; KEIN Teamleiter hier) ========= */
 function GroupModal({
   open,
   onClose,
@@ -105,11 +353,9 @@ function GroupModal({
   }, [allUsers]);
 
   const [memberUuids, setMemberUuids] = useState<string[]>([]);
-  const [leaders, setLeaders] = useState<Record<string, boolean>>({}); // uuid -> is_teamleiter
   const [filter, setFilter] = useState('');
   const [loadingMembers, setLoadingMembers] = useState(false);
 
-  // Beim Öffnen/reset
   useEffect(() => {
     if (!open) return;
     setName(group?.name ?? '');
@@ -117,36 +363,18 @@ function GroupModal({
     setIsPrivate(!!group?.is_private);
     setPassword('');
     setMemberUuids([]);
-    setLeaders({});
     setFilter('');
 
     if (group?.id) {
       (async () => {
+        setLoadingMembers(true);
         try {
-          setLoadingMembers(true);
-
-          // Mitglieder (UUIDs) aus deiner bestehenden Admin-Route laden
           const r = await authedFetch(`/api/admin/groups/${group.id}/members`);
           const j = await r.json().catch(() => ({}));
           const uuids: string[] = Array.isArray(j?.members)
             ? j.members.map((m: any) => String(m.user_id)).filter(Boolean)
             : [];
           setMemberUuids(uuids);
-
-          // Leader-Flags aus dem Team-Endpunkt laden
-          // Erwartete Form: { members: [{ user_id: string, is_teamleiter: boolean }, ...] }
-          // <-- shape hier anpassen, falls nötig
-          const rt = await authedFetch(`/api/teams/${group.id}/members`);
-          const jt = await rt.json().catch(() => ({}));
-          const lf: Record<string, boolean> = {};
-          const arr = Array.isArray(jt?.members) ? jt.members : [];
-          for (const m of arr) {
-            const uid = String(m?.user_id ?? '');
-            if (uid) lf[uid] = !!m?.is_teamleiter;
-          }
-          setLeaders(lf);
-        } catch {
-          // still open modal
         } finally {
           setLoadingMembers(false);
         }
@@ -157,8 +385,8 @@ function GroupModal({
   const available = useMemo(() => {
     const f = filter.trim().toLowerCase();
     return allUsers
-      .filter((u) => u.user_id && !memberUuids.includes(u.user_id))
-      .filter((u) => {
+      .filter(u => u.user_id && !memberUuids.includes(u.user_id))
+      .filter(u => {
         if (!f) return true;
         const hay = `${u.email} ${u.name ?? ''}`.toLowerCase();
         return hay.includes(f);
@@ -166,26 +394,19 @@ function GroupModal({
   }, [allUsers, memberUuids, filter]);
 
   const selected = useMemo(
-    () => memberUuids.map((uuid) => usersByUuid.get(uuid)).filter((x): x is AppUser => !!x),
+    () => memberUuids.map(uuid => usersByUuid.get(uuid)).filter((x): x is AppUser => !!x),
     [memberUuids, usersByUuid]
   );
 
   function add(uuid: string) {
-    setMemberUuids((prev) => (prev.includes(uuid) ? prev : [...prev, uuid]));
+    setMemberUuids(prev => (prev.includes(uuid) ? prev : [...prev, uuid]));
   }
   function remove(uuid: string) {
-    setMemberUuids((prev) => prev.filter((x) => x !== uuid));
-    setLeaders((prev) => {
-      const { [uuid]: _drop, ...rest } = prev;
-      return rest;
-    });
+    setMemberUuids(prev => prev.filter(x => x !== uuid));
   }
 
   async function save() {
-    if (!name.trim()) {
-      alert('Name ist erforderlich.');
-      return;
-    }
+    if (!name.trim()) { alert('Name ist erforderlich.'); return; }
     setSaving(true);
     try {
       let groupId = group?.id ?? null;
@@ -211,7 +432,7 @@ function GroupModal({
         if (creating) groupId = j?.id ?? j?.data?.id;
       }
 
-      // 2) Mitglieder aktualisieren (bestehende Admin-Gruppen-Route)
+      // 2) Mitglieder aktualisieren
       if (groupId) {
         const r2 = await authedFetch(`/api/admin/groups/${groupId}/members`, {
           method: 'PUT',
@@ -220,27 +441,6 @@ function GroupModal({
         });
         const j2 = await r2.json().catch(() => ({}));
         if (!r2.ok) throw new Error(j2?.error || 'Mitglieder konnten nicht gespeichert werden.');
-      }
-
-      // 3) TEAMLEITER-Flags setzen (Teams-API)
-      // Wir patchen für jedes aktuelle Mitglied den Flag. (Mitgliedschaft besteht nach Schritt 2.)
-      if (groupId) {
-        await Promise.all(
-          memberUuids.map(async (uuid) => {
-            const isLeader = !!leaders[uuid];
-            // falls dein API lieber POST für neue Zuweisung nutzt, kannst du bei Bedarf
-            // zuerst POST machen – hier reicht PATCH, weil Mitgliedschaft existiert.
-            const rp = await authedFetch(`/api/teams/${groupId}/members/${uuid}`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ is_teamleiter: isLeader }),
-            });
-            if (!rp.ok) {
-              const jj = await rp.json().catch(() => ({}));
-              throw new Error(jj?.error || `Leader-Flag für ${uuid} konnte nicht gesetzt werden.`);
-            }
-          })
-        );
       }
 
       onSaved();
@@ -259,7 +459,7 @@ function GroupModal({
       <div className="absolute inset-x-0 top-8 mx-auto max-w-5xl rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-xl">
         <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
           <div className="text-lg font-semibold">
-            {creating ? 'Neues Team' : `Team bearbeiten: ${group?.name}`}
+            {creating ? 'Neue Gruppe' : `Gruppe bearbeiten: ${group?.name}`}
           </div>
           <div className="flex gap-2">
             <button className={btnBase} onClick={onClose}>Schließen</button>
@@ -309,20 +509,19 @@ function GroupModal({
                 <div className="text-sm mb-2 text-gray-500">Verfügbar</div>
                 <div className="max-h-[260px] overflow-auto grid gap-2">
                   {loadingMembers && <div className="text-sm text-gray-500">lädt…</div>}
-                  {!loadingMembers &&
-                    available.map((u) => (
-                      <button
-                        key={u.id}
-                        onClick={() => u.user_id && add(u.user_id)}
-                        className="flex items-center justify-between rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-white/10 px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-white/20"
-                      >
-                        <span className="truncate">
-                          <span className="font-medium">{u.name ?? u.email}</span>
-                          {u.name ? <span className="text-gray-500 ml-2">{u.email}</span> : null}
-                        </span>
-                        <span className="text-xs text-gray-500">hinzufügen</span>
-                      </button>
-                    ))}
+                  {!loadingMembers && available.map(u => (
+                    <button
+                      key={u.id}
+                      onClick={() => u.user_id && add(u.user_id)}
+                      className="flex items-center justify-between rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-white/10 px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-white/20"
+                    >
+                      <span className="truncate">
+                        <span className="font-medium">{u.name ?? u.email}</span>
+                        {u.name ? <span className="text-gray-500 ml-2">{u.email}</span> : null}
+                      </span>
+                      <span className="text-xs text-gray-500">hinzufügen</span>
+                    </button>
+                  ))}
                   {!loadingMembers && available.length === 0 && (
                     <div className="text-sm text-gray-500">Keine Treffer.</div>
                   )}
@@ -330,31 +529,15 @@ function GroupModal({
               </div>
 
               <div className="rounded-2xl border border-blue-200 dark:border-blue-900 p-3 bg-blue-50/40 dark:bg-blue-900/10">
-                <div className="text-sm mb-2 text-gray-500">Mitglied im Team</div>
+                <div className="text-sm mb-2 text-gray-500">Mitglied in Gruppe</div>
                 <div className="max-h-[260px] overflow-auto grid gap-2">
-                  {selected.map((u) => {
+                  {selected.map(u => {
                     const uuid = u.user_id!;
-                    const isLeader = !!leaders[uuid];
                     return (
                       <div key={uuid ?? `x-${u.id}`} className="flex items-center justify-between rounded-xl border border-blue-200 dark:border-blue-900 bg-white dark:bg-white/10 px-3 py-2">
-                        <span className="truncate flex items-center gap-2">
-                          <button
-                            type="button"
-                            title={isLeader ? 'Teamleiter' : 'Als Teamleiter ernennen'}
-                            onClick={() => setLeaders(prev => ({ ...prev, [uuid]: !prev[uuid] }))}
-                            className={'text-lg leading-none ' + (isLeader ? 'text-amber-500' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300')}
-                          >
-                            ★
-                          </button>
-                          <span>
-                            <span className="font-medium">{u.name ?? u.email}</span>
-                            {u.name ? <span className="text-gray-500 ml-2">{u.email}</span> : null}
-                          </span>
-                          {isLeader && (
-                            <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700">
-                              Teamleiter
-                            </span>
-                          )}
+                        <span className="truncate">
+                          <span className="font-medium">{u.name ?? u.email}</span>
+                          {u.name ? <span className="text-gray-500 ml-2">{u.email}</span> : null}
                         </span>
                         <button className="text-xs underline" onClick={() => uuid && remove(uuid)}>
                           entfernen
@@ -393,15 +576,16 @@ export default function UsersAdminPage() {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
 
-  // ---------- Groups/Teams ----------
+  // ---------- GRUPPEN ----------
   const [groups, setGroups] = useState<Group[]>([]);
   const [gQ, setGQ] = useState('');
   const [gLoading, setGLoading] = useState(false);
+  const [groupModal, setGroupModal] = useState<{ open: boolean; group: Group | null }>({ open: false, group: null });
 
-  // Dialog: User → Gruppen/Teams zuweisen
+  // Dialog: User → Gruppen zuweisen
   const [assignOpen, setAssignOpen] = useState<null | { user: AppUser; groupIds: number[] }>(null);
 
-  // Einladungs-Modal
+  // Einladungs-Modal für Gruppen
   const [inviteOpen, setInviteOpen] = useState<null | {
     groupId: number | null;
     selectedIds: number[];
@@ -410,11 +594,14 @@ export default function UsersAdminPage() {
     onlyPrivate: boolean;
   }>(null);
 
-  // Gruppenmodal (neu/ändern)
-  const [groupModal, setGroupModal] = useState<{ open: boolean; group: Group | null }>({
-    open: false,
-    group: null,
-  });
+  // ---------- TEAMS ----------
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [tQ, setTQ] = useState('');
+  const [tLoading, setTLoading] = useState(false);
+  const [teamModal, setTeamModal] = useState<{ open: boolean; team: Team | null }>({ open: false, team: null });
+
+  // Dialog: User → Team zuweisen (max 1 aktiv)
+  const [teamAssignOpen, setTeamAssignOpen] = useState<null | { user: AppUser; teamId: number | null }>(null);
 
   const pages = useMemo(() => Math.max(1, Math.ceil(total / pageSize)), [total, pageSize]);
 
@@ -499,14 +686,14 @@ export default function UsersAdminPage() {
     const pwd = prompt(`Neues Passwort für ${user.email} (mind. 8 Zeichen):`);
     if (!pwd) return;
     if (pwd.length < 8) { alert('Mindestens 8 Zeichen.'); return; }
-    const res = await authedFetch(`/api/admin/users/${user.id}/password`, {
+    const res = await authedFetch(`/api/admin/users/${user.id}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pwd })
     });
     if (!res.ok) { const j = await res.json().catch(() => ({})); alert(j.error ?? 'Passwort setzen fehlgeschlagen'); return; }
     alert('Passwort aktualisiert.');
   }
 
-  // ---------- Gruppen/Teams-Calls ----------
+  /* ---------- Gruppen-Calls ---------- */
   const loadGroups = useCallback(async () => {
     setGLoading(true);
     const r = await authedFetch('/api/admin/groups');
@@ -516,7 +703,6 @@ export default function UsersAdminPage() {
   }, []);
   useEffect(() => { loadGroups(); }, [loadGroups]);
 
-  // Dialog öffnen: Gruppen eines Users laden
   async function openAssign(u: AppUser) {
     const r = await authedFetch(`/api/admin/users/${u.id}/groups`);
     const j = await r.json().catch(() => ({}));
@@ -536,24 +722,67 @@ export default function UsersAdminPage() {
     loadGroups();
   }
 
-  // Filter für Gruppenliste
   const gFiltered = useMemo(() => {
     const q2 = gQ.trim().toLowerCase();
     return !q2 ? groups : groups.filter(g => g.name.toLowerCase().includes(q2) || (g.description ?? '').toLowerCase().includes(q2));
   }, [gQ, groups]);
 
-  // Einladungs-Modal öffnen
-  function openInviteForGroup(g?: Group) {
-    setInviteOpen({
-      groupId: g?.id ?? null,
-      selectedIds: [],
-      message: '',
-      filter: '',
-      onlyPrivate: !!g?.is_private,
-    });
+  /* ---------- Teams-Calls ---------- */
+  const loadTeams = useCallback(async () => {
+    setTLoading(true);
+    const r = await authedFetch(`/api/teams`);
+    const j = await r.json().catch(() => ({}));
+    const items: Team[] = Array.isArray(j?.data)
+      ? j.data.map((t: any) => ({
+          id: Number(t.id),
+          name: String(t.name),
+          memberCount: Number(t.memberCount) || 0,
+          created_at: t.created_at ?? null,
+        }))
+      : [];
+    setTeams(items);
+    setTLoading(false);
+  }, []);
+  useEffect(() => { loadTeams(); }, [loadTeams]);
+
+  async function openTeamAssign(u: AppUser) {
+    if (!u.user_id) { alert('Nutzer hat keine Auth-UUID.'); return; }
+    // aktives Team des Users finden
+    let activeTeamId: number | null = null;
+    for (const t of teams) {
+      const r = await authedFetch(`/api/teams/${t.id}/members/${u.user_id}`);
+      if (r.ok) {
+        const j = await r.json().catch(() => ({}));
+        if (j?.member && j.member.active) { activeTeamId = t.id; break; }
+      }
+    }
+    setTeamAssignOpen({ user: u, teamId: activeTeamId });
   }
 
-  // Hilfsfunktionen fürs Invite-Modal
+  async function saveTeamAssign() {
+    if (!teamAssignOpen) return;
+    const teamId = teamAssignOpen.teamId;
+    const userUuid = teamAssignOpen.user.user_id;
+    if (!teamId || !userUuid) { alert('Bitte Team wählen & Nutzer mit UUID.'); return; }
+
+    // setzt active=true für (teamId, userUuid) — Server sorgt per Constraint dafür, dass pro User nur EIN aktives Team existiert
+    const r = await authedFetch(`/api/teams/${teamId}/members/${userUuid}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active: true }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { alert(j.error ?? 'Teamzuweisung fehlgeschlagen'); return; }
+    setTeamAssignOpen(null);
+    loadTeams();
+  }
+
+  const tFiltered = useMemo(() => {
+    const q2 = tQ.trim().toLowerCase();
+    return !q2 ? teams : teams.filter(t => t.name.toLowerCase().includes(q2));
+  }, [tQ, teams]);
+
+  // Hilfsfunktionen fürs Gruppen-Invite-Modal
   const allUsersById = useMemo(() => {
     const m = new Map<number, AppUser>();
     for (const u of users) m.set(u.id, u);
@@ -614,7 +843,7 @@ export default function UsersAdminPage() {
       .filter((u): u is AppUser => !!u);
   }, [inviteOpen, allUsersById]);
 
-  // DnD Handlers
+  // DnD Handlers fürs Invite-Modal
   function onDragStartUser(e: React.DragEvent, id: number) {
     e.dataTransfer.setData('text/plain', String(id));
     e.dataTransfer.effectAllowed = 'move';
@@ -671,8 +900,8 @@ export default function UsersAdminPage() {
           <div className="flex gap-2 md:col-span-3">
             <button disabled={!fEmail || saving} onClick={save} className={btnPrimary} type="button">{saving ? 'Speichern…' : 'Speichern'}</button>
             <button onClick={resetForm} className={btnBase} type="button">Neu</button>
-            <button className={btnBase} type="button" onClick={() => openInviteForGroup()}>
-              Benutzer einladen…
+            <button className={btnBase} type="button" onClick={() => setInviteOpen({ groupId: null, selectedIds: [], message: '', filter: '', onlyPrivate: false })}>
+              Benutzer zu Gruppe einladen…
             </button>
           </div>
         </div>
@@ -749,6 +978,7 @@ export default function UsersAdminPage() {
                         <button className={btnBase} onClick={() => deleteUser(u.id)}>Löschen</button>
                         <button className={btnBase} onClick={() => setPasswordForUser(u)}>Passwort</button>
                         <button className={btnBase} onClick={() => openAssign(u)}>Gruppen</button>
+                        <button className={btnBase} onClick={() => openTeamAssign(u)}>Team</button>
 
                         {/* Quick Actions: ernennen / zurückstufen */}
                         {u.role !== 'teamleiter' && (
@@ -804,19 +1034,67 @@ export default function UsersAdminPage() {
         )}
       </div>
 
-      {/* ---------- Gruppen/Teamverwaltung ---------- */}
+      {/* ---------- TEAMS-VERWALTUNG ---------- */}
       <div className={cardClass + ' space-y-4'}>
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-lg font-semibold">Teams</h2>
           <div className="flex items-center gap-2">
-            <input className={inputClass + ' w-64'} placeholder="Teams suchen…" value={gQ} onChange={(e) => setGQ(e.target.value)} />
-            <button className={btnPrimary} onClick={() => setGroupModal({ open: true, group: null })}>
+            <input className={inputClass + ' w-64'} placeholder="Teams suchen…" value={tQ} onChange={(e) => setTQ(e.target.value)} />
+            <button className={btnPrimary} onClick={() => setTeamModal({ open: true, team: null })}>
               Neues Team
             </button>
           </div>
         </div>
 
-        {/* Liste Teams */}
+        {tLoading ? (
+          <div className="text-sm text-gray-500">lädt…</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm border border-gray-200 dark:border-gray-800 rounded-lg overflow-hidden">
+              <thead className="bg-gray-50 dark:bg-gray-800/60 text-left">
+                <tr>
+                  <th className="px-3 py-2">Name</th>
+                  <th className="px-3 py-2">Mitglieder</th>
+                  <th className="px-3 py-2 text-right">Aktionen</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tFiltered.map(t => (
+                  <tr key={t.id} className="border-t border-gray-100 dark:border-gray-800">
+                    <td className="px-3 py-2 font-medium">{t.name}</td>
+                    <td className="px-3 py-2">{typeof t.memberCount === 'number' ? t.memberCount : '—'}</td>
+                    <td className="px-3 py-2 text-right space-x-2">
+                      <button className={btnBase} onClick={() => setTeamModal({ open: true, team: t })}>Bearbeiten</button>
+                      <button className={btnBase} onClick={() => {
+                        if (!confirm('Dieses Team löschen? (Mitgliedschaften werden entfernt)')) return;
+                        authedFetch(`/api/teams/${t.id}`, { method: 'DELETE' })
+                          .then(async (r) => {
+                            const j = await r.json().catch(() => ({}));
+                            if (!r.ok) { alert(j.error ?? 'Löschen fehlgeschlagen'); return; }
+                            loadTeams();
+                          });
+                      }}>Löschen</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* ---------- GRUPPEN-VERWALTUNG ---------- */}
+      <div className={cardClass + ' space-y-4'}>
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold">Gruppen</h2>
+          <div className="flex items-center gap-2">
+            <input className={inputClass + ' w-64'} placeholder="Gruppen suchen…" value={gQ} onChange={(e) => setGQ(e.target.value)} />
+            <button className={btnPrimary} onClick={() => setGroupModal({ open: true, group: null })}>
+              Neue Gruppe
+            </button>
+          </div>
+        </div>
+
         {gLoading ? (
           <div className="text-sm text-gray-500">lädt…</div>
         ) : (
@@ -874,9 +1152,11 @@ export default function UsersAdminPage() {
                     </td>
                     <td className="px-3 py-2 text-right space-x-2">
                       <button className={btnBase} onClick={() => setGroupModal({ open: true, group: g })}>Bearbeiten</button>
-                      <button className={btnBase} onClick={() => openInviteForGroup(g)}>Einladen</button>
+                      <button className={btnBase} onClick={() => setInviteOpen({
+                        groupId: g.id, selectedIds: [], message: '', filter: '', onlyPrivate: !!g.is_private
+                      })}>Einladen</button>
                       <button className={btnBase} onClick={() => {
-                        if (!confirm('Dieses Team löschen? (Mitgliedschaften werden entfernt)')) return;
+                        if (!confirm('Diese Gruppe löschen? (Mitgliedschaften werden entfernt)')) return;
                         authedFetch(`/api/admin/groups/${g.id}`, { method: 'DELETE' })
                           .then(async (r) => {
                             const j = await r.json().catch(() => ({}));
@@ -893,14 +1173,14 @@ export default function UsersAdminPage() {
         )}
       </div>
 
-      {/* ---------- Dialog: Teams zuweisen ---------- */}
+      {/* ---------- Dialog: Gruppen zuweisen ---------- */}
       {assignOpen && (
         <div className="fixed inset-0 z-50">
           <div className="absolute inset-0 bg-black/40" onClick={() => setAssignOpen(null)} />
           <div className="absolute inset-x-0 top-20 mx-auto max-w-2xl rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-lg p-5">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-lg font-semibold">
-                Teams für <span className="font-mono">{assignOpen.user.email}</span>
+                Gruppen für <span className="font-mono">{assignOpen.user.email}</span>
               </h3>
               <button className={btnBase} onClick={() => setAssignOpen(null)}>Schließen</button>
             </div>
@@ -948,19 +1228,60 @@ export default function UsersAdminPage() {
         </div>
       )}
 
-      {/* ---------- Einladungs-Modal ---------- */}
+      {/* ---------- Dialog: Team zuweisen (max 1 aktiv) ---------- */}
+      {teamAssignOpen && (
+        <div className="fixed inset-0 z-50">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setTeamAssignOpen(null)} />
+          <div className="absolute inset-x-0 top-20 mx-auto max-w-2xl rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-lg p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-lg font-semibold">
+                Team für <span className="font-mono">{teamAssignOpen.user.email}</span>
+              </h3>
+              <button className={btnBase} onClick={() => setTeamAssignOpen(null)}>Schließen</button>
+            </div>
+
+            <div className="grid gap-2 mb-4">
+              {teams.map(t => {
+                const checked = teamAssignOpen.teamId === t.id;
+                return (
+                  <label key={t.id} className={`inline-flex items-center justify-between px-3 py-1.5 rounded-xl border text-sm cursor-pointer
+                    ${checked
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : 'bg-white dark:bg-white/10 text-gray-700 dark:text-gray-100 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-white/20'
+                    }`}>
+                    <span className="font-medium">{t.name}</span>
+                    <input
+                      type="radio"
+                      className="hidden"
+                      checked={checked}
+                      onChange={() => setTeamAssignOpen(prev => prev && ({ ...prev, teamId: t.id }))}
+                    />
+                  </label>
+                );
+              })}
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button className={btnBase} onClick={() => setTeamAssignOpen(null)}>Abbrechen</button>
+              <button className={btnPrimary} onClick={saveTeamAssign}>Speichern</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---------- Gruppen: Einladungs-Modal ---------- */}
       {inviteOpen && (
         <div className="fixed inset-0 z-50">
           <div className="absolute inset-0 bg-black/40" onClick={() => setInviteOpen(null)} />
           <div className="absolute inset-x-0 top-10 mx-auto max-w-5xl rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-lg p-5">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-lg font-semibold">Benutzer zu Team einladen</h3>
+              <h3 className="text-lg font-semibold">Benutzer zu Gruppe einladen</h3>
               <button className={btnBase} onClick={() => setInviteOpen(null)}>Schließen</button>
             </div>
 
             <div className="grid md:grid-cols-3 gap-4 mb-4">
               <div className="md:col-span-1">
-                <label className="form-label">Ziel-Team</label>
+                <label className="form-label">Ziel-Gruppe</label>
                 <select
                   className={inputClass}
                   value={inviteOpen.groupId ?? ''}
@@ -981,7 +1302,7 @@ export default function UsersAdminPage() {
                     checked={inviteOpen.onlyPrivate}
                     onChange={(e) => setInviteOpen(prev => prev && ({ ...prev, onlyPrivate: e.target.checked }))}
                   />
-                  nur private Teams anzeigen
+                  nur private Gruppen anzeigen
                 </label>
               </div>
               <div className="md:col-span-2">
@@ -1088,7 +1409,14 @@ export default function UsersAdminPage() {
         </div>
       )}
 
-      {/* Team-Modal mounten */}
+      {/* Mount Modals */}
+      <TeamModal
+        open={teamModal.open}
+        onClose={() => setTeamModal({ open: false, team: null })}
+        team={teamModal.team}
+        allUsers={users}
+        onSaved={() => { loadTeams(); load(); }}
+      />
       <GroupModal
         open={groupModal.open}
         onClose={() => setGroupModal({ open: false, group: null })}

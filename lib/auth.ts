@@ -51,7 +51,9 @@ export async function verifyToken(token?: string): Promise<Session | null> {
    - nutzt dein AUTH_COOKIE (JWT)
    - zieht Rolle/Name aus DB, wenn vorhanden (App-Quelle der Wahrheit)
 =========================== */
-export type SessionUser = { user_id: string; role: Role; name?: string; email?: string };
+export type SessionUser = {
+    sub: any; user_id: string; role: Role; name?: string; email?: string 
+};
 
 /**
  * Liest das AUTH_COOKIE, verifiziert es und liefert { user_id, role }.
