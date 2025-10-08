@@ -1,7 +1,7 @@
 // middleware.ts
 import { NextResponse, NextRequest } from 'next/server';
 
-type Role = 'admin' | 'moderator' | 'user' | 'teamleiter';
+type Role = 'admin' | 'moderator' | 'teamleiter' | 'user';
 
 /* ----------------------------- Public Paths ----------------------------- */
 const PUBLIC_PATHS = new Set([
@@ -37,7 +37,7 @@ function isAdminArea(pathname: string) {
   );
 }
 
-/* ---- Nur Admin-exklusive Seiten/Endpoints ---- */
+/* ---- Admin-exklusive Seiten/Endpoints ---- */
 const ADMIN_ONLY_PREFIXES = [
   '/admin/news-agent',
   '/admin/kpis',
@@ -50,7 +50,7 @@ const ADMIN_ONLY_PREFIXES = [
 ];
 
 function isAdminOnly(pathname: string) {
-  return ADMIN_ONLY_PREFIXES.some(p => pathname.startsWith(p));
+  return ADMIN_ONLY_PREFIXES.some((p) => pathname.startsWith(p));
 }
 
 /* ----------------------------- Middleware ----------------------------- */
@@ -60,7 +60,7 @@ export function middleware(req: NextRequest) {
   // 1) Öffentliche Pfade
   if (isPublic(pathname)) return NextResponse.next();
 
-  // 2) Nicht-Admin-APIs: durchlassen
+  // 2) API-Routen außerhalb Admin-Bereich: durchlassen
   if (pathname.startsWith('/api') && !isAdminArea(pathname)) {
     return NextResponse.next();
   }
@@ -78,16 +78,16 @@ export function middleware(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // b) Adminbereich: nur Admin ODER Moderator
-  if (isAdminArea(pathname) && !(role === 'admin' || role === 'moderator')) {
+  // b) Adminbereich: admin | moderator | teamleiter
+  if (isAdminArea(pathname) && !(role === 'admin' || role === 'moderator' || role === 'teamleiter')) {
     if (pathname.startsWith('/api')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     return NextResponse.redirect(new URL('/', req.url));
   }
 
-  // c) Admin-only: NUR Admin
-  if (isAdminOnly(pathname) && role !== 'admin') {
+  // c) Admin-only: ebenfalls admin | teamleiter (→ gleiche Rechte)
+  if (isAdminOnly(pathname) && !(role === 'admin' || role === 'teamleiter')) {
     if (pathname.startsWith('/api')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
@@ -99,9 +99,12 @@ export function middleware(req: NextRequest) {
 }
 
 /* ----------------------------- Matcher ----------------------------- */
+// Empfehlung: API gar nicht von der Middleware matchen lassen.
+// Falls du sie weiter matchen willst, ist die Logik oben bereits korrekt,
+// aber robuster ist es, API aus dem Matcher auszuschließen:
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|header.svg).*)',
-    
+    // alles außer Next-Assets/Icons UND außer /api
+    '/((?!_next/static|_next/image|favicon.ico|header.svg|api).*)',
   ],
 };
