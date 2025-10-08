@@ -1,17 +1,20 @@
 // lib/auth.ts
+'use server';
+
 import type { NextRequest } from 'next/server';
 import { SignJWT, jwtVerify } from 'jose';
 import { sql } from '@/lib/db';
 
+/** Name des Auth-Cookies (JWT) */
 export const AUTH_COOKIE = 'auth';
 
-/** App-Rollen – erweitert um "teamleiter" */
+/** App-Rollen – inkl. teamleiter */
 export type Role = 'admin' | 'moderator' | 'teamleiter' | 'user';
 
 /** Payload, die wir in den JWT packen */
 export type Session = { sub: string; role: Role; name?: string };
 
-/** Optionales User-Objekt (kompatibel zu deinem bestehenden Code) */
+/** Optionales User-Objekt (kompatibel zu bestehendem Code) */
 export type AuthUser = {
   sub: string;
   email?: string;
@@ -19,10 +22,19 @@ export type AuthUser = {
   role?: Role;
 };
 
+/** SSR-User-Objekt, das aus dem Cookie/DB ermittelt wird */
+export type SessionUser = {
+  sub: string;
+  user_id: string;
+  role: Role;
+  name?: string;
+  email?: string;
+};
+
 const secret = new TextEncoder().encode(process.env.AUTH_SECRET || 'dev-secret');
 
 /* ===========================
-   JWT sign/verify (wie bisher)
+   JWT sign/verify
 =========================== */
 export async function signSession(session: Session) {
   return await new SignJWT(session)
@@ -36,9 +48,17 @@ export async function verifyToken(token?: string): Promise<Session | null> {
   if (!token) return null;
   try {
     const { payload } = await jwtVerify(token, secret);
+    // Fallbacks absichern
+    const role =
+      (payload.role as Role) === 'admin' ||
+      (payload.role as Role) === 'moderator' ||
+      (payload.role as Role) === 'teamleiter'
+        ? (payload.role as Role)
+        : 'user';
+
     return {
       sub: String(payload.sub),
-      role: (payload.role as Role) ?? 'user',
+      role,
       name: (payload as any).name,
     };
   } catch {
@@ -48,25 +68,15 @@ export async function verifyToken(token?: string): Promise<Session | null> {
 
 /* ===========================
    SSR: User aus Cookies lesen
-   - nutzt dein AUTH_COOKIE (JWT)
-   - zieht Rolle/Name aus DB, wenn vorhanden (App-Quelle der Wahrheit)
+   - nutzt AUTH_COOKIE (JWT)
+   - Rolle/Name/Email werden (falls vorhanden) aus public.app_users geholt
 =========================== */
-export type SessionUser = {
-    sub: any; user_id: string; role: Role; name?: string; email?: string 
-};
-
-/**
- * Liest das AUTH_COOKIE, verifiziert es und liefert { user_id, role }.
- * Die Rolle wird – falls vorhanden – aus public.app_users überschrieben,
- * damit spätere Rollenänderungen sofort greifen (Token kann älter sein).
- */
 export async function getUserFromCookies(req: NextRequest): Promise<SessionUser | null> {
-  // Cookie lesen
   const token = req.cookies.get(AUTH_COOKIE)?.value;
   const sess = await verifyToken(token);
   if (!sess?.sub) return null;
 
-  // Rolle/Name aus DB (Quelle der Wahrheit)
+  // Quelle der Wahrheit: DB
   try {
     const rows = await sql/*sql*/`
       select user_id, role, name, email
@@ -76,12 +86,18 @@ export async function getUserFromCookies(req: NextRequest): Promise<SessionUser 
     `;
 
     if (rows.length > 0) {
-      const r = rows[0];
-      // Rolle aus DB erzwingt „teamleiter“ usw.
+      const r = rows[0] as {
+        user_id: string;
+        role: string | null;
+        name?: string | null;
+        email?: string | null;
+      };
+
       const dbRole: Role =
-        r.role === 'admin' || r.role === 'moderator' || r.role === 'teamleiter' ? r.role : 'user';
+        r.role === 'admin' || r.role === 'moderator' || r.role === 'teamleiter' ? (r.role as Role) : 'user';
 
       return {
+        sub: String(r.user_id),        // wichtig: sub immer setzen
         user_id: String(r.user_id),
         role: dbRole,
         name: r.name ?? sess.name ?? undefined,
@@ -89,7 +105,7 @@ export async function getUserFromCookies(req: NextRequest): Promise<SessionUser 
       };
     }
   } catch {
-    // Falls die DB nicht erreichbar ist, verwenden wir den Token-Fallback
+    // Wenn DB nicht erreichbar ist, fällt es unten auf Token zurück
   }
 
   // Fallback auf Token-Inhalt
@@ -97,14 +113,15 @@ export async function getUserFromCookies(req: NextRequest): Promise<SessionUser 
     sess.role === 'admin' || sess.role === 'moderator' || sess.role === 'teamleiter' ? sess.role : 'user';
 
   return {
-    user_id: sess.sub,
+    sub: String(sess.sub),
+    user_id: String(sess.sub),
     role: safeRole,
     name: sess.name,
   };
 }
 
 /* ===========================
-   Kleine Helfer (optional)
+   Kleine Helfer
 =========================== */
 export const isAdminOrMod = (role?: Role) => role === 'admin' || role === 'moderator';
 export const isTeamlead = (role?: Role) => role === 'teamleiter';
