@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
-import { getUserFromCookies } from '@/lib/auth';
+import { getAdminFromCookies } from '@/lib/admin-auth';
 
 const isUUID = (s: unknown): s is string =>
   typeof s === 'string' &&
@@ -22,7 +22,7 @@ function parsePath(url: string): { teamId: number | null; userId: string | null 
 }
 
 export async function PATCH(req: NextRequest) {
-  const me = await getUserFromCookies(req);
+  const me = await getAdminFromCookies(req);
   if (!me || (me.role !== 'admin' && me.role !== 'moderator')) {
     return NextResponse.json({ ok:false, error:'forbidden' }, { status:403 });
   }

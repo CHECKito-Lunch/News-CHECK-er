@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
-import { getUserFromCookies } from '@/lib/auth';
+import { getAdminFromCookies } from '@/lib/admin-auth';
 
 function getTeamId(url: string): number | null {
   try {
@@ -16,7 +16,7 @@ function getTeamId(url: string): number | null {
 }
 
 export async function PATCH(req: NextRequest) {
-  const me = await getUserFromCookies(req);
+  const me = await getAdminFromCookies(req);
   if (!me || me.role !== 'admin') {
     return NextResponse.json({ ok:false, error:'forbidden' }, { status:403 });
   }
@@ -33,7 +33,7 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const me = await getUserFromCookies(req);
+  const me = await getAdminFromCookies(req);
   if (!me || me.role !== 'admin') {
     return NextResponse.json({ ok:false, error:'forbidden' }, { status:403 });
   }

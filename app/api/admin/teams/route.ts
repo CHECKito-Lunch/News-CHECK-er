@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
-import { getUserFromCookies } from '@/lib/auth';
+import { getAdminFromCookies } from '@/lib/admin-auth';
 
 const isUUID = (s: unknown): s is string =>
   typeof s === 'string' &&
@@ -24,7 +24,7 @@ function json<T extends object>(d: T, status = 200) {
 }
 
 export async function GET(req: NextRequest) {
-  const me = await getUserFromCookies(req);
+  const me = await getAdminFromCookies(req);
   if (!me) return json<ErrorResponse>({ ok: false, error: 'unauthorized' }, 401);
 
   const { searchParams } = new URL(req.url);
@@ -83,7 +83,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const me = await getUserFromCookies(req);
+  const me = await getAdminFromCookies(req);
   if (!me) {
     return json<ErrorResponse>({ ok: false, error: 'unauthorized' }, 401);
   }

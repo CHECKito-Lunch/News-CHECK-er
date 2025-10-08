@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
-import { getUserFromCookies } from '@/lib/auth';
+import { getAdminFromCookies } from '@/lib/admin-auth';
 
 const isUUID = (s: unknown): s is string =>
   typeof s === 'string' &&
@@ -21,7 +21,7 @@ function getTeamId(url: string): number | null {
 }
 
 export async function GET(req: NextRequest) {
-  const me = await getUserFromCookies(req);
+  const me = await getAdminFromCookies(req);
   if (!me) return NextResponse.json({ ok:false, error:'unauthorized' }, { status:401 });
 
   const teamId = getTeamId(req.url);
@@ -59,7 +59,7 @@ export async function GET(req: NextRequest) {
  * Garantiert "max 1 aktives Team pro User" (deaktiviert vorherige akt. Mitgliedschaft).
  */
 export async function POST(req: NextRequest) {
-  const me = await getUserFromCookies(req);
+  const me = await getAdminFromCookies(req);
   if (!me || (me.role !== 'admin' && me.role !== 'moderator')) {
     return NextResponse.json({ ok:false, error:'forbidden' }, { status:403 });
   }
