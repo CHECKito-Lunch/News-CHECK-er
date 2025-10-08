@@ -130,7 +130,7 @@ async function markAllRead() {
       { href: '/groups', label: 'Gruppen' },
       { href: '/events', label: 'Events' },
       { href: '/checkiade', label: 'CHECKiade' },
-      { href: '/feedback', label: 'CHECKiade' },
+      { href: '/feedback', label: 'deine Feedbacks' },
     ];
     if (me) arr.push({ href: '/profile', label: 'Profil' });
     if (me && (me.role === 'admin' || me.role === 'moderator')) {

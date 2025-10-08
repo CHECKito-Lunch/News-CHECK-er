@@ -1042,6 +1042,12 @@ function FeedbackItemRow({
           </div>
         </div>
 
+
+
+
+
+
+
         {/* Kundenkommentar: auf/zu */}
         {f.kommentar && (
           <div className="mt-2">
