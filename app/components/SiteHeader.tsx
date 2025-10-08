@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
 
-type Role = 'admin' | 'moderator' | 'user';
+type Role = 'admin' | 'moderator' | 'user' | 'teamleiter';
 type Me = { user: { sub: string; role: Role; name?: string } | null };
 
 type UnreadRes = {
@@ -124,20 +124,29 @@ async function markAllRead() {
 }
 
   const links = useMemo(() => {
-    const arr: { href: string; label: string }[] = [
-      { href: '/', label: 'Start' },
-      { href: '/news', label: 'News' },
-      { href: '/groups', label: 'Gruppen' },
-      { href: '/events', label: 'Events' },
-      { href: '/checkiade', label: 'CHECKiade' },
-      { href: '/feedback', label: 'deine Feedbacks' },
-    ];
-    if (me) arr.push({ href: '/profile', label: 'Profil' });
-    if (me && (me.role === 'admin' || me.role === 'moderator')) {
-      arr.push({ href: '/admin', label: 'Adminbereich' });
-    }
-    return arr;
-  }, [me]);
+  const arr: { href: string; label: string }[] = [
+    { href: '/', label: 'Start' },
+    { href: '/news', label: 'News' },
+    { href: '/groups', label: 'Gruppen' },
+    { href: '/events', label: 'Events' },
+    { href: '/checkiade', label: 'CHECKiade' },
+    { href: '/feedback', label: 'deine Feedbacks' },
+  ];
+
+  // 🔐 nur für Teamleiter sichtbar
+  if (me && me.role === 'teamleiter') {
+    arr.push({ href: '/teamhub', label: 'Teamhub' });
+  }
+
+  if (me) arr.push({ href: '/profile', label: 'Profil' });
+
+  if (me && (me.role === 'admin' || me.role === 'moderator'|| me.role === 'teamleiter')) {
+    arr.push({ href: '/admin', label: 'Adminbereich' });
+  }
+
+  return arr;
+}, [me]);
+
 
   const Badge = ({ count }: { count: number }) => (
     <span
