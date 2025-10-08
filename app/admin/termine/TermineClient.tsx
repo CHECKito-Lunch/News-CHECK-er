@@ -7,6 +7,7 @@ import listPlugin from '@fullcalendar/list';
 import iCalendarPlugin from '@fullcalendar/icalendar';
 import interactionPlugin from '@fullcalendar/interaction';
 
+
 // --- Typen -----------------------------------------------------------
 export type Termin = {
   id: number;
