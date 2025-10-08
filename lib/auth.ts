@@ -1,5 +1,4 @@
 // lib/auth.ts
-'use server';
 
 import type { NextRequest } from 'next/server';
 import { SignJWT, jwtVerify } from 'jose';
@@ -11,10 +10,10 @@ export const AUTH_COOKIE = 'auth';
 /** App-Rollen – inkl. teamleiter */
 export type Role = 'admin' | 'moderator' | 'teamleiter' | 'user';
 
-/** Payload, die wir in den JWT packen */
+/** Payload im JWT */
 export type Session = { sub: string; role: Role; name?: string };
 
-/** Optionales User-Objekt (kompatibel zu bestehendem Code) */
+/** Optionales User-Objekt für Client-Kontexte */
 export type AuthUser = {
   sub: string;
   email?: string;
@@ -22,7 +21,7 @@ export type AuthUser = {
   role?: Role;
 };
 
-/** SSR-User-Objekt, das aus dem Cookie/DB ermittelt wird */
+/** SSR-User-Objekt (aus Cookie/DB) */
 export type SessionUser = {
   sub: string;
   user_id: string;
@@ -48,13 +47,9 @@ export async function verifyToken(token?: string): Promise<Session | null> {
   if (!token) return null;
   try {
     const { payload } = await jwtVerify(token, secret);
-    // Fallbacks absichern
-    const role =
-      (payload.role as Role) === 'admin' ||
-      (payload.role as Role) === 'moderator' ||
-      (payload.role as Role) === 'teamleiter'
-        ? (payload.role as Role)
-        : 'user';
+    const roleRaw = payload.role as Role | undefined;
+    const role: Role =
+      roleRaw === 'admin' || roleRaw === 'moderator' || roleRaw === 'teamleiter' ? roleRaw : 'user';
 
     return {
       sub: String(payload.sub),
@@ -69,14 +64,14 @@ export async function verifyToken(token?: string): Promise<Session | null> {
 /* ===========================
    SSR: User aus Cookies lesen
    - nutzt AUTH_COOKIE (JWT)
-   - Rolle/Name/Email werden (falls vorhanden) aus public.app_users geholt
+   - überschreibt Rolle/Name/Email aus public.app_users
 =========================== */
 export async function getUserFromCookies(req: NextRequest): Promise<SessionUser | null> {
   const token = req.cookies.get(AUTH_COOKIE)?.value;
   const sess = await verifyToken(token);
   if (!sess?.sub) return null;
 
-  // Quelle der Wahrheit: DB
+  // DB = Quelle der Wahrheit
   try {
     const rows = await sql/*sql*/`
       select user_id, role, name, email
@@ -97,7 +92,7 @@ export async function getUserFromCookies(req: NextRequest): Promise<SessionUser 
         r.role === 'admin' || r.role === 'moderator' || r.role === 'teamleiter' ? (r.role as Role) : 'user';
 
       return {
-        sub: String(r.user_id),        // wichtig: sub immer setzen
+        sub: String(r.user_id),     // sub immer setzen
         user_id: String(r.user_id),
         role: dbRole,
         name: r.name ?? sess.name ?? undefined,
@@ -105,10 +100,10 @@ export async function getUserFromCookies(req: NextRequest): Promise<SessionUser 
       };
     }
   } catch {
-    // Wenn DB nicht erreichbar ist, fällt es unten auf Token zurück
+    // bei DB-Issue unten Fallback auf Token
   }
 
-  // Fallback auf Token-Inhalt
+  // Fallback auf Token
   const safeRole: Role =
     sess.role === 'admin' || sess.role === 'moderator' || sess.role === 'teamleiter' ? sess.role : 'user';
 
