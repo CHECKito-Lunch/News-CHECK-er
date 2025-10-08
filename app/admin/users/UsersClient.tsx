@@ -123,7 +123,7 @@ function TeamModal({
       (async () => {
         setLoadingMembers(true);
         try {
-          const r = await authedFetch(`/api/teams/${team.id}/members`);
+          const r = await authedFetch(`/api/admin/teams/${team.id}/members`);
           const j = await r.json().catch(() => ({}));
           const arr: any[] = Array.isArray(j?.members) ? j.members : [];
 
@@ -176,7 +176,7 @@ function TeamModal({
       let teamId = team?.id ?? null;
 
       if (!teamId) {
-        const r = await authedFetch('/api/teams', {
+        const r = await authedFetch('/api/admin/teams', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name: name.trim() }),
@@ -185,7 +185,7 @@ function TeamModal({
         if (!r.ok) throw new Error(j?.error || 'Team anlegen fehlgeschlagen.');
         teamId = j?.id ?? j?.data?.id;
       } else {
-        const r = await authedFetch(`/api/teams/${teamId}`, {
+        const r = await authedFetch(`/api/admin/teams/${teamId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name: name.trim() }),
@@ -197,7 +197,7 @@ function TeamModal({
       // Mitglieder + Leader-Flags als Bulk ersetzen
       if (teamId) {
         const members = memberUuids.map(uuid => ({ user_id: uuid, is_teamleiter: !!leaders[uuid] }));
-        const r2 = await authedFetch(`/api/teams/${teamId}/members`, {
+        const r2 = await authedFetch(`/api/admin/teams/${teamId}/members`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ members }),
@@ -730,7 +730,7 @@ export default function UsersAdminPage() {
   /* ---------- Teams-Calls ---------- */
   const loadTeams = useCallback(async () => {
     setTLoading(true);
-    const r = await authedFetch(`/api/teams`);
+    const r = await authedFetch(`/api/admin/teams`);
     const j = await r.json().catch(() => ({}));
     const items: Team[] = Array.isArray(j?.data)
       ? j.data.map((t: any) => ({
@@ -750,7 +750,7 @@ export default function UsersAdminPage() {
     // aktives Team des Users finden
     let activeTeamId: number | null = null;
     for (const t of teams) {
-      const r = await authedFetch(`/api/teams/${t.id}/members/${u.user_id}`);
+      const r = await authedFetch(`/api/admin/teams/${t.id}/members/${u.user_id}`);
       if (r.ok) {
         const j = await r.json().catch(() => ({}));
         if (j?.member && j.member.active) { activeTeamId = t.id; break; }
@@ -766,7 +766,7 @@ export default function UsersAdminPage() {
     if (!teamId || !userUuid) { alert('Bitte Team wählen & Nutzer mit UUID.'); return; }
 
     // setzt active=true für (teamId, userUuid) — Server sorgt per Constraint dafür, dass pro User nur EIN aktives Team existiert
-    const r = await authedFetch(`/api/teams/${teamId}/members/${userUuid}`, {
+    const r = await authedFetch(`/api/admin/teams/${teamId}/members/${userUuid}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ active: true }),
@@ -1067,7 +1067,7 @@ export default function UsersAdminPage() {
                       <button className={btnBase} onClick={() => setTeamModal({ open: true, team: t })}>Bearbeiten</button>
                       <button className={btnBase} onClick={() => {
                         if (!confirm('Dieses Team löschen? (Mitgliedschaften werden entfernt)')) return;
-                        authedFetch(`/api/teams/${t.id}`, { method: 'DELETE' })
+                        authedFetch(`/api/admin/teams/${t.id}`, { method: 'DELETE' })
                           .then(async (r) => {
                             const j = await r.json().catch(() => ({}));
                             if (!r.ok) { alert(j.error ?? 'Löschen fehlgeschlagen'); return; }
