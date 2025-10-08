@@ -943,6 +943,123 @@ function DayScoresTable({ items }: { items: FeedbackItem[] | undefined | null })
   );
 }
 
+
+function FeedbackComments({ feedbackId }: { feedbackId: number|string }) {
+  const [items, setItems] = useState<Array<{id:number; body:string; author:string; created_at:string; unread?:boolean}>>([]);
+  const [draft, setDraft] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  async function load() {
+    const r = await authedFetch(`/api/feedback/${feedbackId}/comments`);
+    const j = await r.json();
+    setItems(Array.isArray(j?.items) ? j.items : []);
+  }
+  async function send() {
+    if (!draft.trim()) return;
+    setLoading(true);
+    try {
+      const r = await authedFetch(`/api/feedback/${feedbackId}/comments`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ body: draft.trim() }),
+      });
+      if (r.ok) { setDraft(''); await load(); }
+    } finally { setLoading(false); }
+  }
+  useEffect(()=>{ load(); }, [feedbackId]);
+
+  return (
+    <div className="mt-3 rounded-xl border border-gray-200 dark:border-gray-800 p-3 bg-gray-50/60 dark:bg-gray-800/30">
+      <div className="text-xs font-medium mb-2">Kommentare</div>
+      <ul className="space-y-2 max-h-60 overflow-auto">
+        {items.map(it=>(
+          <li key={it.id} className="text-sm">
+            <span className="font-medium">{it.author}</span>
+            <span className="text-gray-500"> · {new Date(it.created_at).toLocaleString('de-DE')}</span>
+            <p className="whitespace-pre-wrap">{it.body}</p>
+          </li>
+        ))}
+        {items.length===0 && <li className="text-xs text-gray-500">Noch keine Kommentare.</li>}
+      </ul>
+      <div className="mt-2 flex gap-2">
+        <input
+          value={draft}
+          onChange={e=>setDraft(e.target.value)}
+          placeholder="Kommentar schreiben…"
+          className="flex-1 px-3 py-2 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10"
+        />
+        <button onClick={send} disabled={loading||!draft.trim()}
+          className="px-3 py-2 rounded-lg bg-blue-600 text-white disabled:opacity-60">
+          Senden
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function LabelChips({ feedbackId, labels, onChange }:{
+  feedbackId: number|string;
+  labels: Array<{id:number; name:string; color?:string}>;
+  onChange?: (next: any)=> void;
+}) {
+  const [all, setAll] = useState<Array<{id:number; name:string; color?:string}>>([]);
+  const [attached, setAttached] = useState<number[]>(labels.map(l=>l.id));
+
+  useEffect(()=>{(async()=>{
+    const r = await authedFetch(`/api/labels`);
+    const j = await r.json();
+    setAll(Array.isArray(j?.items) ? j.items : [
+      {id:1,name:'Best Practice',color:'#22c55e'},
+      {id:2,name:'Besondere Lösung',color:'#3b82f6'},
+      {id:3,name:'Wissenswert',color:'#f59e0b'},
+    ]);
+  })();},[]);
+
+  async function add(labelId:number){
+    await authedFetch(`/api/feedback/${feedbackId}/labels`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ label_id: labelId })
+    });
+    const next = [...new Set([...attached, labelId])];
+    setAttached(next); onChange?.(next);
+  }
+  async function remove(labelId:number){
+    await authedFetch(`/api/feedback/${feedbackId}/labels/${labelId}`, { method:'DELETE' });
+    const next = attached.filter(id=>id!==labelId);
+    setAttached(next); onChange?.(next);
+  }
+
+  return (
+    <div className="mt-2 flex items-center gap-2 flex-wrap">
+      {all.filter(l=>attached.includes(l.id)).map(l=>(
+        <button key={l.id} onClick={()=>remove(l.id)}
+          className="text-[11px] px-2 py-1 rounded-full border"
+          style={{ borderColor: l.color||'#ddd', background: '#fff' }}>
+          {l.name} ×
+        </button>
+      ))}
+      <div className="relative">
+        <details>
+          <summary className="text-[11px] px-2 py-1 rounded-full bg-gray-100 cursor-pointer">Label hinzufügen</summary>
+          <div className="absolute z-10 mt-2 p-2 rounded-lg border bg-white shadow">
+            <ul className="min-w-[180px]">
+              {all.filter(l=>!attached.includes(l.id)).map(l=>(
+                <li key={l.id}>
+                  <button onClick={()=>add(l.id)} className="w-full text-left px-2 py-1 hover:bg-gray-50">
+                    <span className="inline-block w-2 h-2 rounded-full mr-2" style={{ background: l.color||'#999' }} />
+                    {l.name}
+                  </button>
+                </li>
+              ))}
+              {all.length===0 && <li className="px-2 py-1 text-sm text-gray-500">Keine Labels</li>}
+            </ul>
+          </div>
+        </details>
+      </div>
+    </div>
+  );
+}
+
 /* ===========================
    Einzelzeile – Kommentar-Toggle, interne Notiz (zentriert), „erledigt“-Toggle + BO-Chip + Berlin-Zeit
 =========================== */
@@ -1100,6 +1217,13 @@ function FeedbackItemRow({
             </div>
           </div>
         )}
+
+        {/* 🏷️ Labels */}
+<LabelChips feedbackId={Number(f.id)} labels={[]} />
+
+{/* 💬 Kommentare */}
+<FeedbackComments feedbackId={Number(f.id)} />
+
       </div>
 
       {/* rechte Spalte (Score) */}
