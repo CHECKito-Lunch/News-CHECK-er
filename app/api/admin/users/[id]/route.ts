@@ -47,7 +47,7 @@ export async function PATCH(
   const update: Record<string, unknown> = {};
   if (typeof body.email === 'string') update.email = body.email.trim().toLowerCase();
   if ('name' in body) update.name = (body.name ?? '') === '' ? null : body.name;
-  if (typeof body.role === 'string' && ['admin','moderator','user'].includes(body.role)) update.role = body.role as Role;
+  if (typeof body.role === 'string' && ['admin','moderator','user','teamleiter'].includes(body.role)) update.role = body.role as Role;
   if (typeof body.active === 'boolean') update.active = body.active;
 
   // Wichtig: last_login wird NICHT hier administrativ gesetzt/überschrieben.
