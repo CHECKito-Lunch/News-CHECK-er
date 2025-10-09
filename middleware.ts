@@ -19,12 +19,10 @@ const PUBLIC_PATHS = new Set([
 
 function isPublic(pathname: string) {
   if (PUBLIC_PATHS.has(pathname)) return true;
-
   if (pathname.startsWith('/api/events')) return true;
   if (pathname.startsWith('/api/diag')) return true;
   if (pathname.startsWith('/_next')) return true;
   if (pathname === '/favicon.ico' || pathname === '/header.svg') return true;
-
   return false;
 }
 
@@ -60,48 +58,41 @@ export function middleware(req: NextRequest) {
   // 1) Öffentliche Pfade
   if (isPublic(pathname)) return NextResponse.next();
 
-  // 2) API-Routen außerhalb Admin-Bereich: durchlassen
-  if (pathname.startsWith('/api') && !isAdminArea(pathname)) {
-    return NextResponse.next();
-  }
+  // 2) Login-Erkennung
+  const roleCookie = req.cookies.get('user_role')?.value as Role | undefined;
+  const hasAuthJwt = !!req.cookies.get('auth')?.value;  // dein JWT
 
-  // 3) Rolle prüfen (aus Cookies)
-  const role = req.cookies.get('user_role')?.value as Role | undefined;
-
-  // a) Keine Rolle → Login / 401
-  if (!role) {
-    if (pathname.startsWith('/api')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+  // a) Weder Rolle noch JWT -> Login/Redirect
+  if (!roleCookie && !hasAuthJwt) {
     const url = new URL('/login', req.url);
     if (pathname !== '/login') url.searchParams.set('from', pathname + search);
     return NextResponse.redirect(url);
   }
 
-  // b) Adminbereich: admin | moderator | teamleiter
-  if (isAdminArea(pathname) && !(role === 'admin' || role === 'moderator' || role === 'teamleiter')) {
-    if (pathname.startsWith('/api')) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  // 3) Admin-Bereiche nur dann von der Middleware einschränken,
+  //    wenn eine explizite Rolle im Cookie steht. Falls nur JWT da ist,
+  //    lassen wir durch und der Server-Handler (DB) entscheidet.
+  if (roleCookie) {
+    // b) Adminbereich: admin | moderator | teamleiter dürfen rein
+    if (isAdminArea(pathname) && !(roleCookie === 'admin' || roleCookie === 'moderator' || roleCookie === 'teamleiter')) {
+      return pathname.startsWith('/api')
+        ? NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+        : NextResponse.redirect(new URL('/', req.url));
     }
-    return NextResponse.redirect(new URL('/', req.url));
-  }
 
-  // c) Admin-only: ebenfalls admin | teamleiter (→ gleiche Rechte)
-  if (isAdminOnly(pathname) && !(role === 'admin' || role === 'teamleiter')) {
-    if (pathname.startsWith('/api')) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    // c) Admin-only: admin | teamleiter (gleiches Recht; Moderator nicht)
+    if (isAdminOnly(pathname) && !(roleCookie === 'admin' || roleCookie === 'teamleiter')) {
+      return pathname.startsWith('/api')
+        ? NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+        : NextResponse.redirect(new URL('/admin', req.url));
     }
-    // UX: Moderator → zurück zum Admin-Dashboard
-    return NextResponse.redirect(new URL('/admin', req.url));
   }
 
   return NextResponse.next();
 }
 
 /* ----------------------------- Matcher ----------------------------- */
-// Empfehlung: API gar nicht von der Middleware matchen lassen.
-// Falls du sie weiter matchen willst, ist die Logik oben bereits korrekt,
-// aber robuster ist es, API aus dem Matcher auszuschließen:
+/* API bewusst vom Matching ausgeschlossen (robuster; Server-Handler authorisiert selbst) */
 export const config = {
   matcher: [
     // alles außer Next-Assets/Icons UND außer /api
