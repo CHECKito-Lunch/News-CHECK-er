@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // lib/db.ts
 import 'server-only';
 import dns from 'dns';
@@ -6,10 +7,10 @@ import postgres, { type Sql } from 'postgres';
 // IPv4 bevorzugen, ohne globales lookup zu verbiegen
 try { dns.setDefaultResultOrder?.('ipv4first'); } catch {}
 
-let _sql: Sql<{}> | null = null;
+let _sql: Sql | null = null;
 
 function normalizeUrl(raw: string): string {
-  // postgresQL -> postgres (beide sind ok, aber wir vereinheitlichen)
+  // postgresql -> postgres (beides ok, wir vereinheitlichen)
   let url = raw.replace(/^postgresql:\/\//i, 'postgres://');
 
   // sslmode=require anhängen, falls nicht vorhanden
@@ -19,7 +20,7 @@ function normalizeUrl(raw: string): string {
   return url;
 }
 
-function ensure(): Sql<{}> {
+function ensure(): Sql {
   const raw = process.env.DATABASE_URL;
   if (!raw) throw new Error('DATABASE_URL fehlt. Bitte in .env.local setzen.');
 
@@ -61,14 +62,14 @@ const tag: Tag = (strings, ...values) => (ensure() as any)(strings, ...values);
 (tag as any).end    = () => (ensure() as any).end();
 
 // Exporte
-// Funktions-export mit durchgereichten Helfern (WICHTIG: unsafe/begin/end/json auch hier!)
+// Funktions-export mit durchgereichten Helfern
 export const sql: any = ((...a: any[]) => (ensure() as any)(...a)) as any;
 
-// ⬇️ Diese vier Zeilen fehlten – sie beheben "unsafe is not a function"
+// ⬇️ diese vier Zeilen sorgen dafür, dass sql.begin/unsafe/end/json vorhanden sind
 (sql as any).begin  = (fn: any) => (ensure() as any).begin(fn);
 (sql as any).unsafe = (text: any, params?: any) => (ensure() as any).unsafe(text, params);
 (sql as any).end    = () => (ensure() as any).end();
 (sql as any).json   = (v: any) => (ensure() as any).json(v);
 
-// Nur json brauchen wir aktuell – array/file bitte weglassen (nicht alle Versionen haben das)
+// Nur json brauchen wir aktuell – array/file weglassen (nicht alle Versionen haben das)
 export const sqlJson = (v: any) => (ensure() as any).json(v);

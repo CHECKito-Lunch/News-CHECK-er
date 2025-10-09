@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-img-element */
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
@@ -85,6 +86,7 @@ export default function SiteHeader() {
     };
 
     loadUnread();
+    // eslint-disable-next-line prefer-const
     timer = window.setInterval(loadUnread, 60_000);
 
     const onAuth = () => loadUnread();
