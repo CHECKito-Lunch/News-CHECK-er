@@ -8,7 +8,7 @@ import { getUserFromCookies } from '@/lib/auth';
 const getSlug = (url:string)=> new URL(url).pathname.split('/').filter(Boolean).slice(-1)[0];
 
 export async function GET(req: NextRequest) {
-  const me = await getUserFromCookies(req).catch(()=>null);
+  const me = await getUserFromCookies().catch(()=>null);
   if (!me) return NextResponse.json({ ok:false, error:'unauthorized' }, { status:401 });
   if (me.role !== 'teamleiter' && me.role !== 'admin' && me.role !== 'moderator')
     return NextResponse.json({ ok:false, error:'forbidden' }, { status:403 });

@@ -3,12 +3,11 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import type { NextRequest } from 'next/server';
 import { sql } from '@/lib/db';
 import { getUserFromCookies } from '@/lib/auth';
 
-export async function GET(req: NextRequest) {
-  const me = await getUserFromCookies(req);
+export async function GET() {
+  const me = await getUserFromCookies();
   if (!me) return NextResponse.json({ ok:false, error:'unauthorized' }, { status:401 });
 
   const head = await sql/*sql*/`

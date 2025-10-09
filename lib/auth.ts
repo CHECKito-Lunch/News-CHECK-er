@@ -47,10 +47,10 @@ const isUUID = (s: unknown): s is string =>
  * Danach: Rolle/Name/Email wenn möglich aus DB überschreiben (Quelle der Wahrheit)
  */
 export async function getUserFromCookies(): Promise<SessionUser | null> {
-  const c = await cookies();
+  const c = cookies();
 
   /* 1) Eigener JWT im AUTH_COOKIE */
-  const token = c.get(AUTH_COOKIE)?.value;
+  const token = (await c).get(AUTH_COOKIE)?.value;
   const sess = await verifyToken(token);
   if (sess?.sub) {
     const enriched = await enrichFromDb(sess.sub, sess.role, sess.name);
@@ -65,9 +65,9 @@ export async function getUserFromCookies(): Promise<SessionUser | null> {
   }
 
   /* 2) Legacy-Cookies */
-  const cookieRole = c.get('user_role')?.value;
-  const cookieUserId = c.get('user_id')?.value || '';
-  const cookieUserName = c.get('user_name')?.value;
+  const cookieRole = (await c).get('user_role')?.value;
+  const cookieUserId = (await c).get('user_id')?.value || '';
+  const cookieUserName = (await c).get('user_name')?.value;
   if (isRole(cookieRole) && cookieUserId) {
     const role = cookieRole;
     const sub = cookieUserId;
@@ -82,7 +82,7 @@ export async function getUserFromCookies(): Promise<SessionUser | null> {
   }
 
   /* 3) Supabase sb-*-auth-token (Base64-JSON) */
-  const sbCookie = [...c.getAll()].find(kv => kv.name.includes('-auth-token'));
+  const sbCookie = [...(await c).getAll()].find(kv => kv.name.includes('-auth-token'));
   if (sbCookie?.value) {
     // Formate: "base64-<b64>" oder direkt JWT; wir behandeln beides tolerant
     const val = sbCookie.value.startsWith('base64-') ? sbCookie.value.substring('base64-'.length) : sbCookie.value;

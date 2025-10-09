@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 // app/api/me/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
