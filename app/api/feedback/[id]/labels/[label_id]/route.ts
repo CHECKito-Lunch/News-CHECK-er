@@ -27,7 +27,7 @@ async function canAccess(me:{user_id:string, role:string}, feedbackId:number){
 }
 
 export async function DELETE(req: NextRequest) {
-  const me = await getUserFromCookies(req).catch(()=>null);
+  const me = await getUserFromCookies().catch(()=>null);
   if (!me) return NextResponse.json({ ok:false, error:'unauthorized' }, { status:401 });
 
   const feedbackId = getFeedbackId(req.url);

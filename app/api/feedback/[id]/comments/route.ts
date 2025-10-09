@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -33,7 +34,7 @@ async function canAccessFeedback(me:{user_id:string, role:string}, feedbackId:nu
 }
 
 export async function GET(req: NextRequest) {
-  const me = await getUserFromCookies(req).catch(()=>null);
+  const me = await getUserFromCookies().catch(()=>null);
   if (!me) return NextResponse.json({ ok:false, error:'unauthorized' }, { status:401 });
 
   const id = getFeedbackId(req.url);
@@ -62,7 +63,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const me = await getUserFromCookies(req).catch(()=>null);
+  const me = await getUserFromCookies().catch(()=>null);
   if (!me) return NextResponse.json({ ok:false, error:'unauthorized' }, { status:401 });
 
   const id = getFeedbackId(req.url);

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // app/api/feedback/[id]/labels/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -25,7 +26,7 @@ async function canAccess(me:{user_id:string, role:string}, feedbackId:number){
 }
 
 export async function POST(req: NextRequest) {
-  const me = await getUserFromCookies(req).catch(()=>null);
+  const me = await getUserFromCookies().catch(()=>null);
   if (!me) return NextResponse.json({ ok:false, error:'unauthorized' }, { status:401 });
 
   const feedbackId = getFeedbackId(req.url);

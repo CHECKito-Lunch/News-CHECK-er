@@ -32,7 +32,7 @@ async function canAccessFeedback(me:{user_id:string, role:string}, feedbackId:nu
 }
 
 export async function POST(req: NextRequest) {
-  const me = await getUserFromCookies(req).catch(()=>null);
+  const me = await getUserFromCookies().catch(()=>null);
   if (!me) return NextResponse.json({ ok:false, error:'unauthorized' }, { status:401 });
 
   const { feedbackId, commentId } = getIds(req.url);
