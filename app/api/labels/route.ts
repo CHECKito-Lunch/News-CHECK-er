@@ -8,7 +8,7 @@ import { getUserFromCookies } from '@/lib/auth';
 const isUUID = (s:unknown):s is string => typeof s==='string' && /^[0-9a-f-]{36}$/i.test(s);
 
 export async function GET(req: NextRequest) {
-  const me = await getUserFromCookies(req).catch(()=>null);
+  const me = await getUserFromCookies().catch(()=>null);
   if (!me) return NextResponse.json({ ok:false, error:'unauthorized' }, { status:401 });
 
   const { searchParams } = new URL(req.url);
@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const me = await getUserFromCookies(req).catch(()=>null);
+  const me = await getUserFromCookies().catch(()=>null);
   if (!me) return NextResponse.json({ ok:false, error:'unauthorized' }, { status:401 });
 
   let b:any={};

@@ -1,6 +1,6 @@
 // lib/auth.ts
 
-import type { NextRequest } from 'next/server';
+import { cookies } from 'next/headers';            // ⬅️ Cookies unabhängig vom Request lesen
 import { SignJWT, jwtVerify } from 'jose';
 import { sql } from '@/lib/db';
 
@@ -62,12 +62,13 @@ export async function verifyToken(token?: string): Promise<Session | null> {
 }
 
 /* ===========================
-   SSR: User aus Cookies lesen
+   SSR: User aus Cookies lesen (request-unabhängig)
    - nutzt AUTH_COOKIE (JWT)
    - überschreibt Rolle/Name/Email aus public.app_users
 =========================== */
-export async function getUserFromCookies(req: NextRequest): Promise<SessionUser | null> {
-  const token = req.cookies.get(AUTH_COOKIE)?.value;
+export async function getUserFromCookies(): Promise<SessionUser | null> {
+  const c = cookies();                                      // ⬅️ kein req nötig
+  const token = (await c).get(AUTH_COOKIE)?.value;
   const sess = await verifyToken(token);
   if (!sess?.sub) return null;
 
@@ -119,4 +120,4 @@ export async function getUserFromCookies(req: NextRequest): Promise<SessionUser 
    Kleine Helfer
 =========================== */
 export const isAdminOrMod = (role?: Role) => role === 'admin' || role === 'moderator';
-export const isTeamlead = (role?: Role) => role === 'teamleiter';
+export const isTeamlead   = (role?: Role) => role === 'teamleiter';
