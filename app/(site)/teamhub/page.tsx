@@ -44,10 +44,6 @@ const isTrueish = (v: unknown) => {
   return s === 'ja' || s === 'true' || s === '1' || s === 'y' || s === 'yes';
 };
 const getTs = (f: FeedbackItem) => (f.feedback_ts ?? f.ts ?? null);
-const ymKeyBerlin = (d: Date) => {
-  const z = new Date(d.toLocaleString('en-US', { timeZone: FE_TZ }));
-  return `${z.getFullYear()}-${String(z.getMonth() + 1).padStart(2, '0')}`;
-};
 const fmtDateTimeBerlin = (iso: string | null) => {
   if (!iso) return '—';
   const d = new Date(iso);
@@ -87,17 +83,30 @@ export default function TeamHubPage() {
   const [items, setItems]     = useState<FeedbackItem[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Filter (Dropdowns)
-  const [minRating, setMinRating] = useState<number>(0); // 0..5
-  const [channels, setChannels]   = useState<Set<string>>(new Set()); // leer => alle
-  const [groupMode, setGroupMode] = useState<'month'|'rating_then_month'>('month');
-
-  // UI: geöffnete Monate
-  const [openMonths, setOpenMonths] = useState<Record<string, boolean>>({});
+  // Ansicht
+  const [view, setView] = useState<'table'|'list'>('table');
 
   // Kommentar-Karte
   const [recent, setRecent] = useState<RecentComment[]>([]);
   const [recentLoading, setRecentLoading] = useState(false);
+
+  // Unread-Map (für „Neu vom Mitarbeiter“-Marker)
+  const [unreadMap, setUnreadMap] = useState<Record<string, { last_by_owner:boolean; unread_total:number; last_comment_at:string }>>({});
+
+  // ---- Tabellen-Filter pro Spalte ----
+  const [fDateFrom, setFDateFrom] = useState<string>('');
+  const [fDateTo, setFDateTo]     = useState<string>('');
+  const [fKanal, setFKanal]       = useState<string>(''); // exact match (Dropdown)
+  const [fTemplate, setFTemplate] = useState<string>(''); // contains
+  const [fScoreMin, setFScoreMin] = useState<string>(''); // number
+  const [fRekla, setFRekla]       = useState<'any'|'rekla'|'none'>('any');
+  const [fStatus, setFStatus]     = useState<'any'|'offen'|'geklärt'>('any');
+  const [fComment, setFComment]   = useState<string>(''); // contains
+  const [fLabelId, setFLabelId]   = useState<number|''>(''); // by label id
+
+  // Listen-Gruppierung (falls du die Liste weiterhin nutzen willst)
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  const [groupMode, setGroupMode] = useState<'month'|'rating_then_month'>('month');
 
   useEffect(() => {
     (async () => {
@@ -121,12 +130,6 @@ export default function TeamHubPage() {
       const j  = await r.json().catch(() => null);
       const rows: FeedbackItem[] = Array.isArray(j?.items) ? j.items : [];
       setItems(rows);
-
-      // Kanäle initial befüllen (einmalig)
-      if (channels.size === 0) {
-        const ks = new Set(rows.map(x => x.feedbacktyp).filter(Boolean));
-        setChannels(ks);
-      }
     } finally {
       setLoading(false);
     }
@@ -140,156 +143,146 @@ export default function TeamHubPage() {
     (async () => {
       setRecentLoading(true);
       try {
-        const r = await authedFetch(
-  `/api/teamhub/threads?mode=recent_owner_comments&owner_id=${encodeURIComponent(userId)}&limit=20`,
-  { cache: 'no-store' }
-);
-const j = await r.json().catch(()=>null);
-setRecent(Array.isArray(j?.items) ? j.items : []);
+        const r = await authedFetch(`/api/teamhub/threads?mode=recent_owner_comments&owner_id=${encodeURIComponent(userId)}&limit=20`, { cache: 'no-store' });
+        const j = await r.json().catch(()=>null);
+        setRecent(Array.isArray(j?.items) ? j.items : []);
       } finally { setRecentLoading(false); }
     })();
   }, [userId]);
 
+  // Unread-Map laden
+  useEffect(()=>{(async()=>{
+    if (!userId) { setUnreadMap({}); return; }
+    const r = await authedFetch(`/api/teamhub/unread-map?owner_id=${encodeURIComponent(userId)}`, { cache:'no-store' });
+    const j = await r.json().catch(()=>null);
+    if (j?.ok) setUnreadMap(j.map || {});
+  })()}, [userId]);
+
   const curName = useMemo(() => members.find(m => m.user_id === userId)?.name ?? '—', [members, userId]);
 
-  // Channel-Liste für UI
+  // Werte für Dropdowns aus Daten ableiten
   const allChannels = useMemo(() => {
     const s = new Set<string>();
     for (const it of items) if (it.feedbacktyp) s.add(it.feedbacktyp);
     return [...s].sort();
   }, [items]);
+  const allLabels = useMemo(()=>{
+    const s = new Map<number,string>();
+    for (const it of items) (it.labels||[]).forEach(l=>s.set(l.id, l.name));
+    return [...s.entries()].sort((a,b)=>a[1].localeCompare(b[1]));
+  }, [items]);
 
-  // --- Filter + Gruppierung ---
+  // ---- Tabellenfilter anwenden ----
+  const filteredItems = useMemo(()=>{
+    return items.filter(f=>{
+      // Datum
+      const tIso = getTs(f);
+      if (!tIso) return false;
+      const t = new Date(tIso).getTime();
+      if (fDateFrom) {
+        const df = new Date(fDateFrom + 'T00:00:00Z').getTime();
+        if (t < df) return false;
+      }
+      if (fDateTo) {
+        const dt = new Date(fDateTo + 'T23:59:59Z').getTime();
+        if (t > dt) return false;
+      }
+      // Kanal
+      if (fKanal && f.feedbacktyp !== fKanal) return false;
+      // Template
+      if (fTemplate && !(f.template_name||'').toLowerCase().includes(fTemplate.toLowerCase())) return false;
+      // Score min
+      if (fScoreMin) {
+        const s = avgScore(f) ?? 0;
+        if (s < Number(fScoreMin)) return false;
+      }
+      // Rekla
+      if (fRekla === 'rekla' && !isTrueish(f.rekla)) return false;
+      if (fRekla === 'none' && isTrueish(f.rekla)) return false;
+      // Status
+      const isGekl = isTrueish(f.geklaert);
+      if (fStatus === 'offen' && isGekl) return false;
+      if (fStatus === 'geklärt' && !isGekl) return false;
+      // Kommentar
+      if (fComment && !(f.kommentar||'').toLowerCase().includes(fComment.toLowerCase())) return false;
+      // Label
+      if (fLabelId !== '') {
+        const ids = new Set((f.labels||[]).map(l=>l.id));
+        if (!ids.has(Number(fLabelId))) return false;
+      }
+      return true;
+    }).sort((a,b)=>{
+      const ta = getTs(a) ? new Date(getTs(a) as string).getTime() : 0;
+      const tb = getTs(b) ? new Date(getTs(b) as string).getTime() : 0;
+      return tb - ta;
+    });
+  }, [items, fDateFrom, fDateTo, fKanal, fTemplate, fScoreMin, fRekla, fStatus, fComment, fLabelId]);
+
+  // ---- Gruppen für Listenansicht (optional beibehalten) ----
   type Group = { key: string; label: string; items: FeedbackItem[] };
   const groups: Group[] = useMemo(() => {
-    // filtern
-    const filtered = items.filter(f => {
-      const s = avgScore(f);
-      const passRating = minRating <= 0 ? true : Number(s ?? 0) >= minRating;
-      const passChannel = channels.size === 0 ? true : channels.has(f.feedbacktyp || '');
-      return passRating && passChannel;
-    });
-
+    const arr = filteredItems; // gleiche Filter wie Tabelle
     if (groupMode === 'month') {
-      // Gruppe nach Monat
       const map = new Map<string, FeedbackItem[]>();
-      for (const f of filtered) {
-        const iso = getTs(f);
-        const d = iso ? new Date(iso) : null;
-        if (!d || isNaN(d.getTime())) continue;
-        const key = ymKeyBerlin(d);
-        const arr = map.get(key) ?? [];
-        arr.push(f); map.set(key, arr);
-      }
-      const months = [...map.entries()].map(([k, arr]) => {
-        const [y, m] = k.split('-');
-        // innerhalb des Monats: neueste zuerst
-        const sorted = [...arr].sort((a, b) => {
-          const ta = getTs(a) ? new Date(getTs(a) as string).getTime() : 0;
-          const tb = getTs(b) ? new Date(getTs(b) as string).getTime() : 0;
-          return tb - ta;
-        });
-        return { key: k, label: `${m}/${y}`, items: sorted };
-      }).sort((a, b) => a.key < b.key ? 1 : -1);
-
-      return months;
-    }
-
-    // groupMode === 'rating_then_month'
-    // 1) nach Bewertung buckets bilden (5.0.., 4.75.., 4.5.., 4.0.., <4.0)
-    const bucketFor = (s: number | null) => {
-      const v = Number(s ?? 0);
-      if (v >= 4.95) return '5.00–4.95';
-      if (v >= 4.75) return '4.95–4.75';
-      if (v >= 4.50) return '4.75–4.50';
-      if (v >= 4.00) return '4.50–4.00';
-      return '< 4.00';
-    };
-
-    const buckets = new Map<string, FeedbackItem[]>();
-    for (const f of filtered) {
-      const key = bucketFor(avgScore(f));
-      const arr = buckets.get(key) ?? [];
-      arr.push(f); buckets.set(key, arr);
-    }
-
-    // 2) innerhalb jedes Buckets → nach Monat
-    const order = ['5.00–4.95','4.95–4.75','4.75–4.50','4.50–4.00','< 4.00'];
-    const out: Group[] = [];
-    for (const bucket of order) {
-      const arr = buckets.get(bucket);
-      if (!arr || arr.length === 0) continue;
-
-      const perMonth = new Map<string, FeedbackItem[]>();
       for (const f of arr) {
-        const iso = getTs(f);
-        const d = iso ? new Date(iso) : null;
-        if (!d || isNaN(d.getTime())) continue;
-        const key = ymKeyBerlin(d);
-        const list = perMonth.get(key) ?? [];
-        list.push(f); perMonth.set(key, list);
+        const iso = getTs(f)!;
+        const d = new Date(iso);
+        const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}`;
+        const list = map.get(key) ?? [];
+        list.push(f); map.set(key, list);
       }
-
-      // Monate absteigend, innerhalb neueste zuerst
-      const months = [...perMonth.entries()].sort((a,b)=> a[0] < b[0] ? 1 : -1);
-      months.forEach(([k, list]) => {
-        const [y, m] = k.split('-');
-        const sorted = [...list].sort((a, b) => {
-          const ta = getTs(a) ? new Date(getTs(a) as string).getTime() : 0;
-          const tb = getTs(b) ? new Date(getTs(b) as string).getTime() : 0;
+      return [...map.entries()].sort((a,b)=> a[0]<b[0] ? 1 : -1).map(([k, list])=>{
+        const [y,m] = k.split('-');
+        const sorted = [...list].sort((a,b)=>{
+          const ta = new Date(getTs(a)!).getTime();
+          const tb = new Date(getTs(b)!).getTime();
           return tb - ta;
         });
-        out.push({ key: `${bucket}:${k}`, label: `${bucket} · ${m}/${y}`, items: sorted });
+        return { key:k, label:`${m}/${y}`, items:sorted };
       });
+    } else {
+      const bucketFor = (s:number|null)=>{
+        const v = Number(s ?? 0);
+        if (v >= 4.95) return '5.00–4.95';
+        if (v >= 4.75) return '4.95–4.75';
+        if (v >= 4.50) return '4.75–4.50';
+        if (v >= 4.00) return '4.50–4.00';
+        return '< 4.00';
+      };
+      const buckets = new Map<string, FeedbackItem[]>();
+      for (const f of arr) {
+        const b = bucketFor(avgScore(f));
+        const list = buckets.get(b) ?? [];
+        list.push(f); buckets.set(b, list);
+      }
+      const order = ['5.00–4.95','4.95–4.75','4.75–4.50','4.50–4.00','< 4.00'];
+      const out: Group[] = [];
+      for (const b of order) {
+        const perMonth = new Map<string, FeedbackItem[]>();
+        for (const f of buckets.get(b) || []) {
+          const d = new Date(getTs(f)!);
+          const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}`;
+          const list = perMonth.get(key) ?? [];
+          list.push(f); perMonth.set(key, list);
+        }
+        [...perMonth.entries()].sort((a,b)=>a[0]<b[0]?1:-1).forEach(([k, list])=>{
+          const [y,m] = k.split('-');
+          const sorted = [...list].sort((a,b)=>{
+            const ta = new Date(getTs(a)!).getTime();
+            const tb = new Date(getTs(b)!).getTime();
+            return tb - ta;
+          });
+          out.push({ key:`${b}:${k}`, label:`${b} · ${m}/${y}`, items:sorted });
+        });
+      }
+      return out;
     }
-    return out;
-  }, [items, minRating, channels, groupMode]);
+  }, [filteredItems, groupMode]);
 
-  // UI helpers
-  const setAllChannels = (on: boolean) => setChannels(on ? new Set(allChannels) : new Set());
-  const toggleChannel = (ch: string) =>
-    setChannels(prev => {
-      const next = new Set(prev);
-      if (next.has(ch)) next.delete(ch); else next.add(ch);
-      return next;
-    });
-  const toggleMonth = (k: string) => setOpenMonths(p => ({ ...p, [k]: !p[k] }));
-
-  // Dropdown-Renderer (leichtgewichtig mit <details>)
-  function ChannelsDropdown() {
-    return (
-      <details className="relative">
-        <summary className="px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-white/10 text-sm cursor-pointer">
-          Feedbackarten
-        </summary>
-        <div className="absolute right-0 z-10 mt-2 w-64 rounded-lg border bg-white dark:bg-gray-900 shadow p-2">
-          <div className="flex items-center gap-2 mb-2">
-            <button className="text-xs px-2 py-1 rounded border" onClick={()=>setAllChannels(true)}>alle</button>
-            <button className="text-xs px-2 py-1 rounded border" onClick={()=>setAllChannels(false)}>keine</button>
-          </div>
-          <ul className="max-h-64 overflow-auto space-y-1">
-            {allChannels.map(ch => (
-              <li key={ch} className="text-sm">
-                <label className="inline-flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 dark:hover:bg-white/10 w-full cursor-pointer">
-                  <input
-                    type="checkbox"
-                    className="accent-blue-600"
-                    checked={channels.has(ch)}
-                    onChange={()=>toggleChannel(ch)}
-                  />
-                  <span className="truncate">{ch}</span>
-                </label>
-              </li>
-            ))}
-            {allChannels.length===0 && <li className="text-xs text-gray-500 px-2 py-1">Keine Kanäle</li>}
-          </ul>
-        </div>
-      </details>
-    );
-  }
+  const toggleGroup = (k:string) => setOpenGroups(p=>({ ...p, [k]: !p[k] }));
 
   return (
-    <div className="container max-w-6xl mx-auto py-6 space-y-4">
+    <div className="container max-w-7xl mx-auto py-6 space-y-4">
       {/* Header */}
       <header className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
@@ -317,6 +310,19 @@ setRecent(Array.isArray(j?.items) ? j.items : []);
             <input type="date" value={to} onChange={e => setTo(e.target.value)}
                   className="px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-white/10 text-sm" />
           </div>
+
+          {/* Ansicht */}
+          <select
+            value={view}
+            onChange={e=>setView(e.target.value as any)}
+            className="px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-white/10 text-sm"
+          >
+            <option value="table">Tabelle</option>
+            <option value="list">Liste</option>
+          </select>
+
+          {/* Label-Manager */}
+          <LabelManagerButton />
         </div>
       </header>
 
@@ -348,12 +354,150 @@ setRecent(Array.isArray(j?.items) ? j.items : []);
         )}
       </section>
 
-      {/* Filterleiste – Dropdowns */}
-      <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-3 bg-gray-50 dark:bg-gray-800/40">
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* Gruppierung */}
-          <div className="flex items-center gap-2">
-            <label className="text-sm">Gruppierung:</label>
+      {loading && <div className="text-sm text-gray-500">Lade…</div>}
+
+      {/* TABELLENANSICHT */}
+      {!loading && view === 'table' && (
+        <div className="rounded-xl border border-gray-200 dark:border-gray-800 overflow-auto">
+          <table className="min-w-[1100px] w-full text-sm">
+            <thead className="sticky top-0 bg-gray-50 dark:bg-gray-800/60">
+              <tr className="text-gray-600 dark:text-gray-300">
+                <th className="px-3 py-2 text-left">Neu</th>
+                <th className="px-3 py-2 text-left">Datum</th>
+                <th className="px-3 py-2 text-left">Kanal</th>
+                <th className="px-3 py-2 text-left">Template</th>
+                <th className="px-3 py-2 text-right">Ø</th>
+                <th className="px-3 py-2 text-left">Rekla</th>
+                <th className="px-3 py-2 text-left">Status</th>
+                <th className="px-3 py-2 text-left">Kommentar</th>
+                <th className="px-3 py-2 text-left">Labels</th>
+                <th className="px-3 py-2 text-left">BO</th>
+              </tr>
+              {/* Filterzeile */}
+              <tr className="bg-white/70 dark:bg-gray-900/30">
+                <th className="px-3 py-2"></th>
+                <th className="px-3 py-2">
+                  <div className="flex gap-1">
+                    <input type="date" value={fDateFrom} onChange={e=>setFDateFrom(e.target.value)}
+                      className="w-[9.5rem] px-2 py-1 rounded border text-xs" />
+                    <input type="date" value={fDateTo} onChange={e=>setFDateTo(e.target.value)}
+                      className="w-[9.5rem] px-2 py-1 rounded border text-xs" />
+                  </div>
+                </th>
+                <th className="px-3 py-2">
+                  <select value={fKanal} onChange={e=>setFKanal(e.target.value)}
+                    className="w-[10rem] px-2 py-1 rounded border text-xs">
+                    <option value="">Alle</option>
+                    {allChannels.map(c=><option key={c} value={c}>{c}</option>)}
+                  </select>
+                </th>
+                <th className="px-3 py-2">
+                  <input value={fTemplate} onChange={e=>setFTemplate(e.target.value)}
+                    placeholder="suchen…" className="w-[12rem] px-2 py-1 rounded border text-xs" />
+                </th>
+                <th className="px-3 py-2">
+                  <input value={fScoreMin} onChange={e=>setFScoreMin(e.target.value)}
+                    placeholder="min" inputMode="decimal"
+                    className="w-[4.5rem] px-2 py-1 rounded border text-xs text-right" />
+                </th>
+                <th className="px-3 py-2">
+                  <select value={fRekla} onChange={e=>setFRekla(e.target.value as any)}
+                    className="w-[7.5rem] px-2 py-1 rounded border text-xs">
+                    <option value="any">Alle</option>
+                    <option value="rekla">Rekla</option>
+                    <option value="none">Keine</option>
+                  </select>
+                </th>
+                <th className="px-3 py-2">
+                  <select value={fStatus} onChange={e=>setFStatus(e.target.value as any)}
+                    className="w-[8rem] px-2 py-1 rounded border text-xs">
+                    <option value="any">Alle</option>
+                    <option value="offen">offen</option>
+                    <option value="geklärt">geklärt</option>
+                  </select>
+                </th>
+                <th className="px-3 py-2">
+                  <input value={fComment} onChange={e=>setFComment(e.target.value)}
+                    placeholder="suchen…" className="w-[14rem] px-2 py-1 rounded border text-xs" />
+                </th>
+                <th className="px-3 py-2">
+                  <select value={String(fLabelId)} onChange={e=>setFLabelId(e.target.value===''?'':Number(e.target.value))}
+                    className="w-[12rem] px-2 py-1 rounded border text-xs">
+                    <option value="">Alle</option>
+                    {allLabels.map(([id,name])=>(
+                      <option key={id} value={id}>{name}</option>
+                    ))}
+                  </select>
+                </th>
+                <th className="px-3 py-2">
+                  <button
+                    onClick={()=>{
+                      setFDateFrom(''); setFDateTo(''); setFKanal('');
+                      setFTemplate(''); setFScoreMin(''); setFRekla('any');
+                      setFStatus('any'); setFComment(''); setFLabelId('');
+                    }}
+                    className="px-2 py-1 rounded border text-xs"
+                  >
+                    Filter zurücksetzen
+                  </button>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredItems.map(f=>{
+                const s = avgScore(f);
+                const bo = boLinkFor(f);
+                const um = unreadMap[String(f.id)];
+                const hasNewFromOwner = !!(um && um.last_by_owner && um.unread_total > 0);
+                return (
+                  <tr key={String(f.id)} className="border-t border-gray-100 dark:border-gray-800">
+                    <td className="px-3 py-2">
+                      {hasNewFromOwner && <span title="Neuer Kommentar vom Mitarbeiter"
+                        className="inline-block w-2.5 h-2.5 rounded-full bg-rose-500" />}
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap">{fmtDateTimeBerlin(getTs(f))}</td>
+                    <td className="px-3 py-2">
+                      <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800">
+                        {f.feedbacktyp}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2">{f.template_name ?? '—'}</td>
+                    <td className={`px-3 py-2 text-right tabular-nums font-medium ${noteColor(s)}`}>{fmtAvg(s)}</td>
+                    <td className="px-3 py-2">{isTrueish(f.rekla) ? 'Rekla' : '—'}</td>
+                    <td className="px-3 py-2">{isTrueish(f.geklaert) ? 'geklärt' : 'offen'}</td>
+                    <td className="px-3 py-2 max-w-[360px] truncate">{f.kommentar ?? '—'}</td>
+                    <td className="px-3 py-2">
+                      <LabelChips feedbackId={f.id} labels={f.labels ?? []} />
+                    </td>
+                    <td className="px-3 py-2">
+                      {bo && (
+                        <a
+                          href={bo}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"
+                          title="Im Backoffice suchen"
+                        >
+                          🔎 BO
+                        </a>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+              {filteredItems.length===0 && (
+                <tr><td colSpan={10} className="px-3 py-6 text-center text-sm text-gray-500">Keine Treffer</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* LISTENANSICHT (optional) */}
+      {!loading && view === 'list' && (
+        <div className="rounded-xl border border-gray-200 dark:border-gray-800">
+          <div className="p-3 border-b border-gray-100 dark:border-gray-800 flex items-center gap-2 text-sm">
+            <label>Gruppierung:</label>
             <select
               value={groupMode}
               onChange={e=>setGroupMode(e.target.value as any)}
@@ -363,129 +507,100 @@ setRecent(Array.isArray(j?.items) ? j.items : []);
               <option value="rating_then_month">Nach Bewertung → Monate</option>
             </select>
           </div>
+          {groups.length===0 ? (
+            <div className="p-4 text-sm text-gray-500">Keine Feedbacks im Zeitraum/Filter.</div>
+          ) : (
+            <ul className="divide-y divide-gray-200 dark:divide-gray-800">
+              {groups.map(g=>{
+                const open = !!openGroups[g.key];
+                return (
+                  <li key={g.key}>
+                    <button onClick={()=>toggleGroup(g.key)}
+                      className="w-full px-3 py-3 flex items-center justify-between bg-white/70 dark:bg-white/5">
+                      <div className="flex items-center gap-3">
+                        <span className="text-base font-semibold">{g.label}</span>
+                        <span className="text-xs text-gray-500">{g.items.length} Feedbacks</span>
+                      </div>
+                      <span className="text-gray-400">{open ? '▾' : '▸'}</span>
+                    </button>
+                    {open && (
+                      <ul className="divide-y divide-gray-200 dark:divide-gray-800">
+                        {g.items.map(f=>{
+                          const s = avgScore(f);
+                          const bo = boLinkFor(f);
+                          const um = unreadMap[String(f.id)];
+                          const hasNewFromOwner = !!(um && um.last_by_owner && um.unread_total > 0);
+                          return (
+                            <li key={String(f.id)} className="p-3 flex items-start justify-between gap-3">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center justify-between gap-2 flex-wrap">
+                                  <div className="min-w-0 flex items-center gap-2 flex-wrap">
+                                    {hasNewFromOwner && (
+                                      <span title="Neuer Kommentar vom Mitarbeiter"
+                                        className="inline-block w-2.5 h-2.5 rounded-full bg-rose-500" />
+                                    )}
+                                    <span className="font-medium">{f.template_name ?? f.feedbacktyp}</span>
+                                    <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+                                      {f.feedbacktyp}
+                                    </span>
+                                    {isTrueish(f.rekla) && (
+                                      <span className="text-[11px] px-1.5 py-0.5 rounded-full border border-amber-300 text-amber-700 dark:border-amber-900 dark:text-amber-300">
+                                        Rekla
+                                      </span>
+                                    )}
+                                    <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${isTrueish(f.geklaert)
+                                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200'
+                                      : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'}`}>
+                                      {isTrueish(f.geklaert) ? 'geklärt' : 'offen'}
+                                    </span>
+                                  </div>
+                                  <div className="shrink-0 flex items-center gap-2">
+                                    {bo && (
+                                      <a
+                                        href={bo}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"
+                                        title="Im Backoffice suchen"
+                                      >
+                                        🔎 Im BO suchen
+                                      </a>
+                                    )}
+                                    <span className="text-[11px] px-2 py-1 rounded-full bg-slate-50 text-slate-700 border border-slate-200">
+                                      {fmtDateTimeBerlin(getTs(f))}
+                                    </span>
+                                  </div>
+                                </div>
 
-          {/* Mindestbewertung */}
-          <div className="flex items-center gap-2">
-            <label className="text-sm">Mindest-Bewertung:</label>
-            <select
-              value={String(minRating)}
-              onChange={e=>setMinRating(Number(e.target.value))}
-              className="px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-white/10 text-sm"
-            >
-              {[
-                ['0','Alle'],
-                ['4.0','≥ 4.00'],
-                ['4.5','≥ 4.50'],
-                ['4.75','≥ 4.75'],
-                ['4.95','≥ 4.95'],
-              ].map(([v,l])=> <option key={v} value={v}>{l}</option>)}
-            </select>
-          </div>
+                                {f.kommentar && (
+                                  <p className="mt-2 text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{f.kommentar}</p>
+                                )}
 
-          {/* Kanäle */}
-          <ChannelsDropdown />
+                                {/* Labels */}
+                                <LabelChips feedbackId={f.id} labels={f.labels ?? []} />
+
+                                {/* Kommentare */}
+                                <FeedbackComments feedbackId={f.id} />
+                              </div>
+
+                              {/* rechte Spalte: Ø */}
+                              <div className="shrink-0 text-right pl-2">
+                                <div className="text-xs text-gray-500">Ø</div>
+                                <div className={`text-lg font-semibold ${noteColor(s)}`}>
+                                  {fmtAvg(s)}
+                                </div>
+                              </div>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </div>
-      </div>
-
-      {loading && <div className="text-sm text-gray-500">Lade…</div>}
-
-      {!loading && groups.length === 0 && (
-        <div className="text-sm text-gray-500">Keine Feedbacks im Zeitraum/Filter.</div>
-      )}
-
-      {/* Gruppenliste */}
-      {!loading && groups.length > 0 && (
-        <ul className="space-y-3">
-          {groups.map(g => {
-            const open = !!openMonths[g.key];
-            return (
-              <li key={g.key} className="rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden">
-                <button
-                  onClick={()=>toggleMonth(g.key)}
-                  className="w-full px-3 py-3 flex items-center justify-between bg-white/70 dark:bg-white/5"
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="text-base font-semibold">{g.label}</span>
-                    <span className="text-xs text-gray-500">{g.items.length} Feedbacks</span>
-                  </div>
-                  <span className="text-gray-400">{open ? '▾' : '▸'}</span>
-                </button>
-
-                {open && (
-                  <ul className="divide-y divide-gray-200 dark:divide-gray-800">
-                    {g.items.map((f) => {
-                      const s = avgScore(f);
-                      const bo = boLinkFor(f);
-                      return (
-                        <li key={String(f.id)} className="p-3 flex items-start justify-between gap-3">
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center justify-between gap-2 flex-wrap">
-                              <div className="min-w-0 flex items-center gap-2 flex-wrap">
-                                <span className="font-medium">{f.template_name ?? f.feedbacktyp}</span>
-                                <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300">
-                                  {f.feedbacktyp}
-                                </span>
-                                {isTrueish(f.rekla) && (
-                                  <span className="text-[11px] px-1.5 py-0.5 rounded-full border border-amber-300 text-amber-700 dark:border-amber-900 dark:text-amber-300">
-                                    Rekla
-                                  </span>
-                                )}
-                                <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${isTrueish(f.geklaert)
-                                  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200'
-                                  : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'}`}>
-                                  {isTrueish(f.geklaert) ? 'geklärt' : 'offen'}
-                                </span>
-                              </div>
-                              <div className="shrink-0 flex items-center gap-2">
-                                {bo && (
-                                  <a
-                                    href={bo}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"
-                                    title="Im Backoffice suchen"
-                                  >
-                                    🔎 Im BO suchen
-                                  </a>
-                                )}
-                                <span className="text-[11px] px-2 py-1 rounded-full bg-slate-50 text-slate-700 border border-slate-200">
-                                  {fmtDateTimeBerlin(getTs(f))}
-                                </span>
-                                {f.template_name && (
-                                  <span className="text-[11px] px-2 py-1 rounded-full bg-slate-50 text-slate-700 border border-slate-200">
-                                    {f.template_name}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-
-                            {f.kommentar && (
-                              <p className="mt-2 text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{f.kommentar}</p>
-                            )}
-
-                            {/* Labels */}
-                            <LabelChips feedbackId={f.id} labels={f.labels ?? []} />
-
-                            {/* Kommentare */}
-                            <FeedbackComments feedbackId={f.id} />
-                          </div>
-
-                          {/* rechte Spalte: Ø */}
-                          <div className="shrink-0 text-right pl-2">
-                            <div className="text-xs text-gray-500">Ø</div>
-                            <div className={`text-lg font-semibold ${noteColor(s)}`}>
-                              {fmtAvg(s)}
-                            </div>
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </li>
-            );
-          })}
-        </ul>
       )}
     </div>
   );
@@ -547,7 +662,7 @@ function LabelChips({ feedbackId, labels }: {
   const [attached, setAttached] = useState<number[]>(labels.map(l=>l.id));
 
   useEffect(()=>{(async()=>{
-    const r = await authedFetch(`/api/labels`, { cache: 'no-store' });
+    const r = await authedFetch(`/api/teamhub/labels`, { cache: 'no-store' });
     const j = await r.json().catch(()=>null);
     setAll(Array.isArray(j?.items) ? j.items : []);
   })();},[]);
@@ -589,6 +704,88 @@ function LabelChips({ feedbackId, labels }: {
           </ul>
         </div>
       </details>
+    </div>
+  );
+}
+
+/* ---------------- Label-Manager (Modal) ---------------- */
+function LabelManagerButton() {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button onClick={()=>setOpen(true)}
+        className="px-2 py-1.5 rounded-lg border bg-white dark:bg-white/10 text-sm">
+        Labels verwalten
+      </button>
+      {open && <LabelManager onClose={()=>setOpen(false)} />}
+    </>
+  );
+}
+
+function LabelManager({ onClose }:{ onClose: ()=>void }) {
+  const [name, setName] = useState('');
+  const [color, setColor] = useState('#22c55e');
+  const [teamId, setTeamId] = useState<string>('');
+  const [teamName, setTeamName] = useState<string>('');
+  const [saving, setSaving] = useState(false);
+
+  // Team automatisch setzen (Teamleiter-Teams). Auswahl ausgeblendet.
+  useEffect(()=>{(async()=>{
+    const r = await authedFetch('/api/teamhub/my-teams', { cache:'no-store' });
+    const j = await r.json().catch(()=>null);
+    const arr: Array<{team_id:string; name:string}> = Array.isArray(j?.items) ? j.items : [];
+    if (arr.length >= 1) {
+      setTeamId(arr[0].team_id);
+      setTeamName(arr[0].name);
+    } else {
+      setTeamId('');
+      setTeamName('');
+    }
+  })();},[]);
+
+  async function save(){
+    if (!name.trim() || !teamId) return;
+    setSaving(true);
+    try {
+      const r = await authedFetch('/api/teamhub/labels', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ name: name.trim(), color, team_id: teamId })
+      });
+      if (r.ok) onClose();
+    } finally { setSaving(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+      <div className="w-full max-w-md rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="font-semibold">Labels verwalten</div>
+          <button onClick={onClose} className="text-sm opacity-70 hover:opacity-100">Schließen</button>
+        </div>
+        <div className="space-y-2">
+          <div className="text-xs text-gray-500">
+            Team: <span className="inline-flex items-center gap-2 px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-800">{teamName || '—'}</span>
+          </div>
+          <label className="block text-sm">
+            <span className="block mb-1">Name</span>
+            <input value={name} onChange={e=>setName(e.target.value)}
+              className="w-full px-2 py-1.5 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10 text-sm" />
+          </label>
+          <label className="block text-sm">
+            <span className="block mb-1">Farbe</span>
+            <input type="color" value={color} onChange={e=>setColor(e.target.value)}
+              className="h-9 w-12 p-0 border rounded" />
+          </label>
+        </div>
+        <div className="pt-2 flex justify-end gap-2">
+          <button onClick={onClose} className="px-3 py-2 rounded-lg border">Abbrechen</button>
+          <button onClick={save} disabled={saving||!name.trim()||!teamId}
+            className="px-3 py-2 rounded-lg bg-blue-600 text-white disabled:opacity-60">Speichern</button>
+        </div>
+        {!teamId && (
+          <div className="text-xs text-red-600">Kein Team gefunden, für das du Teamleiter bist.</div>
+        )}
+      </div>
     </div>
   );
 }

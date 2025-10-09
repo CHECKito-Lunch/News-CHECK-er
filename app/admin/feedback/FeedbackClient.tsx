@@ -1,3 +1,6 @@
+/* eslint-disable @next/next/no-html-link-for-pages */
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable prefer-const */
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
@@ -864,17 +867,7 @@ function YnToggle({ value, onChange }:{ value:'ja'|'nein'|null, onChange:(v:'ja'
   );
 }
 
-function BoolToggle({ value, onChange }:{ value:boolean, onChange:(v:boolean)=>void }) {
-  return (
-    <button
-      type="button"
-      onClick={()=>onChange(!value)}
-      className={`px-2 py-1 rounded-md text-xs border ${value ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white dark:bg-white/10'}`}
-    >
-      {value ? 'ja' : 'nein'}
-    </button>
-  );
-}
+
 
 function NumInput({ value, onChange }:{ value:number|null, onChange:(v:number|null)=>void }){
   return (
