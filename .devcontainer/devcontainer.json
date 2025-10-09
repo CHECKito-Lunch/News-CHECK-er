@@ -1,19 +1,11 @@
 {
   "name": "News-CHECK-er (Next.js)",
   "image": "mcr.microsoft.com/devcontainers/typescript-node:20",
-  "features": {
-    "ghcr.io/devcontainers/features/git:1": {},
-    "ghcr.io/devcontainers/features/node:1": { "version": "20" }
-  },
   "forwardPorts": [3000],
-  "postCreateCommand": "npm ci || pnpm install || yarn install",
+  "postCreateCommand": "sudo apt-get update && sudo apt-get install -y git-lfs && git lfs install && npm ci",
   "customizations": {
     "vscode": {
-      "extensions": [
-        "dbaeumer.vscode-eslint",
-        "esbenp.prettier-vscode",
-        "eamodio.gitlens"
-      ]
+      "extensions": ["dbaeumer.vscode-eslint", "esbenp.prettier-vscode"]
     }
   },
   "remoteUser": "node",
