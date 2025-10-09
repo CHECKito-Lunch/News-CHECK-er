@@ -9,7 +9,7 @@ import {
   Wrench, CalendarDays, Bot, Activity, UserCircle2, Ticket, ChevronLeft
 } from 'lucide-react';
 
-type Role = 'admin' | 'moderator' | 'user';
+type Role = 'admin' | 'moderator' | 'user'| 'teamleiter';
 type Item = {
   href: string;
   label: string;
@@ -23,31 +23,31 @@ const NAV_ALL: Group[] = [
   {
     title: 'Inhalte',
     items: [
-      { href: '/admin/news',         label: 'Beitrag anlegen',   icon: Newspaper,   roles: ['admin','moderator'] },
-      { href: '/admin/posts-list',   label: 'Beiträge',          icon: ListChecks,  roles: ['admin','moderator'] },
-      { href: '/admin/polls',        label: 'Abstimmungen',      icon: Vote,        roles: ['admin','moderator'] },
-      { href: '/admin/categories',   label: 'Kategorien',        icon: Tags,        roles: ['admin','moderator'] },
-      { href: '/admin/badges',       label: 'Badges',            icon: Award,       roles: ['admin','moderator'] },
-      { href: '/admin/termine',      label: 'Termine',           icon: CalendarDays,roles: ['admin','moderator'] },
-      { href: '/admin/events',       label: 'Events',            icon: Ticket,      roles: ['admin','moderator'] },
-      { href: '/admin/checkiade',    label: 'CHECKiade',         icon: Trophy,      roles: ['admin'] },
-      { href: '/admin/tools',        label: 'Tools',             icon: Wrench,      roles: ['admin','moderator'] },
-      { href: '/admin/kpis',         label: 'KPIs',              icon: Activity,    roles: ['admin'] },
-      { href: '/admin/feedback',     label: 'Feedbacks',         icon: Vote,        roles: ['admin'] },
+      { href: '/admin/news',         label: 'Beitrag anlegen',   icon: Newspaper,   roles: ['admin','moderator','teamleiter'] },
+      { href: '/admin/posts-list',   label: 'Beiträge',          icon: ListChecks,  roles: ['admin','moderator','teamleiter'] },
+      { href: '/admin/polls',        label: 'Abstimmungen',      icon: Vote,        roles: ['admin','moderator','teamleiter'] },
+      { href: '/admin/categories',   label: 'Kategorien',        icon: Tags,        roles: ['admin','moderator','teamleiter'] },
+      { href: '/admin/badges',       label: 'Badges',            icon: Award,       roles: ['admin','moderator','teamleiter'] },
+      { href: '/admin/termine',      label: 'Termine',           icon: CalendarDays,roles: ['admin','moderator','teamleiter'] },
+      { href: '/admin/events',       label: 'Events',            icon: Ticket,      roles: ['admin','moderator','teamleiter'] },
+      { href: '/admin/checkiade',    label: 'CHECKiade',         icon: Trophy,      roles: ['admin','teamleiter'] },
+      { href: '/admin/tools',        label: 'Tools',             icon: Wrench,      roles: ['admin','moderator','teamleiter'] },
+      { href: '/admin/kpis',         label: 'KPIs',              icon: Activity,    roles: ['admin','teamleiter'] },
+      { href: '/admin/feedback',     label: 'Feedbacks',         icon: Vote,        roles: ['admin','teamleiter'] },
     ],
   },
   {
     title: 'Veranstalter',
     items: [
-      { href: '/admin/vendors',        label: 'Veranstalter',          icon: Store,  roles: ['admin','moderator'] },
-      { href: '/admin/vendor-groups',  label: 'Veranstalter-Gruppen',  icon: Users2, roles: ['admin','moderator'] },
+      { href: '/admin/vendors',        label: 'Veranstalter',          icon: Store,  roles: ['admin','moderator','teamleiter'] },
+      { href: '/admin/vendor-groups',  label: 'Veranstalter-Gruppen',  icon: Users2, roles: ['admin','moderator','teamleiter'] },
     ],
   },
   {
     title: 'System',
     items: [
-      { href: '/admin/news-agent', label: 'News-Agent',           icon: Bot,          roles: ['admin'] },
-      { href: '/admin/users',      label: 'Benutzer und Gruppen', icon: UserCircle2,  roles: ['admin','moderator'] },
+      { href: '/admin/news-agent', label: 'News-Agent',           icon: Bot,          roles: ['admin', 'teamleiter'] },
+      { href: '/admin/users',      label: 'Benutzer und Gruppen', icon: UserCircle2,  roles: ['admin','moderator','teamleiter'] },
     ],
   },
 ];

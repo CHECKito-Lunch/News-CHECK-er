@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // app/admin/page.tsx
 import Link from 'next/link';
 import { headers as nextHeaders, cookies } from 'next/headers';
@@ -9,7 +10,7 @@ import {
 
 export const dynamic = 'force-dynamic';
 
-type Role = 'admin' | 'moderator' | 'user' | null;
+type Role = 'admin' | 'moderator' | 'user' |  'teamleiter' | null;
 
 async function getRole(): Promise<Role> {
   const c = await cookies();                         // Next 15: async
@@ -18,25 +19,25 @@ async function getRole(): Promise<Role> {
 
 /* ---- Kacheln mit Rollen ---- */
 const tiles: Array<{
-  href: string; label: string; icon: any; roles: Array<'admin' | 'moderator'>;
+  href: string; label: string; icon: any; roles: Array<'admin' | 'moderator' | 'teamleiter'>;
 }> = [
-  { href: '/admin/news',          label: 'Beitrag anlegen',      icon: Newspaper,    roles: ['admin','moderator'] },
-  { href: '/admin/posts-list',    label: 'Beiträge',             icon: ListChecks,   roles: ['admin','moderator'] },
-  { href: '/admin/polls',         label: 'Abstimmungen',         icon: Vote,         roles: ['admin','moderator'] },
-  { href: '/admin/vendors',       label: 'Veranstalter',         icon: Store,        roles: ['admin','moderator'] },
-  { href: '/admin/categories',    label: 'Kategorien',           icon: Tags,         roles: ['admin','moderator'] },
-  { href: '/admin/badges',        label: 'Badges',               icon: Award,        roles: ['admin','moderator'] },
-  { href: '/admin/vendor-groups', label: 'Veranstalter-Gruppen', icon: Users2,       roles: ['admin','moderator'] },
-  { href: '/admin/termine',       label: 'Termine',              icon: CalendarDays, roles: ['admin','moderator'] },
-  { href: '/admin/events',        label: 'Events',               icon: Ticket,       roles: ['admin','moderator'] },
-  { href: '/admin/tools',         label: 'Tools',                icon: Wrench,       roles: ['admin','moderator'] },
+  { href: '/admin/news',          label: 'Beitrag anlegen',      icon: Newspaper,    roles: ['admin','moderator','teamleiter'] },
+  { href: '/admin/posts-list',    label: 'Beiträge',             icon: ListChecks,   roles: ['admin','moderator','teamleiter']  },
+  { href: '/admin/polls',         label: 'Abstimmungen',         icon: Vote,         roles: ['admin','moderator','teamleiter'] },
+  { href: '/admin/vendors',       label: 'Veranstalter',         icon: Store,        roles: ['admin','moderator','teamleiter']  },
+  { href: '/admin/categories',    label: 'Kategorien',           icon: Tags,         roles: ['admin','moderator','teamleiter'] },
+  { href: '/admin/badges',        label: 'Badges',               icon: Award,        roles: ['admin','moderator','teamleiter']  },
+  { href: '/admin/vendor-groups', label: 'Veranstalter-Gruppen', icon: Users2,       roles: ['admin','moderator','teamleiter']  },
+  { href: '/admin/termine',       label: 'Termine',              icon: CalendarDays, roles: ['admin','moderator','teamleiter']  },
+  { href: '/admin/events',        label: 'Events',               icon: Ticket,       roles: ['admin','moderator','teamleiter'] },
+  { href: '/admin/tools',         label: 'Tools',                icon: Wrench,       roles: ['admin','moderator','teamleiter']  },
 
   // admin-only
-  { href: '/admin/news-agent',    label: 'News-Agent',           icon: Bot,          roles: ['admin'] },
-  { href: '/admin/kpis',          label: 'KPIs',                 icon: Activity,     roles: ['admin'] },
-  { href: '/admin/users',         label: 'Benutzer',             icon: UserCircle2,  roles: ['admin','moderator'] },
-  { href: '/admin/checkiade',     label: 'CHECKiade',            icon: Trophy,       roles: ['admin'] },
-  { href: '/admin/feedback',      label: 'Feedbacks',            icon: Vote,         roles: ['admin'] },
+  { href: '/admin/news-agent',    label: 'News-Agent',           icon: Bot,          roles: ['admin','teamleiter'] },
+  { href: '/admin/kpis',          label: 'KPIs',                 icon: Activity,     roles: ['admin','teamleiter'] },
+  { href: '/admin/users',         label: 'Benutzer',             icon: UserCircle2,  roles: ['admin','moderator','teamleiter'] },
+  { href: '/admin/checkiade',     label: 'CHECKiade',            icon: Trophy,       roles: ['admin','teamleiter'] },
+  { href: '/admin/feedback',      label: 'Feedbacks',            icon: Vote,         roles: ['admin','teamleiter'] },
 ];
 
 async function absoluteUrl(path: string) {
@@ -88,7 +89,7 @@ async function getStats(): Promise<StatsResponse | null> {
 export default async function AdminHome() {
   // Seite selbst absichern (zusätzlich zur Middleware)
   const role = await getRole();
-  if (role !== 'admin' && role !== 'moderator') {
+  if (role !== 'admin' && role !== 'moderator' && role !== 'teamleiter') {
     redirect('/login'); // oder redirect('/')
   }
 

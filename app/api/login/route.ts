@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { AUTH_COOKIE } from '@/lib/auth';
 
-type Role = 'admin' | 'moderator' | 'user';
+type Role = 'admin' | 'moderator' | 'user'| 'teamleiter';
 
 export async function POST(req: Request) {
   const auth = req.headers.get('authorization') || '';
