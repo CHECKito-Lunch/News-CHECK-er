@@ -1,7 +1,6 @@
-'use client';
-
 /* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable @typescript-eslint/no-explicit-any */
+'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
@@ -75,7 +74,7 @@ const noteColor = (v: number | null | undefined) =>
   : (v as number) >= 4.0  ? 'text-amber-600'
   : 'text-red-600';
 
-// "Januar 2025" etc. (immer Berlin/DE)
+// "Januar 2025" etc.
 const fmtMonthYearDE = (y: number, m1to12: number) => {
   const d = new Date(Date.UTC(y, m1to12 - 1, 1));
   return new Intl.DateTimeFormat('de-DE', { month: 'long', year: 'numeric' }).format(d);
@@ -90,7 +89,7 @@ export default function TeamHubPage() {
   const [items, setItems]     = useState<FeedbackItem[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Kommentar-Karte
+  // Kommentar-Karte (Mitarbeiter-Kommentare)
   const [recent, setRecent] = useState<RecentComment[]>([]);
   const [recentLoading, setRecentLoading] = useState(false);
 
@@ -100,13 +99,13 @@ export default function TeamHubPage() {
   // ---- Filter-States ----
   const [fDateFrom, setFDateFrom] = useState<string>('');
   const [fDateTo, setFDateTo]     = useState<string>('');
-  const [fKanal, setFKanal]       = useState<string>(''); // exact match (Dropdown)
-  const [fTemplate, setFTemplate] = useState<string>(''); // contains
-  const [fScoreMin, setFScoreMin] = useState<string>(''); // number
+  const [fKanal, setFKanal]       = useState<string>('');
+  const [fTemplate, setFTemplate] = useState<string>('');
+  const [fComment, setFComment]   = useState<string>('');
   const [fRekla, setFRekla]       = useState<'any'|'rekla'|'none'>('any');
   const [fStatus, setFStatus]     = useState<'any'|'offen'|'geklärt'>('any');
-  const [fComment, setFComment]   = useState<string>(''); // contains
-  const [fLabelId, setFLabelId]   = useState<number|''>(''); // by label id
+  const [fLabelId, setFLabelId]   = useState<number|''>('');
+  const [fBucket, setFBucket]     = useState<'all'|'neg'|'mid'|'high'|'perfect'>('all'); // Score-Buckets
 
   // Sortierung
   const [sort, setSort] = useState<'newest'|'score_desc'>('newest');
@@ -115,6 +114,9 @@ export default function TeamHubPage() {
   const [allLabelsGlobal, setAllLabelsGlobal] = useState<Array<{id:number; name:string; color?:string}>>([]);
   const [labelsLoading, setLabelsLoading] = useState(false);
   const [labelsError, setLabelsError] = useState<string|null>(null);
+
+  // Expand/Collapse Monatsgruppen
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({}); // default: alles zu
 
   useEffect(() => {
     const ac = new AbortController();
@@ -165,12 +167,13 @@ export default function TeamHubPage() {
   useEffect(() => { load(); }, [userId]);
   useEffect(() => { if (userId) load(); }, [from, to]);
 
-  // Kommentar-Karte laden
+  // Neueste Mitarbeiter-Kommentare laden (Top-Karte)
   useEffect(() => {
     if (!userId) { setRecent([]); return; }
     (async () => {
       setRecentLoading(true);
       try {
+        // Diese API liefert die letzten Kommentare DES Mitarbeiters (owner)
         const r = await authedFetch(`/api/teamhub/threads?mode=recent_owner_comments&owner_id=${encodeURIComponent(userId)}&limit=20`, { cache: 'no-store' });
         const j = await r.json().catch(()=>null);
         setRecent(Array.isArray(j?.items) ? j.items : []);
@@ -195,7 +198,7 @@ export default function TeamHubPage() {
     return [...s].sort();
   }, [items]);
 
-  // Labels für Filter-Dropdown aus globaler Liste (id -> name)
+  // Labels für Filter-Dropdown
   const labelFilterOptions = useMemo<[number,string][]>(()=>{
     return allLabelsGlobal.map(l => [l.id, l.name] as [number,string]).sort((a,b)=>a[1].localeCompare(b[1]));
   }, [allLabelsGlobal]);
@@ -216,23 +219,25 @@ export default function TeamHubPage() {
       }
       if (fKanal && f.feedbacktyp !== fKanal) return false;
       if (fTemplate && !(f.template_name||'').toLowerCase().includes(fTemplate.toLowerCase())) return false;
-      if (fScoreMin) {
-        const s = avgScore(f) ?? 0;
-        if (s < Number(fScoreMin)) return false;
-      }
+      if (fComment && !(f.kommentar||'').toLowerCase().includes(fComment.toLowerCase())) return false;
       if (fRekla === 'rekla' && !isTrueish(f.rekla)) return false;
       if (fRekla === 'none' && isTrueish(f.rekla)) return false;
       const isGekl = isTrueish(f.geklaert);
       if (fStatus === 'offen' && isGekl) return false;
       if (fStatus === 'geklärt' && !isGekl) return false;
-      if (fComment && !(f.kommentar||'').toLowerCase().includes(fComment.toLowerCase())) return false;
       if (fLabelId !== '') {
         const ids = new Set((f.labels||[]).map(l=>l.id));
         if (!ids.has(Number(fLabelId))) return false;
       }
+      // Score-Buckets
+      const s = avgScore(f) ?? 0;
+      if (fBucket==='neg'     && s>3.0)  return false;
+      if (fBucket==='mid'     && !(s>=3.01 && s<4.5)) return false;
+      if (fBucket==='high'    && !(s>=4.5 && s<5.0))  return false;
+      if (fBucket==='perfect' && s<5.0)  return false;
       return true;
     });
-  }, [items, fDateFrom, fDateTo, fKanal, fTemplate, fScoreMin, fRekla, fStatus, fComment, fLabelId]);
+  }, [items, fDateFrom, fDateTo, fKanal, fTemplate, fComment, fRekla, fStatus, fLabelId, fBucket]);
 
   // ---- SORTIEREN ----
   const sortedItems = useMemo(()=>{
@@ -267,6 +272,37 @@ export default function TeamHubPage() {
         return { key:k, label: fmtMonthYearDE(y, m), items: list };
       });
   }, [sortedItems]);
+
+  // ---- KPI-Übersicht (für aktuelle Filter, ohne Bucket-Effekt? -> mit Bucket, damit es zum Listing passt) ----
+  const kpis = useMemo(()=>{
+    const arr = sortedItems;
+    const n = arr.length;
+    const scores = arr.map(avgScore).filter((x): x is number => Number.isFinite(x as any));
+    const avg = scores.length ? (scores.reduce((s,n)=>s+n,0)/scores.length) : null;
+    const neg = scores.filter(s=>s<=3.0).length;
+    const rekla = arr.filter(f=>isTrueish(f.rekla)).length;
+    const offen = arr.filter(f=>!isTrueish(f.geklaert)).length;
+    const geloest = n - offen;
+    return { n, avg, neg, rekla, offen, geloest, negPct: n? Math.round(100*neg/n):0 };
+  }, [sortedItems]);
+
+  // Oben: „Neue Mitarbeiter-Kommentare“ Zähler aus unreadMap
+  const ownerNewCount = useMemo(()=>{
+    let c = 0;
+    for (const k in unreadMap) {
+      const v = unreadMap[k];
+      if (v?.last_by_owner && v.unread_total>0) c++;
+    }
+    return c;
+  }, [unreadMap]);
+
+  // Expand/Collapse alle
+  const setAllGroupsOpen = (open:boolean) => {
+    const m: Record<string,boolean> = {};
+    groups.forEach(g=> { m[g.key] = open; });
+    setOpenGroups(m);
+  };
+  const toggleGroup = (k:string) => setOpenGroups(p=>({ ...p, [k]: !p[k] }));
 
   return (
     <div className="container max-w-7xl mx-auto py-6 space-y-4">
@@ -309,14 +345,33 @@ export default function TeamHubPage() {
         {labelsError && <span className="ml-2 text-xs text-red-600">{labelsError}</span>}
       </div>
 
-      {/* Kommentar-Karte */}
+      {/* Hinweisleiste: neue Mitarbeiter-Kommentare */}
+      {ownerNewCount > 0 && (
+        <div className="rounded-xl bg-rose-50 text-rose-800 border border-rose-200 px-3 py-2 text-sm">
+          {ownerNewCount} neue Kommentar{ownerNewCount>1?'e':''} vom Mitarbeiter (ungelesen).
+        </div>
+      )}
+
+      {/* KPI-Übersicht */}
+      <section className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3 md:p-4">
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+          <Kpi title="Ø-Score" value={fmtAvg(kpis.avg)} tone={kpis.avg!=null?noteColor(kpis.avg):'text-gray-500'} />
+          <Kpi title="Feedbacks" value={String(kpis.n)} />
+          <Kpi title="Negativ ≤3,0" value={`${kpis.neg} (${kpis.negPct}%)`} />
+          <Kpi title="Rekla" value={String(kpis.rekla)} />
+          <Kpi title="offen" value={String(kpis.offen)} />
+          <Kpi title="geklärt" value={String(kpis.geloest)} />
+        </div>
+      </section>
+
+      {/* Neueste Mitarbeiter-Kommentare */}
       <section className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4">
         <div className="flex items-center justify-between mb-2">
-          <div className="text-sm font-semibold">Neueste Kommentare</div>
+          <div className="text-sm font-semibold">Neueste Kommentare des Mitarbeiters</div>
           <div className="text-xs text-gray-500">{recentLoading ? 'lädt…' : `${recent.length} Einträge`}</div>
         </div>
         {recent.length === 0 ? (
-          <div className="text-sm text-gray-500">Keine Team-Kommentare vorhanden.</div>
+          <div className="text-sm text-gray-500">Keine Mitarbeiter-Kommentare vorhanden.</div>
         ) : (
           <ul className="divide-y divide-gray-200 dark:divide-gray-800">
             {recent.map(rc => (
@@ -324,7 +379,7 @@ export default function TeamHubPage() {
                 <div className="text-[12px] text-gray-500 mb-1">
                   <span className="font-medium">{rc.author}</span>
                   <span> · {new Date(rc.created_at).toLocaleString('de-DE')}</span>
-                  <Link href={`/feedback/${rc.feedback_id}`} className="ml-2 text-blue-600 hover:underline">öffnen</Link>
+                  <Link href={`/feedback/${rc.feedback_id}`} className="ml-2 text-blue-600 hover:underline">Feedback öffnen</Link>
                 </div>
                 <p className="text-sm whitespace-pre-wrap">{rc.body}</p>
               </li>
@@ -338,7 +393,7 @@ export default function TeamHubPage() {
       {/* INBOX-LAYOUT */}
       {!loading && (
         <section className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
-          {/* Filterleiste (kompakt) */}
+          {/* Filterleiste */}
           <div className="p-3 flex flex-wrap md:flex-nowrap items-center gap-2 border-b border-gray-100 dark:border-gray-800 text-sm">
             <div className="flex items-center gap-2">
               <input
@@ -384,15 +439,6 @@ export default function TeamHubPage() {
               aria-label="Kommentar"
             />
 
-            <input
-              value={fScoreMin}
-              onChange={e=>setFScoreMin(e.target.value)}
-              placeholder="Ø min"
-              inputMode="decimal"
-              className="w-24 px-2 py-1.5 rounded-lg border text-right dark:border-gray-700 bg-white dark:bg-white/10"
-              aria-label="Mindestscore"
-            />
-
             <select
               value={fRekla}
               onChange={e=>setFRekla(e.target.value as any)}
@@ -427,109 +473,166 @@ export default function TeamHubPage() {
               ))}
             </select>
 
-            {/* Sortierung + Counter + Reset */}
-            <div className="flex items-center gap-2 ml-auto">
-              <SortSwitcher sort={sort} setSort={setSort} />
-              <span className="text-xs text-gray-500 whitespace-nowrap">{sortedItems.length} Treffer</span>
-              <button
-                onClick={()=>{
-                  setFDateFrom(''); setFDateTo(''); setFKanal('');
-                  setFTemplate(''); setFScoreMin(''); setFRekla('any');
-                  setFStatus('any'); setFComment(''); setFLabelId('');
-                }}
-                className="px-2 py-1.5 rounded-lg border text-xs"
-              >
-                Filter zurücksetzen
-              </button>
+            {/* Score-Bucket Quickfilter */}
+            <div className="flex items-center gap-1 ml-auto">
+              <BucketChip active={fBucket==='all'} onClick={()=>setFBucket('all')}>alle</BucketChip>
+              <BucketChip active={fBucket==='neg'} onClick={()=>setFBucket('neg')}>≤ 3,0</BucketChip>
+              <BucketChip active={fBucket==='mid'} onClick={()=>setFBucket('mid')}>3,01–4,49</BucketChip>
+              <BucketChip active={fBucket==='high'} onClick={()=>setFBucket('high')}>4,5–4,99</BucketChip>
+              <BucketChip active={fBucket==='perfect'} onClick={()=>setFBucket('perfect')}>5,0</BucketChip>
             </div>
           </div>
 
-          {/* Ergebnisliste (Monatsgruppen) */}
+          {/* Sort/Counter/Reset */}
+          <div className="px-3 py-2 flex items-center gap-2 border-b border-gray-100 dark:border-gray-800 text-sm">
+            <SortSwitcher sort={sort} setSort={setSort} />
+            <span className="text-xs text-gray-500 whitespace-nowrap">{sortedItems.length} Treffer</span>
+            <button
+              onClick={()=>{
+                setFDateFrom(''); setFDateTo(''); setFKanal('');
+                setFTemplate(''); setFComment(''); setFRekla('any');
+                setFStatus('any'); setFLabelId(''); setFBucket('all');
+              }}
+              className="px-2 py-1.5 rounded-lg border text-xs ml-auto"
+            >
+              Filter zurücksetzen
+            </button>
+            <div className="flex items-center gap-2">
+              <button onClick={()=>setAllGroupsOpen(true)} className="px-2 py-1.5 rounded-lg border text-xs">Alle öffnen</button>
+              <button onClick={()=>setAllGroupsOpen(false)} className="px-2 py-1.5 rounded-lg border text-xs">Alle schließen</button>
+            </div>
+          </div>
+
+          {/* Ergebnisliste (Monatsgruppen, default zu) */}
           {loading ? (
             <div className="p-6 text-sm text-gray-500">Lade…</div>
           ) : groups.length === 0 ? (
             <div className="p-6 text-sm text-gray-500">Keine Treffer</div>
           ) : (
             <div>
-              {groups.map(g => (
-                <div key={g.key} className="border-b last:border-b-0 border-gray-100 dark:border-gray-800">
-                  <div className="sticky top-0 z-10 px-3 py-2 bg-gray-50/80 dark:bg-gray-800/80 backdrop-blur text-sm font-semibold border-b border-gray-100 dark:border-gray-800 capitalize">
-                    <div className="flex items-center justify-between">
+              {groups.map(g => {
+                const open = !!openGroups[g.key]; // default: false
+                return (
+                  <div key={g.key} className="border-b last:border-b-0 border-gray-100 dark:border-gray-800">
+                    <button
+                      onClick={()=>toggleGroup(g.key)}
+                      className="w-full sticky top-0 z-10 px-3 py-2 bg-gray-50/80 dark:bg-gray-800/80 backdrop-blur text-sm font-semibold border-b border-gray-100 dark:border-gray-800 capitalize flex items-center justify-between"
+                    >
                       <span>{g.label}</span>
-                      <span className="text-xs text-gray-500">{g.items.length} Feedbacks</span>
-                    </div>
+                      <span className="text-xs text-gray-500">{open?'▾':'▸'} {g.items.length} Feedbacks</span>
+                    </button>
+
+                    {open && (
+                      <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+                        {g.items.map(f=>{
+                          const s  = avgScore(f);
+                          const bo = boLinkFor(f);
+                          const um = unreadMap[String(f.id)];
+                          const hasNewFromOwner = !!(um && um.last_by_owner && um.unread_total > 0);
+                          return (
+                            <FeedbackRow
+                              key={String(f.id)}
+                              f={f}
+                              s={s}
+                              bo={bo}
+                              hasNewFromOwner={hasNewFromOwner}
+                              allLabelsGlobal={allLabelsGlobal}
+                            />
+                          );
+                        })}
+                      </ul>
+                    )}
                   </div>
-                  <ul className="divide-y divide-gray-100 dark:divide-gray-800">
-                    {g.items.map(f=>{
-                      const s  = avgScore(f);
-                      const bo = boLinkFor(f);
-                      const um = unreadMap[String(f.id)];
-                      const hasNewFromOwner = !!(um && um.last_by_owner && um.unread_total > 0);
-                      return (
-                        <li key={String(f.id)} className="p-3 md:p-4 hover:bg-gray-50/60 dark:hover:bg-white/5 transition-colors">
-                          <div className="flex items-start gap-3">
-                            {/* Neu-Dot */}
-                            <div className="pt-2">
-                              {hasNewFromOwner && <span title="Neuer Kommentar vom Mitarbeiter" className="inline-block w-2.5 h-2.5 rounded-full bg-rose-500" />}
-                            </div>
-
-                            {/* Hauptinhalt */}
-                            <div className="min-w-0 flex-1">
-                              {/* Kopfzeile */}
-                              <div className="flex items-center justify-between gap-2 flex-wrap">
-                                <div className="min-w-0 flex items-center gap-2 flex-wrap">
-                                  <span className="font-medium truncate max-w-[40ch]">{f.template_name ?? f.feedbacktyp}</span>
-                                  <Chip subtle>{f.feedbacktyp}</Chip>
-                                  {isTrueish(f.rekla) && (<Chip tone="amber">Rekla</Chip>)}
-                                  <Chip tone={isTrueish(f.geklaert) ? 'emerald' : 'slate'}>
-                                    {isTrueish(f.geklaert) ? 'geklärt' : 'offen'}
-                                  </Chip>
-                                </div>
-
-                                <div className="shrink-0 flex items-center gap-2">
-                                  {bo && (
-                                    <a
-                                      href={bo}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"
-                                      title="Im Backoffice suchen"
-                                    >
-                                      🔎 BO
-                                    </a>
-                                  )}
-                                  <span className="text-[11px] px-2 py-1 rounded-full bg-slate-50 text-slate-700 border border-slate-200">
-                                    {fmtDateTimeBerlin(getTs(f))}
-                                  </span>
-                                  <span className={`ml-2 text-xs px-2 py-1 rounded-full border ${noteColor(s)}`}>
-                                    Ø {fmtAvg(s)}
-                                  </span>
-                                </div>
-                              </div>
-
-                              {/* Kommentar-Preview */}
-                              {f.kommentar && (
-                                <p className="mt-2 text-sm text-gray-700 dark:text-gray-300 line-clamp-2">{f.kommentar}</p>
-                              )}
-
-                              {/* Labels + Aktionen */}
-                              <div className="mt-2 flex items-center gap-2 flex-wrap">
-                                <LabelChips feedbackId={f.id} labels={f.labels ?? []} allLabels={allLabelsGlobal} />
-                                <Link href={`/feedback/${f.id}`} className="text-sm text-blue-600 hover:underline">öffnen</Link>
-                              </div>
-                            </div>
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </section>
       )}
     </div>
+  );
+}
+
+/* ---------------- Row + helpers ---------------- */
+function FeedbackRow({
+  f, s, bo, hasNewFromOwner, allLabelsGlobal,
+}:{
+  f: FeedbackItem;
+  s: number|null;
+  bo: string|null;
+  hasNewFromOwner: boolean;
+  allLabelsGlobal: Array<{id:number; name:string; color?:string}>;
+}) {
+  const [showComments, setShowComments] = useState(false);
+  return (
+    <li className="p-3 md:p-4 hover:bg-gray-50/60 dark:hover:bg-white/5 transition-colors">
+      <div className="flex items-start gap-3">
+        {/* Neu-Dot */}
+        <div className="pt-2">
+          {hasNewFromOwner && <span title="Neuer Kommentar vom Mitarbeiter" className="inline-block w-2.5 h-2.5 rounded-full bg-rose-500" />}
+        </div>
+
+        {/* Hauptinhalt */}
+        <div className="min-w-0 flex-1">
+          {/* Kopfzeile */}
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="min-w-0 flex items-center gap-2 flex-wrap">
+              <span className="font-medium truncate max-w-[40ch]">{f.template_name ?? f.feedbacktyp}</span>
+              <Chip subtle>{f.feedbacktyp}</Chip>
+              {isTrueish(f.rekla) && (<Chip tone="amber">Rekla</Chip>)}
+              <Chip tone={isTrueish(f.geklaert) ? 'emerald' : 'slate'}>
+                {isTrueish(f.geklaert) ? 'geklärt' : 'offen'}
+              </Chip>
+            </div>
+
+            <div className="shrink-0 flex items-center gap-2">
+              {bo && (
+                <a
+                  href={bo}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"
+                  title="Im Backoffice suchen"
+                >
+                  🔎 BO
+                </a>
+              )}
+              <span className="text-[11px] px-2 py-1 rounded-full bg-slate-50 text-slate-700 border border-slate-200">
+                {fmtDateTimeBerlin(getTs(f))}
+              </span>
+              <span className={`ml-2 text-xs px-2 py-1 rounded-full border ${noteColor(s)}`}>
+                Ø {fmtAvg(s)}
+              </span>
+            </div>
+          </div>
+
+          {/* Kommentar-Preview */}
+          {f.kommentar && (
+            <p className="mt-2 text-sm text-gray-700 dark:text-gray-300 line-clamp-2">{f.kommentar}</p>
+          )}
+
+          {/* Labels + Aktionen */}
+          <div className="mt-2 flex items-center gap-2 flex-wrap">
+            <LabelChips feedbackId={f.id} labels={f.labels ?? []} allLabels={allLabelsGlobal} />
+            <Link href={`/feedback/${f.id}`} className="text-sm text-blue-600 hover:underline">öffnen</Link>
+            <button
+              onClick={()=>setShowComments(v=>!v)}
+              className="text-sm px-2 py-1 rounded-lg border"
+              aria-expanded={showComments}
+            >
+              {showComments ? 'Kommentare verbergen' : 'Kommentare anzeigen'}
+            </button>
+          </div>
+
+          {/* Kommentare inline */}
+          {showComments && (
+            <div className="mt-3">
+              <FeedbackComments feedbackId={f.id} />
+            </div>
+          )}
+        </div>
+      </div>
+    </li>
   );
 }
 
@@ -545,7 +648,6 @@ function LabelChips({
 }) {
   const [attached, setAttached] = useState<number[]>(labels.map(l=>l.id));
 
-  // Sync wenn Parent neue labels liefert (z.B. nach Reload)
   useEffect(()=>{
     setAttached(labels.map(l=>l.id));
   }, [labels.map(l=>l.id).join(',')]); // primitive deps
@@ -593,6 +695,54 @@ function LabelChips({
   );
 }
 
+/* ---------------- Kommentare ---------------- */
+function FeedbackComments({ feedbackId }: { feedbackId: number|string }) {
+  const [items, setItems] = useState<Array<{id:number; body:string; author:string; created_at:string}>>([]);
+  const [draft, setDraft] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  async function load() {
+    const r = await authedFetch(`/api/feedback/${feedbackId}/comments`, { cache: 'no-store' });
+    const j = await r.json().catch(()=>null);
+    setItems(Array.isArray(j?.items) ? j.items : []);
+  }
+  async function send() {
+    if (!draft.trim()) return;
+    setLoading(true);
+    try {
+      const r = await authedFetch(`/api/feedback/${feedbackId}/comments`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ body: draft.trim() }),
+      });
+      if (r.ok) { setDraft(''); await load(); }
+    } finally { setLoading(false); }
+  }
+  useEffect(()=>{ load(); }, [feedbackId]);
+
+  return (
+    <div className="mt-1 rounded-lg border border-gray-200 dark:border-gray-800 p-3">
+      <div className="text-xs font-medium mb-1">Kommentare</div>
+      <ul className="space-y-1 text-sm">
+        {items.map(it=>(
+          <li key={it.id}>
+            <span className="font-medium">{it.author}</span>
+            <span className="text-gray-500"> · {new Date(it.created_at).toLocaleString('de-DE')}</span>
+            <p className="whitespace-pre-wrap">{it.body}</p>
+          </li>
+        ))}
+        {items.length===0 && <li className="text-xs text-gray-500">Noch keine Kommentare.</li>}
+      </ul>
+      <div className="mt-2 flex gap-2">
+        <input value={draft} onChange={e=>setDraft(e.target.value)} placeholder="Kommentieren…"
+               className="flex-1 px-3 py-2 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10" />
+        <button onClick={send} disabled={loading||!draft.trim()} className="px-3 py-2 rounded-lg bg-blue-600 text-white disabled:opacity-60">
+          Senden
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ---------------- Label-Manager (Modal) ---------------- */
 function LabelManagerButton() {
   const [open, setOpen] = useState(false);
@@ -614,7 +764,6 @@ function LabelManager({ onClose }:{ onClose: ()=>void }) {
   const [teamName, setTeamName] = useState<string>('');
   const [saving, setSaving] = useState(false);
 
-  // Team automatisch setzen (Teamleiter-Teams). Auswahl ausgeblendet.
   useEffect(()=>{(async()=>{
     const r = await authedFetch('/api/teamhub/my-teams', { cache:'no-store' });
     const j = await r.json().catch(()=>null);
@@ -676,6 +825,15 @@ function LabelManager({ onClose }:{ onClose: ()=>void }) {
 }
 
 /* ---------------- Kleine UI-Helfer ---------------- */
+function Kpi({ title, value, tone }:{ title:string; value:string; tone?:string }) {
+  return (
+    <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-3">
+      <div className="text-[11px] text-gray-500">{title}</div>
+      <div className={`text-lg font-semibold ${tone||''}`}>{value}</div>
+    </div>
+  );
+}
+
 function SortSwitcher({ sort, setSort }:{ sort:'newest'|'score_desc'; setSort:(v:'newest'|'score_desc')=>void; }) {
   return (
     <select
@@ -704,4 +862,15 @@ function Chip({ children, tone, subtle }:{
   };
   const cls = tone ? map[tone] : (subtle ? map.slate : 'bg-gray-100 text-gray-700 border border-gray-200');
   return <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${cls}`}>{children}</span>;
+}
+
+function BucketChip({children, active, onClick}:{children:React.ReactNode; active:boolean; onClick:()=>void}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`text-[11px] px-2 py-1 rounded-full border ${active ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-white/10'}`}
+    >
+      {children}
+    </button>
+  );
 }
