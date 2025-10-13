@@ -10,6 +10,7 @@ import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip,
   ReferenceLine, CartesianGrid
 } from 'recharts';
+import { AiSummaryPanel } from '@/app/(site)/feedback/AiSummaryPanel';
 
 /* 🆕 Feedback */
 type FeedbackItem = {
@@ -600,17 +601,18 @@ const monthlyTrend = useMemo(() => {
   return (
     <section className="p-5 rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-lg font-semibold">Kunden-Feedback</h2>
-        <div className="flex items-center gap-2">
-          <input type="date" value={from} onChange={(e)=>setFrom(e.target.value)}
-                 className="px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-white/10 text-sm" />
-          <span className="text-gray-400">–</span>
-          <input type="date" value={to} onChange={(e)=>setTo(e.target.value)}
-                 className="px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-white/10 text-sm" />
-        </div>
-      </div>
+  <h2 className="text-lg font-semibold">Kunden-Feedback</h2>
+  <div className="flex items-center gap-2">
+    <input type="date" value={from} onChange={(e)=>setFrom(e.target.value)} className="px-2 py-1.5 ..." />
+    <span className="text-gray-400">–</span>
+    <input type="date" value={to} onChange={(e)=>setTo(e.target.value)} className="px-2 py-1.5 ..." />
+  </div>
+</div>
 
-      {loading && <div className="text-sm text-gray-500">Lade…</div>}
+{/* KI-Panel */}
+<AiSummaryPanel items={items} from={from} to={to} />
+
+{loading && <div className="text-sm text-gray-500">Lade…</div>}
 
       {!loading && (
         <>
