@@ -119,7 +119,7 @@ export function AiSummaryPanel({
   return (
     <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-3 bg-white dark:bg-gray-900 mb-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="font-medium">KI-Zusammenfassung (wertschätzend)</div>
+        <div className="font-medium">Kommentar-Zusammenfassung</div>
         <div className="text-xs text-gray-500">
           Wähle Channels & Zeitraum, dann Analyse starten.
         </div>
