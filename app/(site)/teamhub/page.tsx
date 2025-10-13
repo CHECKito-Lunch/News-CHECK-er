@@ -1,6 +1,7 @@
+'use client';
+
 /* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
@@ -74,6 +75,12 @@ const noteColor = (v: number | null | undefined) =>
   : (v as number) >= 4.0  ? 'text-amber-600'
   : 'text-red-600';
 
+// "Januar 2025" etc. (immer Berlin/DE)
+const fmtMonthYearDE = (y: number, m1to12: number) => {
+  const d = new Date(Date.UTC(y, m1to12 - 1, 1));
+  return new Intl.DateTimeFormat('de-DE', { month: 'long', year: 'numeric' }).format(d);
+};
+
 /* --------------- Page ------------------ */
 export default function TeamHubPage() {
   const [members, setMembers] = useState<Member[]>([]);
@@ -83,9 +90,6 @@ export default function TeamHubPage() {
   const [items, setItems]     = useState<FeedbackItem[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Ansicht
-  const [view, setView] = useState<'table'|'list'>('table');
-
   // Kommentar-Karte
   const [recent, setRecent] = useState<RecentComment[]>([]);
   const [recentLoading, setRecentLoading] = useState(false);
@@ -93,7 +97,7 @@ export default function TeamHubPage() {
   // Unread-Map (für „Neu vom Mitarbeiter“-Marker)
   const [unreadMap, setUnreadMap] = useState<Record<string, { last_by_owner:boolean; unread_total:number; last_comment_at:string }>>({});
 
-  // ---- Tabellen-Filter pro Spalte ----
+  // ---- Filter-States ----
   const [fDateFrom, setFDateFrom] = useState<string>('');
   const [fDateTo, setFDateTo]     = useState<string>('');
   const [fKanal, setFKanal]       = useState<string>(''); // exact match (Dropdown)
@@ -104,9 +108,33 @@ export default function TeamHubPage() {
   const [fComment, setFComment]   = useState<string>(''); // contains
   const [fLabelId, setFLabelId]   = useState<number|''>(''); // by label id
 
-  // Listen-Gruppierung (falls du die Liste weiterhin nutzen willst)
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
-  const [groupMode, setGroupMode] = useState<'month'|'rating_then_month'>('month');
+  // Sortierung
+  const [sort, setSort] = useState<'newest'|'score_desc'>('newest');
+
+  // Labels global laden
+  const [allLabelsGlobal, setAllLabelsGlobal] = useState<Array<{id:number; name:string; color?:string}>>([]);
+  const [labelsLoading, setLabelsLoading] = useState(false);
+  const [labelsError, setLabelsError] = useState<string|null>(null);
+
+  useEffect(() => {
+    const ac = new AbortController();
+    (async () => {
+      setLabelsLoading(true);
+      setLabelsError(null);
+      try {
+        const r = await authedFetch('/api/teamhub/labels', { cache: 'no-store', signal: ac.signal as any });
+        const j = await r.json().catch(() => null);
+        setAllLabelsGlobal(Array.isArray(j?.items) ? j.items : []);
+      } catch (err:any) {
+        console.error('labels fetch failed', err);
+        setLabelsError('Konnte Labels nicht laden.');
+        setAllLabelsGlobal([]);
+      } finally {
+        setLabelsLoading(false);
+      }
+    })();
+    return () => ac.abort();
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -160,22 +188,21 @@ export default function TeamHubPage() {
 
   const curName = useMemo(() => members.find(m => m.user_id === userId)?.name ?? '—', [members, userId]);
 
-  // Werte für Dropdowns aus Daten ableiten
+  // Dropdown-Werte
   const allChannels = useMemo(() => {
     const s = new Set<string>();
     for (const it of items) if (it.feedbacktyp) s.add(it.feedbacktyp);
     return [...s].sort();
   }, [items]);
-  const allLabels = useMemo(()=>{
-    const s = new Map<number,string>();
-    for (const it of items) (it.labels||[]).forEach(l=>s.set(l.id, l.name));
-    return [...s.entries()].sort((a,b)=>a[1].localeCompare(b[1]));
-  }, [items]);
 
-  // ---- Tabellenfilter anwenden ----
-  const filteredItems = useMemo(()=>{
+  // Labels für Filter-Dropdown aus globaler Liste (id -> name)
+  const labelFilterOptions = useMemo<[number,string][]>(()=>{
+    return allLabelsGlobal.map(l => [l.id, l.name] as [number,string]).sort((a,b)=>a[1].localeCompare(b[1]));
+  }, [allLabelsGlobal]);
+
+  // ---- FILTERN (ohne Sort) ----
+  const filtered = useMemo(()=>{
     return items.filter(f=>{
-      // Datum
       const tIso = getTs(f);
       if (!tIso) return false;
       const t = new Date(tIso).getTime();
@@ -187,99 +214,59 @@ export default function TeamHubPage() {
         const dt = new Date(fDateTo + 'T23:59:59Z').getTime();
         if (t > dt) return false;
       }
-      // Kanal
       if (fKanal && f.feedbacktyp !== fKanal) return false;
-      // Template
       if (fTemplate && !(f.template_name||'').toLowerCase().includes(fTemplate.toLowerCase())) return false;
-      // Score min
       if (fScoreMin) {
         const s = avgScore(f) ?? 0;
         if (s < Number(fScoreMin)) return false;
       }
-      // Rekla
       if (fRekla === 'rekla' && !isTrueish(f.rekla)) return false;
       if (fRekla === 'none' && isTrueish(f.rekla)) return false;
-      // Status
       const isGekl = isTrueish(f.geklaert);
       if (fStatus === 'offen' && isGekl) return false;
       if (fStatus === 'geklärt' && !isGekl) return false;
-      // Kommentar
       if (fComment && !(f.kommentar||'').toLowerCase().includes(fComment.toLowerCase())) return false;
-      // Label
       if (fLabelId !== '') {
         const ids = new Set((f.labels||[]).map(l=>l.id));
         if (!ids.has(Number(fLabelId))) return false;
       }
       return true;
-    }).sort((a,b)=>{
+    });
+  }, [items, fDateFrom, fDateTo, fKanal, fTemplate, fScoreMin, fRekla, fStatus, fComment, fLabelId]);
+
+  // ---- SORTIEREN ----
+  const sortedItems = useMemo(()=>{
+    const arr = [...filtered];
+    if (sort==='score_desc') {
+      return arr.sort((a,b)=> (avgScore(b)??0) - (avgScore(a)??0));
+    }
+    return arr.sort((a,b)=>{
       const ta = getTs(a) ? new Date(getTs(a) as string).getTime() : 0;
       const tb = getTs(b) ? new Date(getTs(b) as string).getTime() : 0;
       return tb - ta;
     });
-  }, [items, fDateFrom, fDateTo, fKanal, fTemplate, fScoreMin, fRekla, fStatus, fComment, fLabelId]);
+  }, [filtered, sort]);
 
-  // ---- Gruppen für Listenansicht (optional beibehalten) ----
+  // ---- MONATS-GRUPPEN ----
   type Group = { key: string; label: string; items: FeedbackItem[] };
   const groups: Group[] = useMemo(() => {
-    const arr = filteredItems; // gleiche Filter wie Tabelle
-    if (groupMode === 'month') {
-      const map = new Map<string, FeedbackItem[]>();
-      for (const f of arr) {
-        const iso = getTs(f)!;
-        const d = new Date(iso);
-        const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}`;
-        const list = map.get(key) ?? [];
-        list.push(f); map.set(key, list);
-      }
-      return [...map.entries()].sort((a,b)=> a[0]<b[0] ? 1 : -1).map(([k, list])=>{
-        const [y,m] = k.split('-');
-        const sorted = [...list].sort((a,b)=>{
-          const ta = new Date(getTs(a)!).getTime();
-          const tb = new Date(getTs(b)!).getTime();
-          return tb - ta;
-        });
-        return { key:k, label:`${m}/${y}`, items:sorted };
-      });
-    } else {
-      const bucketFor = (s:number|null)=>{
-        const v = Number(s ?? 0);
-        if (v >= 4.95) return '5.00–4.95';
-        if (v >= 4.75) return '4.95–4.75';
-        if (v >= 4.50) return '4.75–4.50';
-        if (v >= 4.00) return '4.50–4.00';
-        return '< 4.00';
-      };
-      const buckets = new Map<string, FeedbackItem[]>();
-      for (const f of arr) {
-        const b = bucketFor(avgScore(f));
-        const list = buckets.get(b) ?? [];
-        list.push(f); buckets.set(b, list);
-      }
-      const order = ['5.00–4.95','4.95–4.75','4.75–4.50','4.50–4.00','< 4.00'];
-      const out: Group[] = [];
-      for (const b of order) {
-        const perMonth = new Map<string, FeedbackItem[]>();
-        for (const f of buckets.get(b) || []) {
-          const d = new Date(getTs(f)!);
-          const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}`;
-          const list = perMonth.get(key) ?? [];
-          list.push(f); perMonth.set(key, list);
-        }
-        [...perMonth.entries()].sort((a,b)=>a[0]<b[0]?1:-1).forEach(([k, list])=>{
-          const [y,m] = k.split('-');
-          const sorted = [...list].sort((a,b)=>{
-            const ta = new Date(getTs(a)!).getTime();
-            const tb = new Date(getTs(b)!).getTime();
-            return tb - ta;
-          });
-          out.push({ key:`${b}:${k}`, label:`${b} · ${m}/${y}`, items:sorted });
-        });
-      }
-      return out;
+    const map = new Map<string, FeedbackItem[]>();
+    for (const f of sortedItems) {
+      const iso = getTs(f);
+      if (!iso) continue;
+      const d = new Date(iso);
+      const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}`;
+      const list = map.get(key) ?? [];
+      list.push(f); map.set(key, list);
     }
-  }, [filteredItems, groupMode]);
-
-  const toggleGroup = (k:string) => setOpenGroups(p=>({ ...p, [k]: !p[k] }));
+    return [...map.entries()]
+      .sort((a,b)=> a[0] < b[0] ? 1 : -1)
+      .map(([k, list])=>{
+        const [yStr,mStr] = k.split('-');
+        const y = Number(yStr), m = Number(mStr);
+        return { key:k, label: fmtMonthYearDE(y, m), items: list };
+      });
+  }, [sortedItems]);
 
   return (
     <div className="container max-w-7xl mx-auto py-6 space-y-4">
@@ -305,21 +292,11 @@ export default function TeamHubPage() {
           {/* Zeitraum */}
           <div className="flex items-center gap-2">
             <input type="date" value={from} onChange={e => setFrom(e.target.value)}
-                  className="px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-white/10 text-sm" />
+                  className="w-40 px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-white/10 text-sm" />
             <span className="text-gray-400">–</span>
             <input type="date" value={to} onChange={e => setTo(e.target.value)}
-                  className="px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-white/10 text-sm" />
+                  className="w-40 px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-white/10 text-sm" />
           </div>
-
-          {/* Ansicht */}
-          <select
-            value={view}
-            onChange={e=>setView(e.target.value as any)}
-            className="px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-white/10 text-sm"
-          >
-            <option value="table">Tabelle</option>
-            <option value="list">Liste</option>
-          </select>
 
           {/* Label-Manager */}
           <LabelManagerButton />
@@ -328,6 +305,8 @@ export default function TeamHubPage() {
 
       <div className="text-sm text-gray-600 dark:text-gray-300">
         Mitarbeiter: <b>{curName}</b>
+        {labelsLoading && <span className="ml-2 text-xs text-gray-500">Labels laden…</span>}
+        {labelsError && <span className="ml-2 text-xs text-red-600">{labelsError}</span>}
       </div>
 
       {/* Kommentar-Karte */}
@@ -356,316 +335,220 @@ export default function TeamHubPage() {
 
       {loading && <div className="text-sm text-gray-500">Lade…</div>}
 
-      {/* TABELLENANSICHT */}
-      {!loading && view === 'table' && (
-        <div className="rounded-xl border border-gray-200 dark:border-gray-800 overflow-auto">
-          <table className="min-w-[1100px] w-full text-sm">
-            <thead className="sticky top-0 bg-gray-50 dark:bg-gray-800/60">
-              <tr className="text-gray-600 dark:text-gray-300">
-                <th className="px-3 py-2 text-left">Neu</th>
-                <th className="px-3 py-2 text-left">Datum</th>
-                <th className="px-3 py-2 text-left">Kanal</th>
-                <th className="px-3 py-2 text-left">Template</th>
-                <th className="px-3 py-2 text-right">Ø</th>
-                <th className="px-3 py-2 text-left">Rekla</th>
-                <th className="px-3 py-2 text-left">Status</th>
-                <th className="px-3 py-2 text-left">Kommentar</th>
-                <th className="px-3 py-2 text-left">Labels</th>
-                <th className="px-3 py-2 text-left">BO</th>
-              </tr>
-              {/* Filterzeile */}
-              <tr className="bg-white/70 dark:bg-gray-900/30">
-                <th className="px-3 py-2"></th>
-                <th className="px-3 py-2">
-                  <div className="flex gap-1">
-                    <input type="date" value={fDateFrom} onChange={e=>setFDateFrom(e.target.value)}
-                      className="w-[9.5rem] px-2 py-1 rounded border text-xs" />
-                    <input type="date" value={fDateTo} onChange={e=>setFDateTo(e.target.value)}
-                      className="w-[9.5rem] px-2 py-1 rounded border text-xs" />
-                  </div>
-                </th>
-                <th className="px-3 py-2">
-                  <select value={fKanal} onChange={e=>setFKanal(e.target.value)}
-                    className="w-[10rem] px-2 py-1 rounded border text-xs">
-                    <option value="">Alle</option>
-                    {allChannels.map(c=><option key={c} value={c}>{c}</option>)}
-                  </select>
-                </th>
-                <th className="px-3 py-2">
-                  <input value={fTemplate} onChange={e=>setFTemplate(e.target.value)}
-                    placeholder="suchen…" className="w-[12rem] px-2 py-1 rounded border text-xs" />
-                </th>
-                <th className="px-3 py-2">
-                  <input value={fScoreMin} onChange={e=>setFScoreMin(e.target.value)}
-                    placeholder="min" inputMode="decimal"
-                    className="w-[4.5rem] px-2 py-1 rounded border text-xs text-right" />
-                </th>
-                <th className="px-3 py-2">
-                  <select value={fRekla} onChange={e=>setFRekla(e.target.value as any)}
-                    className="w-[7.5rem] px-2 py-1 rounded border text-xs">
-                    <option value="any">Alle</option>
-                    <option value="rekla">Rekla</option>
-                    <option value="none">Keine</option>
-                  </select>
-                </th>
-                <th className="px-3 py-2">
-                  <select value={fStatus} onChange={e=>setFStatus(e.target.value as any)}
-                    className="w-[8rem] px-2 py-1 rounded border text-xs">
-                    <option value="any">Alle</option>
-                    <option value="offen">offen</option>
-                    <option value="geklärt">geklärt</option>
-                  </select>
-                </th>
-                <th className="px-3 py-2">
-                  <input value={fComment} onChange={e=>setFComment(e.target.value)}
-                    placeholder="suchen…" className="w-[14rem] px-2 py-1 rounded border text-xs" />
-                </th>
-                <th className="px-3 py-2">
-                  <select value={String(fLabelId)} onChange={e=>setFLabelId(e.target.value===''?'':Number(e.target.value))}
-                    className="w-[12rem] px-2 py-1 rounded border text-xs">
-                    <option value="">Alle</option>
-                    {allLabels.map(([id,name])=>(
-                      <option key={id} value={id}>{name}</option>
-                    ))}
-                  </select>
-                </th>
-                <th className="px-3 py-2">
-                  <button
-                    onClick={()=>{
-                      setFDateFrom(''); setFDateTo(''); setFKanal('');
-                      setFTemplate(''); setFScoreMin(''); setFRekla('any');
-                      setFStatus('any'); setFComment(''); setFLabelId('');
-                    }}
-                    className="px-2 py-1 rounded border text-xs"
-                  >
-                    Filter zurücksetzen
-                  </button>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredItems.map(f=>{
-                const s = avgScore(f);
-                const bo = boLinkFor(f);
-                const um = unreadMap[String(f.id)];
-                const hasNewFromOwner = !!(um && um.last_by_owner && um.unread_total > 0);
-                return (
-                  <tr key={String(f.id)} className="border-t border-gray-100 dark:border-gray-800">
-                    <td className="px-3 py-2">
-                      {hasNewFromOwner && <span title="Neuer Kommentar vom Mitarbeiter"
-                        className="inline-block w-2.5 h-2.5 rounded-full bg-rose-500" />}
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap">{fmtDateTimeBerlin(getTs(f))}</td>
-                    <td className="px-3 py-2">
-                      <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800">
-                        {f.feedbacktyp}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2">{f.template_name ?? '—'}</td>
-                    <td className={`px-3 py-2 text-right tabular-nums font-medium ${noteColor(s)}`}>{fmtAvg(s)}</td>
-                    <td className="px-3 py-2">{isTrueish(f.rekla) ? 'Rekla' : '—'}</td>
-                    <td className="px-3 py-2">{isTrueish(f.geklaert) ? 'geklärt' : 'offen'}</td>
-                    <td className="px-3 py-2 max-w-[360px] truncate">{f.kommentar ?? '—'}</td>
-                    <td className="px-3 py-2">
-                      <LabelChips feedbackId={f.id} labels={f.labels ?? []} />
-                    </td>
-                    <td className="px-3 py-2">
-                      {bo && (
-                        <a
-                          href={bo}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"
-                          title="Im Backoffice suchen"
-                        >
-                          🔎 BO
-                        </a>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-              {filteredItems.length===0 && (
-                <tr><td colSpan={10} className="px-3 py-6 text-center text-sm text-gray-500">Keine Treffer</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
+      {/* INBOX-LAYOUT */}
+      {!loading && (
+        <section className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+          {/* Filterleiste (kompakt) */}
+          <div className="p-3 flex flex-wrap md:flex-nowrap items-center gap-2 border-b border-gray-100 dark:border-gray-800 text-sm">
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                value={fDateFrom}
+                onChange={e=>setFDateFrom(e.target.value)}
+                className="w-40 px-2 py-1.5 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10"
+                aria-label="Von"
+              />
+              <span className="text-gray-400">–</span>
+              <input
+                type="date"
+                value={fDateTo}
+                onChange={e=>setFDateTo(e.target.value)}
+                className="w-40 px-2 py-1.5 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10"
+                aria-label="Bis"
+              />
+            </div>
 
-      {/* LISTENANSICHT (optional) */}
-      {!loading && view === 'list' && (
-        <div className="rounded-xl border border-gray-200 dark:border-gray-800">
-          <div className="p-3 border-b border-gray-100 dark:border-gray-800 flex items-center gap-2 text-sm">
-            <label>Gruppierung:</label>
             <select
-              value={groupMode}
-              onChange={e=>setGroupMode(e.target.value as any)}
-              className="px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-white/10 text-sm"
+              value={fKanal}
+              onChange={e=>setFKanal(e.target.value)}
+              className="w-48 px-2 py-1.5 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10"
+              aria-label="Kanal"
             >
-              <option value="month">Nach Monaten</option>
-              <option value="rating_then_month">Nach Bewertung → Monate</option>
+              <option value="">Alle Kanäle</option>
+              {allChannels.map(c => (<option key={c} value={c}>{c}</option>))}
             </select>
+
+            <input
+              value={fTemplate}
+              onChange={e=>setFTemplate(e.target.value)}
+              placeholder="Template suchen…"
+              className="w-64 md:w-72 px-2 py-1.5 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10"
+              aria-label="Template"
+            />
+
+            <input
+              value={fComment}
+              onChange={e=>setFComment(e.target.value)}
+              placeholder="Kommentar suchen…"
+              className="w-64 md:w-80 px-2 py-1.5 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10"
+              aria-label="Kommentar"
+            />
+
+            <input
+              value={fScoreMin}
+              onChange={e=>setFScoreMin(e.target.value)}
+              placeholder="Ø min"
+              inputMode="decimal"
+              className="w-24 px-2 py-1.5 rounded-lg border text-right dark:border-gray-700 bg-white dark:bg-white/10"
+              aria-label="Mindestscore"
+            />
+
+            <select
+              value={fRekla}
+              onChange={e=>setFRekla(e.target.value as any)}
+              className="w-40 px-2 py-1.5 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10"
+              aria-label="Reklamation"
+            >
+              <option value="any">Rekla: Alle</option>
+              <option value="rekla">Nur Rekla</option>
+              <option value="none">Ohne Rekla</option>
+            </select>
+
+            <select
+              value={fStatus}
+              onChange={e=>setFStatus(e.target.value as any)}
+              className="w-36 px-2 py-1.5 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10"
+              aria-label="Status"
+            >
+              <option value="any">Status: Alle</option>
+              <option value="offen">offen</option>
+              <option value="geklärt">geklärt</option>
+            </select>
+
+            <select
+              value={String(fLabelId)}
+              onChange={e=>setFLabelId(e.target.value===''?'':Number(e.target.value))}
+              className="w-56 px-2 py-1.5 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10"
+              aria-label="Label"
+            >
+              <option value="">Alle Labels</option>
+              {labelFilterOptions.map(([id,name])=> (
+                <option key={id} value={id}>{name}</option>
+              ))}
+            </select>
+
+            {/* Sortierung + Counter + Reset */}
+            <div className="flex items-center gap-2 ml-auto">
+              <SortSwitcher sort={sort} setSort={setSort} />
+              <span className="text-xs text-gray-500 whitespace-nowrap">{sortedItems.length} Treffer</span>
+              <button
+                onClick={()=>{
+                  setFDateFrom(''); setFDateTo(''); setFKanal('');
+                  setFTemplate(''); setFScoreMin(''); setFRekla('any');
+                  setFStatus('any'); setFComment(''); setFLabelId('');
+                }}
+                className="px-2 py-1.5 rounded-lg border text-xs"
+              >
+                Filter zurücksetzen
+              </button>
+            </div>
           </div>
-          {groups.length===0 ? (
-            <div className="p-4 text-sm text-gray-500">Keine Feedbacks im Zeitraum/Filter.</div>
+
+          {/* Ergebnisliste (Monatsgruppen) */}
+          {loading ? (
+            <div className="p-6 text-sm text-gray-500">Lade…</div>
+          ) : groups.length === 0 ? (
+            <div className="p-6 text-sm text-gray-500">Keine Treffer</div>
           ) : (
-            <ul className="divide-y divide-gray-200 dark:divide-gray-800">
-              {groups.map(g=>{
-                const open = !!openGroups[g.key];
-                return (
-                  <li key={g.key}>
-                    <button onClick={()=>toggleGroup(g.key)}
-                      className="w-full px-3 py-3 flex items-center justify-between bg-white/70 dark:bg-white/5">
-                      <div className="flex items-center gap-3">
-                        <span className="text-base font-semibold">{g.label}</span>
-                        <span className="text-xs text-gray-500">{g.items.length} Feedbacks</span>
-                      </div>
-                      <span className="text-gray-400">{open ? '▾' : '▸'}</span>
-                    </button>
-                    {open && (
-                      <ul className="divide-y divide-gray-200 dark:divide-gray-800">
-                        {g.items.map(f=>{
-                          const s = avgScore(f);
-                          const bo = boLinkFor(f);
-                          const um = unreadMap[String(f.id)];
-                          const hasNewFromOwner = !!(um && um.last_by_owner && um.unread_total > 0);
-                          return (
-                            <li key={String(f.id)} className="p-3 flex items-start justify-between gap-3">
-                              <div className="min-w-0 flex-1">
-                                <div className="flex items-center justify-between gap-2 flex-wrap">
-                                  <div className="min-w-0 flex items-center gap-2 flex-wrap">
-                                    {hasNewFromOwner && (
-                                      <span title="Neuer Kommentar vom Mitarbeiter"
-                                        className="inline-block w-2.5 h-2.5 rounded-full bg-rose-500" />
-                                    )}
-                                    <span className="font-medium">{f.template_name ?? f.feedbacktyp}</span>
-                                    <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300">
-                                      {f.feedbacktyp}
-                                    </span>
-                                    {isTrueish(f.rekla) && (
-                                      <span className="text-[11px] px-1.5 py-0.5 rounded-full border border-amber-300 text-amber-700 dark:border-amber-900 dark:text-amber-300">
-                                        Rekla
-                                      </span>
-                                    )}
-                                    <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${isTrueish(f.geklaert)
-                                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200'
-                                      : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'}`}>
-                                      {isTrueish(f.geklaert) ? 'geklärt' : 'offen'}
-                                    </span>
-                                  </div>
-                                  <div className="shrink-0 flex items-center gap-2">
-                                    {bo && (
-                                      <a
-                                        href={bo}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"
-                                        title="Im Backoffice suchen"
-                                      >
-                                        🔎 Im BO suchen
-                                      </a>
-                                    )}
-                                    <span className="text-[11px] px-2 py-1 rounded-full bg-slate-50 text-slate-700 border border-slate-200">
-                                      {fmtDateTimeBerlin(getTs(f))}
-                                    </span>
-                                  </div>
+            <div>
+              {groups.map(g => (
+                <div key={g.key} className="border-b last:border-b-0 border-gray-100 dark:border-gray-800">
+                  <div className="sticky top-0 z-10 px-3 py-2 bg-gray-50/80 dark:bg-gray-800/80 backdrop-blur text-sm font-semibold border-b border-gray-100 dark:border-gray-800 capitalize">
+                    <div className="flex items-center justify-between">
+                      <span>{g.label}</span>
+                      <span className="text-xs text-gray-500">{g.items.length} Feedbacks</span>
+                    </div>
+                  </div>
+                  <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+                    {g.items.map(f=>{
+                      const s  = avgScore(f);
+                      const bo = boLinkFor(f);
+                      const um = unreadMap[String(f.id)];
+                      const hasNewFromOwner = !!(um && um.last_by_owner && um.unread_total > 0);
+                      return (
+                        <li key={String(f.id)} className="p-3 md:p-4 hover:bg-gray-50/60 dark:hover:bg-white/5 transition-colors">
+                          <div className="flex items-start gap-3">
+                            {/* Neu-Dot */}
+                            <div className="pt-2">
+                              {hasNewFromOwner && <span title="Neuer Kommentar vom Mitarbeiter" className="inline-block w-2.5 h-2.5 rounded-full bg-rose-500" />}
+                            </div>
+
+                            {/* Hauptinhalt */}
+                            <div className="min-w-0 flex-1">
+                              {/* Kopfzeile */}
+                              <div className="flex items-center justify-between gap-2 flex-wrap">
+                                <div className="min-w-0 flex items-center gap-2 flex-wrap">
+                                  <span className="font-medium truncate max-w-[40ch]">{f.template_name ?? f.feedbacktyp}</span>
+                                  <Chip subtle>{f.feedbacktyp}</Chip>
+                                  {isTrueish(f.rekla) && (<Chip tone="amber">Rekla</Chip>)}
+                                  <Chip tone={isTrueish(f.geklaert) ? 'emerald' : 'slate'}>
+                                    {isTrueish(f.geklaert) ? 'geklärt' : 'offen'}
+                                  </Chip>
                                 </div>
 
-                                {f.kommentar && (
-                                  <p className="mt-2 text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{f.kommentar}</p>
-                                )}
-
-                                {/* Labels */}
-                                <LabelChips feedbackId={f.id} labels={f.labels ?? []} />
-
-                                {/* Kommentare */}
-                                <FeedbackComments feedbackId={f.id} />
-                              </div>
-
-                              {/* rechte Spalte: Ø */}
-                              <div className="shrink-0 text-right pl-2">
-                                <div className="text-xs text-gray-500">Ø</div>
-                                <div className={`text-lg font-semibold ${noteColor(s)}`}>
-                                  {fmtAvg(s)}
+                                <div className="shrink-0 flex items-center gap-2">
+                                  {bo && (
+                                    <a
+                                      href={bo}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"
+                                      title="Im Backoffice suchen"
+                                    >
+                                      🔎 BO
+                                    </a>
+                                  )}
+                                  <span className="text-[11px] px-2 py-1 rounded-full bg-slate-50 text-slate-700 border border-slate-200">
+                                    {fmtDateTimeBerlin(getTs(f))}
+                                  </span>
+                                  <span className={`ml-2 text-xs px-2 py-1 rounded-full border ${noteColor(s)}`}>
+                                    Ø {fmtAvg(s)}
+                                  </span>
                                 </div>
                               </div>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
+
+                              {/* Kommentar-Preview */}
+                              {f.kommentar && (
+                                <p className="mt-2 text-sm text-gray-700 dark:text-gray-300 line-clamp-2">{f.kommentar}</p>
+                              )}
+
+                              {/* Labels + Aktionen */}
+                              <div className="mt-2 flex items-center gap-2 flex-wrap">
+                                <LabelChips feedbackId={f.id} labels={f.labels ?? []} allLabels={allLabelsGlobal} />
+                                <Link href={`/feedback/${f.id}`} className="text-sm text-blue-600 hover:underline">öffnen</Link>
+                              </div>
+                            </div>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ))}
+            </div>
           )}
-        </div>
+        </section>
       )}
     </div>
   );
 }
 
-/* ---------------- Small helpers/components ---------------- */
-function FeedbackComments({ feedbackId }: { feedbackId: number|string }) {
-  const [items, setItems] = useState<Array<{id:number; body:string; author:string; created_at:string}>>([]);
-  const [draft, setDraft] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  async function load() {
-    const r = await authedFetch(`/api/feedback/${feedbackId}/comments`, { cache: 'no-store' });
-    const j = await r.json().catch(()=>null);
-    setItems(Array.isArray(j?.items) ? j.items : []);
-  }
-  async function send() {
-    if (!draft.trim()) return;
-    setLoading(true);
-    try {
-      const r = await authedFetch(`/api/feedback/${feedbackId}/comments`, {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ body: draft.trim() }),
-      });
-      if (r.ok) { setDraft(''); await load(); }
-    } finally { setLoading(false); }
-  }
-  useEffect(()=>{ load(); }, [feedbackId]);
-
-  return (
-    <div className="mt-3">
-      <div className="text-xs font-medium mb-1">Kommentare</div>
-      <ul className="space-y-1 text-sm">
-        {items.map(it=>(
-          <li key={it.id}>
-            <span className="font-medium">{it.author}</span>
-            <span className="text-gray-500"> · {new Date(it.created_at).toLocaleString('de-DE')}</span>
-            <p className="whitespace-pre-wrap">{it.body}</p>
-          </li>
-        ))}
-        {items.length===0 && <li className="text-xs text-gray-500">Noch keine Kommentare.</li>}
-      </ul>
-      <div className="mt-2 flex gap-2">
-        <input value={draft} onChange={e=>setDraft(e.target.value)} placeholder="Kommentieren…"
-               className="flex-1 px-3 py-2 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10" />
-        <button onClick={send} disabled={loading||!draft.trim()} className="px-3 py-2 rounded-lg bg-blue-600 text-white disabled:opacity-60">
-          Senden
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function LabelChips({ feedbackId, labels }: {
+/* ---------------- Label-Chips ---------------- */
+function LabelChips({
+  feedbackId,
+  labels,
+  allLabels,
+}: {
   feedbackId: number|string;
   labels: Array<{id:number; name:string; color?:string}>;
+  allLabels: Array<{id:number; name:string; color?:string}>;
 }) {
-  const [all, setAll] = useState<Array<{id:number; name:string; color?:string}>>([]);
   const [attached, setAttached] = useState<number[]>(labels.map(l=>l.id));
 
-  useEffect(()=>{(async()=>{
-    const r = await authedFetch(`/api/teamhub/labels`, { cache: 'no-store' });
-    const j = await r.json().catch(()=>null);
-    setAll(Array.isArray(j?.items) ? j.items : []);
-  })();},[]);
+  // Sync wenn Parent neue labels liefert (z.B. nach Reload)
+  useEffect(()=>{
+    setAttached(labels.map(l=>l.id));
+  }, [labels.map(l=>l.id).join(',')]); // primitive deps
 
   async function add(labelId:number){
     const r = await authedFetch(`/api/feedback/${feedbackId}/labels`, {
@@ -679,9 +562,11 @@ function LabelChips({ feedbackId, labels }: {
     if (r.ok) setAttached(prev => prev.filter(id=>id!==labelId));
   }
 
+  const attachedSet = new Set(attached);
+
   return (
     <div className="mt-2 flex items-center gap-2 flex-wrap">
-      {all.filter(l=>attached.includes(l.id)).map(l=>(
+      {allLabels.filter(l=>attachedSet.has(l.id)).map(l=>(
         <button key={l.id} onClick={()=>remove(l.id)}
           className="text-[11px] px-2 py-1 rounded-full border"
           style={{ borderColor: l.color||'#ddd', background: '#fff' }}>
@@ -691,8 +576,8 @@ function LabelChips({ feedbackId, labels }: {
       <details className="relative">
         <summary className="text-[11px] px-2 py-1 rounded-full bg-gray-100 cursor-pointer">Label hinzufügen</summary>
         <div className="absolute z-10 mt-2 p-2 rounded-lg border bg-white shadow">
-          <ul className="min-w-[180px]">
-            {all.filter(l=>!attached.includes(l.id)).map(l=>(
+          <ul className="min-w-[180px] max-h-60 overflow-auto">
+            {allLabels.filter(l=>!attachedSet.has(l.id)).map(l=>(
               <li key={l.id}>
                 <button onClick={()=>add(l.id)} className="w-full text-left px-2 py-1 hover:bg-gray-50">
                   <span className="inline-block w-2 h-2 rounded-full mr-2" style={{ background: l.color||'#999' }} />
@@ -700,7 +585,7 @@ function LabelChips({ feedbackId, labels }: {
                 </button>
               </li>
             ))}
-            {all.length===0 && <li className="px-2 py-1 text-sm text-gray-500">Keine Labels</li>}
+            {allLabels.length===0 && <li className="px-2 py-1 text-sm text-gray-500">Keine Labels</li>}
           </ul>
         </div>
       </details>
@@ -788,4 +673,35 @@ function LabelManager({ onClose }:{ onClose: ()=>void }) {
       </div>
     </div>
   );
+}
+
+/* ---------------- Kleine UI-Helfer ---------------- */
+function SortSwitcher({ sort, setSort }:{ sort:'newest'|'score_desc'; setSort:(v:'newest'|'score_desc')=>void; }) {
+  return (
+    <select
+      value={sort}
+      onChange={e=>setSort(e.target.value as any)}
+      className="px-2 py-1.5 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10"
+      aria-label="Sortierung"
+    >
+      <option value="newest">Neueste zuerst</option>
+      <option value="score_desc">Höchster Ø zuerst</option>
+    </select>
+  );
+}
+
+function Chip({ children, tone, subtle }:{
+  children: React.ReactNode;
+  tone?: 'slate'|'amber'|'emerald';
+  subtle?: boolean;
+}) {
+  const map: Record<string,string> = {
+    slate:   subtle ? 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300' : 'bg-slate-50 text-slate-700 border border-slate-200',
+    amber:   subtle ? 'border border-amber-300 text-amber-700 dark:border-amber-900 dark:text-amber-300'
+                    : 'bg-amber-50 text-amber-700 border border-amber-200',
+    emerald: subtle ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200'
+                    : 'bg-emerald-50 text-emerald-700 border border-emerald-200',
+  };
+  const cls = tone ? map[tone] : (subtle ? map.slate : 'bg-gray-100 text-gray-700 border border-gray-200');
+  return <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${cls}`}>{children}</span>;
 }

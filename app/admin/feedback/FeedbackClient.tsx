@@ -61,22 +61,19 @@ const parseTsToMs = (ts?: string | null, fallbackDate?: string) => {
   if (!s) return 0;
   const m1 = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2}|\d{4})(?:[ T](\d{1,2}):(\d{2}))?$/);
   if (m1) {
-    let [, dd, mm, yy, hh='00', mi='00'] = m1;
+    let [, dd, mm, yy, hh='00', mi='00'] = m1 as any;
     let year = +yy; if (yy.length===2) year = 2000 + year;
     return Date.UTC(year, +mm-1, +dd, +hh, +mi, 0);
   }
   const m2 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})(?:[ T](\d{1,2}):(\d{2}))?$/);
   if (m2) {
-    let [, dd, mm, yy, hh='00', mi='00'] = m2;
+    let [, dd, mm, yy, hh='00', mi='00'] = m2 as any;
     let year = +yy; if (yy.length===2) year = 2000 + year;
     return Date.UTC(year, +mm-1, +dd, +hh, +mi, 0);
   }
   const d = new Date(s);
   return isNaN(d.getTime()) ? 0 : d.getTime();
 };
-
-
-
 
 /* ===========================
    Page
@@ -97,6 +94,9 @@ export default function AdminFeedbackPage(){
   const [loading,setLoading]=useState(false);
   const [saving,setSaving]=useState(false);
   const [dropDupes,setDropDupes]=useState(true);
+
+  // NEU: Auswahl einzelner CSV-Zeilen für Teil-Upload
+  const [selectedIdx, setSelectedIdx] = useState<Set<number>>(new Set());
 
   // Bestehende
   const [existing,setExisting]=useState<ExistingRow[]>([]);
@@ -146,10 +146,10 @@ export default function AdminFeedbackPage(){
         const j = await r.json().catch(()=>({}));
         const items: ExistingRow[] = Array.isArray(j?.items) ? j.items : [];
         items.sort((a,b)=> parseTsToMs(b.ts, b.feedback_at) - parseTsToMs(a.ts, a.feedback_at));
-      setExisting(items);
-// kein Auto-Open – Modal bleibt zu, bis man in der Liste klickt
-setOpenId(null);
-setModalDraft({});
+        setExisting(items);
+        // kein Auto-Open – Modal bleibt zu, bis man in der Liste klickt
+        setOpenId(null);
+        setModalDraft({});
       } finally {
         setLoadingExisting(false);
       }
@@ -194,6 +194,9 @@ setModalDraft({});
           }));
           setRows(safe);
           setTab('upload');
+
+          // Auswahl initial: ALLE markieren
+          setSelectedIdx(new Set(safe.map((_,i)=> i)));
 
           // erkannte Agenten sammeln & Mapping leeren
           const unique = new Map<string,string>(); // key -> label
@@ -269,19 +272,49 @@ setModalDraft({});
     return true;
   }, [assignMode, agentSummary, agentMap]);
 
-  // Rows für Save: setze agent_name auf den gewählten Mitarbeiter-Namen
-  const rowsForSave = useMemo(()=>{
-    const base = dropDupes ? rows.filter((_,i)=> !dupInfo.dupIdx.has(i)) : rows;
-    return base.map(r=>{
+  // Sichtbare Auswahl-Helpers
+  function isAllVisibleSelected(){
+    let all=true, any=false;
+    rows.forEach((_,i)=>{
+      if (dropDupes && dupInfo.dupIdx.has(i)) return; // "unsichtbar"
+      const sel = selectedIdx.has(i);
+      any = any || sel;
+      all = all && sel;
+    });
+    return {all, any};
+  }
+  function toggleAllVisible(){
+    const {all} = isAllVisibleSelected();
+    const next = new Set<number>(selectedIdx);
+    rows.forEach((_,i)=>{
+      if (dropDupes && dupInfo.dupIdx.has(i)) return;
+      if (all) next.delete(i); else next.add(i);
+    });
+    setSelectedIdx(next);
+  }
+
+  // Rows für Save: nur ausgewählte & ggf. Duplikate raus
+ // Rows für Save: nur ausgewählte & ggf. Duplikate raus
+const rowsForSave = useMemo(()=>{
+  const filtered = rows.filter((_,i)=> selectedIdx.has(i) && !(dropDupes && dupInfo.dupIdx.has(i)));
+
+  return filtered
+    .filter(r=>{
+      if (assignMode === 'fixed') return true; // fixed: alles erlauben
+      const key = buildAgentKey(r);
+      // auto: NUR importieren, wenn ein Mapping existiert; sonst überspringen
+      return !!(key && agentMap[key]);
+    })
+    .map(r=>{
       const key = buildAgentKey(r);
       if (!key) return r;
       const chosenId = agentMap[key];
       if (!chosenId) return r;
       const u = usersById.get(chosenId);
-      if (u?.name) return { ...r, agent_name: u.name, agent_first: null, agent_last: null };
+      if (u?.name) return { ...r, agent_name: u.name, agent_first: null, agent_last: null } as ParsedRow;
       return r;
     });
-  }, [rows, dropDupes, dupInfo, agentMap, usersById]);
+}, [rows, dropDupes, dupInfo, agentMap, usersById, selectedIdx, assignMode]);
 
   /* ---------- Speichern ----------
      fixed  → braucht fixedUserId
@@ -294,12 +327,12 @@ setModalDraft({});
     if (assignMode==='fixed') {
       if (!fixedUserId) { alert('Bitte Mitarbeiter für feste Zuordnung wählen.'); return; }
       effectiveUserId = fixedUserId;
-    } else {
-      if (!canSaveAuto) { alert('Bitte alle erkannten Bearbeiter zuordnen.'); return; }
-      const firstId = Object.values(agentMap).find(Boolean) || users[0]?.id;
-      if (!firstId) { alert('Kein Benutzer vorhanden.'); return; }
-      effectiveUserId = firstId;
-    }
+} else {
+ 
+const fallbackId = Object.values(agentMap).find(Boolean) || users[0]?.id;
+if (!fallbackId) { alert('Kein Benutzer vorhanden.'); return; }
+effectiveUserId = fallbackId;
+}
 
     setSaving(true);
     try{
@@ -315,6 +348,7 @@ setModalDraft({});
       if(r.ok && j?.ok){
         setRows([]);
         setAgentMap({});
+        setSelectedIdx(new Set());
         alert(`Import ok – ${j.inserted ?? 0} Zeilen${j.skipped? ` (übersprungen: ${j.skipped})` : ''}`);
       } else {
         alert(j?.error||'Import fehlgeschlagen');
@@ -396,6 +430,8 @@ setModalDraft({});
   /* ===========================
      UI
   ============================ */
+  const { all: allSelected } = isAllVisibleSelected();
+
   return (
     <div className="container max-w-7xl mx-auto py-6 space-y-5">
       <div className="flex items-center justify-between">
@@ -429,7 +465,7 @@ setModalDraft({});
             {assignMode==='fixed' && (
               <div className="grid gap-2">
                 <div className="text-sm">Fest zuordnen zu Mitarbeiter</div>
-                <UserSelect users={users} value={fixedUserId} onChange={setFixedUserId} placeholder="– Mitarbeiter wählen –" />
+                <UserSelectWithSearch users={users} value={fixedUserId} onChange={setFixedUserId} placeholder="– Mitarbeiter wählen –" />
               </div>
             )}
 
@@ -444,15 +480,12 @@ setModalDraft({});
           </fieldset>
 
           {/* Rechts: bestehende Feedbacks */}
-          <fieldset className="rounded-xl border border-gray-200 dark:border-gray-700 p-3">
+          <fieldset className="rounded-XL border border-gray-200 dark:border-gray-700 p-3">
             <legend className="px-1 text-sm text-gray-600">Bestehende Feedbacks ansehen und bearbeiten</legend>
             <div className="grid gap-2">
-              <UserSelect users={users} value={viewUserId} onChange={setViewUserId} placeholder="– Mitarbeiter wählen –" />
-              <div className="inline-flex rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden self-start">
-              </div>
-              <p className="text-xs text-gray-500">
-  Klicke in der Liste auf einen Eintrag, um das Feedback zu bearbeiten.
-</p>
+              <UserSelectWithSearch users={users} value={viewUserId} onChange={setViewUserId} placeholder="– Mitarbeiter wählen –" />
+              <div className="inline-flex rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden self-start"></div>
+              <p className="text-xs text-gray-500">Klicke in der Liste auf einen Eintrag, um das Feedback zu bearbeiten.</p>
             </div>
           </fieldset>
         </div>
@@ -473,36 +506,42 @@ setModalDraft({});
             {rows.length>0 ? (
               <>
                 <div className="flex items-center justify-between text-sm text-gray-600">
-                  <div>
-                    Vorschau: {rows.length} Einträge
+                  <div className="flex items-center gap-3">
+                    <span>Vorschau: {rows.length} Einträge</span>
+                    <button
+                      onClick={toggleAllVisible}
+                      className="px-2 py-1 rounded border dark:border-gray-700"
+                    >
+                      Alle sichtbar {allSelected ? 'abwählen' : 'auswählen'}
+                    </button>
+                    <span className="text-gray-500">
+                      Ausgewählt: {[...selectedIdx].filter(i=>!(dropDupes && dupInfo.dupIdx.has(i))).length}
+                    </span>
                     {dupInfo.dupIdx.size>0 && (
                       <span className="ml-3 text-amber-700 dark:text-amber-400">
                         {dupInfo.dupIdx.size} mögliche Duplikate erkannt
                       </span>
                     )}
                   </div>
-              <label className="inline-flex items-center gap-2 cursor-pointer select-none">
-  <input
-    type="checkbox"
-    checked={dropDupes}
-    onChange={e => setDropDupes(e.target.checked)}
-    className="
-      h-4 w-4 rounded border-gray-300 text-blue-600
-      focus:ring-blue-500 focus:ring-offset-0
-      transition-all duration-150
-    "
-  />
-  <span className="text-sm text-gray-700 dark:text-gray-300">
-    Duplikate vor dem Speichern entfernen
-  </span>
-</label>
+                  <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={dropDupes}
+                      onChange={e => setDropDupes(e.target.checked)}
+                      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 focus:ring-offset-0 transition-all duration-150"
+                    />
+                    <span className="text-sm text-gray-700 dark:text-gray-300">Duplikate vor dem Speichern entfernen</span>
+                  </label>
                 </div>
 
                 <div className="mt-2 max-h-[60vh] overflow-auto rounded-xl border border-gray-200 dark:border-gray-800">
                   <table className="min-w-full text-sm">
                     <thead className="bg-gray-50 dark:bg-gray-800/50 sticky top-0 z-10">
                       <tr>
-                        {['Datum','Channel','Ø','F','Q','A','Kommentar','Template','Rekla','Geklärt?','BO','Interne Notiz'].map(h=>(
+                        <th className="w-10 px-3 py-2">
+                          <input type="checkbox" checked={allSelected} onChange={toggleAllVisible} />
+                        </th>
+                        {['Datum','Channel','Ø','F','Q','A','Kommentar','Template','Rekla','Geklärt?','BO','Interne Notiz'].map(h=> (
                           <th key={h} className="text-left px-3 py-2 font-medium">{h}</th>
                         ))}
                       </tr>
@@ -510,19 +549,31 @@ setModalDraft({});
                     <tbody>
                       {rows.map((r,idx)=>{
                         const isDup = dupInfo.dupIdx.has(idx);
+                        const hiddenByDup = dropDupes && isDup;
                         const boDirect = r.booking_number ? `https://backoffice.reisen.check24.de/booking/search/?booking_number=${encodeURIComponent(r.booking_number)}` : undefined;
                         const boRedirect = r.booking_number ? `/api/bo/${encodeURIComponent(r.booking_number)}` : undefined;
                         return (
-                          <tr key={idx} className={`border-t border-gray-100 dark:border-gray-800 align-top ${isDup && dropDupes ? 'opacity-50' : ''}`}>
+                          <tr key={idx} className={`border-t border-gray-100 dark:border-gray-800 align-top ${hiddenByDup ? 'opacity-50' : ''}`}>
+                            <td className="px-3 py-2 align-top">
+                              {!hiddenByDup && (
+                                <input
+                                  type="checkbox"
+                                  checked={selectedIdx.has(idx)}
+                                  onChange={(e)=>{
+                                    const next = new Set(selectedIdx);
+                                    if (e.target.checked) next.add(idx); else next.delete(idx);
+                                    setSelectedIdx(next);
+                                  }}
+                                />
+                              )}
+                            </td>
                             <td className="px-3 py-2 whitespace-nowrap">{r.ts ?? '–'}</td>
                             <td className="px-3 py-2 whitespace-nowrap">{r.feedbacktyp ?? '–'}</td>
                             <td className="px-3 py-2 font-medium">{r.bewertung ?? '–'}</td>
                             <td className="px-3 py-2">{r.beraterfreundlichkeit ?? '–'}</td>
                             <td className="px-3 py-2">{r.beraterqualifikation ?? '–'}</td>
                             <td className="px-3 py-2">{r.angebotsattraktivitaet ?? '–'}</td>
-                            <td className="px-3 py-2 max-w-[26rem]">
-                              {r.kommentar ? <span className="whitespace-pre-wrap">{r.kommentar}</span> : '–'}
-                            </td>
+                            <td className="px-3 py-2 max-w-[26rem]">{r.kommentar ? <span className="whitespace-pre-wrap">{r.kommentar}</span> : '–'}</td>
                             <td className="px-3 py-2">{r.template_name ?? '–'}</td>
                             <td className="px-3 py-2">
                               <YnToggle
@@ -561,16 +612,16 @@ setModalDraft({});
 
                 <div className="mt-3 flex justify-end">
                   <button
-                    onClick={save}
-                    disabled={
-                      saving
-                      || rowsForSave.length===0
-                      || (assignMode==='fixed' ? !fixedUserId : !canSaveAuto)
-                    }
-                    className="inline-flex items-center gap-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white px-4 py-2 text-sm"
-                  >
-                    {saving ? 'Speichere…' : `Speichern (${rowsForSave.length})`}
-                  </button>
+  onClick={save}
+  disabled={
+    saving ||
+    rowsForSave.length === 0 ||
+    (assignMode === 'fixed' && !fixedUserId) // nur im fixed-Modus nötig
+  }
+  className="inline-flex items-center gap-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white px-4 py-2 text-sm"
+>
+  {saving ? 'Speichere…' : `Speichern (${rowsForSave.length})`}
+</button>
                 </div>
               </>
             ) : (
@@ -622,16 +673,15 @@ setModalDraft({});
                     <button onClick={goNext} disabled={openIndex<0 || openIndex>=existing.length-1}
                       className="px-3 py-2 rounded-lg text-sm border bg-white hover:bg-gray-50 dark:bg-white/10 dark:hover:bg-white/20 dark:border-gray-700 disabled:opacity-50">Nächstes</button>
                     {openItem?.booking_number_hash ? (
-  <a
-    href={`/api/bo/${openItem.booking_number_hash}`}
-    target="_blank"
-    rel="noreferrer"
-    className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs
-               bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"
-  >
-    Im Backoffice öffnen
-  </a>
-) : <span />}
+                      <a
+                        href={`/api/bo/${openItem.booking_number_hash}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"
+                      >
+                        Im Backoffice öffnen
+                      </a>
+                    ) : <span />}
                   </div>
                   <div className="flex items-center gap-2">
                     <button onClick={deleteModal} className="px-3 py-2 rounded-lg text-sm bg-red-600 hover:bg-red-700 text-white">Löschen</button>
@@ -686,30 +736,30 @@ setModalDraft({});
                     />
                   </Field>
 
-               <div className="grid grid-cols-2 gap-3">
-  <Field label="Rekla">
-    <YnToggle
-      value={(modalDraft.reklamation ?? openItem.reklamation) === null
-               ? null
-               : ((modalDraft.reklamation ?? openItem.reklamation) ? 'ja' : 'nein')}
-      onChange={(v)=>setModalDraft(d=>({
-        ...d,
-        reklamation: v === 'ja' ? true : v === 'nein' ? false : null
-      }))}
-    />
-  </Field>
-  <Field label="Geklärt?">
-    <YnToggle
-      value={(modalDraft.resolved ?? openItem.resolved) === null
-               ? null
-               : ((modalDraft.resolved ?? openItem.resolved) ? 'ja' : 'nein')}
-      onChange={(v)=>setModalDraft(d=>({
-        ...d,
-        resolved: v === 'ja' ? true : v === 'nein' ? false : null
-      }))}
-    />
-  </Field>
-</div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="Rekla">
+                      <YnToggle
+                        value={(modalDraft.reklamation ?? openItem.reklamation) === null
+                                 ? null
+                                 : ((modalDraft.reklamation ?? openItem.reklamation) ? 'ja' : 'nein')}
+                        onChange={(v)=>setModalDraft(d=>({
+                          ...d,
+                          reklamation: v === 'ja' ? true : v === 'nein' ? false : null
+                        }))}
+                      />
+                    </Field>
+                    <Field label="Geklärt?">
+                      <YnToggle
+                        value={(modalDraft.resolved ?? openItem.resolved) === null
+                                 ? null
+                                 : ((modalDraft.resolved ?? openItem.resolved) ? 'ja' : 'nein')}
+                        onChange={(v)=>setModalDraft(d=>({
+                          ...d,
+                          resolved: v === 'ja' ? true : v === 'nein' ? false : null
+                        }))}
+                      />
+                    </Field>
+                  </div>
 
                   <Field label="Interne Notiz">
                     <input
@@ -720,9 +770,8 @@ setModalDraft({});
                   </Field>
 
                   {!openItem.booking_number_hash && (
-  <div className="text-xs text-gray-500">Kein BO-Link vorhanden.</div>
-)}
-                  {}
+                    <div className="text-xs text-gray-500">Kein BO-Link vorhanden.</div>
+                  )}
                 </div>
               )}
             </Modal>
@@ -754,7 +803,7 @@ function AgentMappingPanel({
             <tr>
               <th className="text-left px-3 py-2">Name (CSV)</th>
               <th className="text-left px-3 py-2">Häufigkeit</th>
-              <th className="text-left px-3 py-2 w-[420px]">Zuordnung (erforderlich)</th>
+              <th className="text-left px-3 py-2 w-[420px]">Zuordnung (optional, nicht ausgewählt wird übersprungen)</th>
             </tr>
           </thead>
           <tbody>
@@ -765,23 +814,14 @@ function AgentMappingPanel({
                   <td className="px-3 py-2">{a.label || '(leer)'}</td>
                   <td className="px-3 py-2">{a.count}</td>
                   <td className="px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <select
+                    <div className="flex items-center gap-2 w-full">
+                      <UserSelectWithSearch
+                        users={users}
                         value={val}
-                        onChange={e=>{
-                          const v = e.target.value as string;
-                          setAgentMap(prev=>({ ...prev, [a.key]: v }));
-                        }}
-                        className="px-3 py-2 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10 w-full"
-                      >
-                        <option value="">– Mitarbeiter wählen –</option>
-                        {users.map(u=>(
-                          <option key={u.id} value={u.id}>
-                            {u.name || u.email || u.id}
-                          </option>
-                        ))}
-                      </select>
-                      {!val && <span className="text-xs text-amber-600">Pflichtfeld</span>}
+                        onChange={(v)=> setAgentMap(prev=>({ ...prev, [a.key]: v }))}
+                        placeholder="– Mitarbeiter wählen –"
+                      />
+                      
                     </div>
                   </td>
                 </tr>
@@ -810,12 +850,52 @@ function UserSelect({ users, value, onChange, placeholder }:{
       className="px-3 py-2 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10 w-full"
     >
       <option value="">{placeholder || '– auswählen –'}</option>
-      {users.map(u=>(
+      {users.map(u=> (
         <option key={u.id} value={u.id}>
           {u.name || u.email || u.id}
         </option>
       ))}
     </select>
+  );
+}
+
+// NEU: Suchbare Variante
+function UserSelectWithSearch({ users, value, onChange, placeholder }:{
+  users: User[]; value: string; onChange:(v:string)=>void; placeholder?:string;
+}){
+  const [q, setQ] = useState('');
+  const filtered = useMemo(()=>{
+    const term = q.toLowerCase();
+    return users.filter(u => (u.name || u.email || u.id).toLowerCase().includes(term));
+  }, [q, users]);
+
+  const current = value ? users.find(u=>u.id===value) : undefined;
+  const list = useMemo(()=>{
+    if (!current) return filtered;
+    return [current, ...filtered.filter(u=>u.id!==current.id)];
+  }, [current, filtered]);
+
+  return (
+    <div className="grid gap-2 w-full">
+      <input
+        value={q}
+        onChange={e=>setQ(e.target.value)}
+        placeholder="Suchen… (Name, E-Mail)"
+        className="px-3 py-2 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10 w-full"
+      />
+      <select
+        value={value}
+        onChange={e=>onChange(e.target.value)}
+        className="px-3 py-2 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10 w-full"
+      >
+        <option value="">{placeholder || '– auswählen –'}</option>
+        {list.map(u=> (
+          <option key={u.id} value={u.id}>
+            {u.name || u.email || u.id}
+          </option>
+        ))}
+      </select>
+    </div>
   );
 }
 
@@ -866,8 +946,6 @@ function YnToggle({ value, onChange }:{ value:'ja'|'nein'|null, onChange:(v:'ja'
     </div>
   );
 }
-
-
 
 function NumInput({ value, onChange }:{ value:number|null, onChange:(v:number|null)=>void }){
   return (

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // app/api/admin/groups/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

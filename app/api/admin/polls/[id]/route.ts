@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // app/api/admin/polls/[id]/route.ts
 import { NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/requireAdmin';

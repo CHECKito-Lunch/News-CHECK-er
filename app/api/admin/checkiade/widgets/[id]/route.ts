@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // app/api/admin/checkiade/widgets/[id]/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // app/api/teams/[id]/members/[user_id]/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -23,7 +24,7 @@ function parsePath(url: string): { teamId: number | null; userId: string | null 
 
 export async function PATCH(req: NextRequest) {
   const me = await getAdminFromCookies(req);
-  if (!me || (me.role !== 'admin' && me.role !== 'moderator')) {
+  if (!me || (!me || (me.role !== 'admin' && me.role !== 'moderator' && me.role !== 'teamleiter'))) {
     return NextResponse.json({ ok:false, error:'forbidden' }, { status:403 });
   }
   const { teamId, userId } = parsePath(req.url);

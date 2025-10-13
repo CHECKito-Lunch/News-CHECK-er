@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // app/api/teams/[id]/members/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -28,7 +29,7 @@ export async function GET(req: NextRequest) {
   if (!teamId) return NextResponse.json({ ok:false, error:'bad_id' }, { status:400 });
 
   // Zugriff: admin/mod immer; teamleiter nur für Teams, in denen er Mitglied ist
-  if (me.role === 'teamleiter') {
+  if (!me || (me.role !== 'admin' && me.role !== 'moderator' && me.role !== 'teamleiter')) {
     const r = await sql/*sql*/`
       select 1 from public.team_memberships
       where team_id = ${teamId} and user_id = ${me.sub}::uuid
@@ -60,7 +61,7 @@ export async function GET(req: NextRequest) {
  */
 export async function POST(req: NextRequest) {
   const me = await getAdminFromCookies(req);
-  if (!me || (me.role !== 'admin' && me.role !== 'moderator')) {
+  if (!me || (me.role !== 'admin' && me.role !== 'moderator' && me.role !== 'teamleiter')) {
     return NextResponse.json({ ok:false, error:'forbidden' }, { status:403 });
   }
   const teamId = getTeamId(req.url);
