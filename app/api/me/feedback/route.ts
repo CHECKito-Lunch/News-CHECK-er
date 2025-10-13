@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // app/api/me/feedback/route.ts
 import { NextResponse, type NextRequest } from 'next/server';
 import { sql } from '@/lib/db';
