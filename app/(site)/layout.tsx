@@ -7,7 +7,7 @@ import { ArrowUp } from 'lucide-react';
 import SiteHeader from '../components/SiteHeader';
 
 // gleiche Breite wie im Admin (bei Bedarf hier zentral ändern):
-const SHELL_WIDTH = 'max-w-20xl';
+const SHELL_WIDTH = 'max-w-30xl';
 
 function ScrollToTopButton() {
   const [visible, setVisible] = useState(false);
