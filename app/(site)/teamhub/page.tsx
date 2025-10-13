@@ -286,6 +286,19 @@ export default function TeamHubPage() {
       });
   }, [sortedItems, unreadMap]);
 
+  // ---- KPI-Übersicht (basierend auf den aktuellen Filtern) ----
+  const kpis = useMemo(()=>{
+    const arr = sortedItems;
+    const n = arr.length;
+    const scores = arr.map(avgScore).filter((x): x is number => Number.isFinite(x as any));
+    const avg = scores.length ? (scores.reduce((s,n)=>s+n,0)/scores.length) : null;
+    const neg = scores.filter(s=>s<=3.0).length;
+    const rekla = arr.filter(f=>isTrueish(f.rekla)).length;
+    const offen = arr.filter(f=>!isTrueish(f.geklaert)).length;
+    const geloest = n - offen;
+    return { n, avg, neg, rekla, offen, geloest, negPct: n? Math.round(100*neg/n):0 };
+  }, [sortedItems]);
+
   // Hilfsfunktionen: Gruppen öffnen/schließen
   const setAllGroups = (open:boolean) => {
     const next: Record<string, boolean> = {};
@@ -367,6 +380,18 @@ export default function TeamHubPage() {
         {labelsLoading && <span className="ml-2 text-xs text-gray-500">Labels laden…</span>}
         {labelsError && <span className="ml-2 text-xs text-red-600">{labelsError}</span>}
       </div>
+
+      {/* KPI-Übersicht (neu) */}
+      <section className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3 md:p-4">
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+          <Kpi title="Ø-Score" value={fmtAvg(kpis.avg)} tone={kpis.avg!=null?noteColor(kpis.avg):'text-gray-500'} />
+          <Kpi title="Feedbacks" value={String(kpis.n)} />
+          <Kpi title="Negativ ≤3,0" value={`${kpis.neg} (${kpis.negPct}%)`} />
+          <Kpi title="Rekla" value={String(kpis.rekla)} />
+          <Kpi title="offen" value={String(kpis.offen)} />
+          <Kpi title="geklärt" value={String(kpis.geloest)} />
+        </div>
+      </section>
 
       {/* Neueste Kommentare des Mitarbeiters */}
       <section className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4">
@@ -792,4 +817,14 @@ function Chip({ children, tone, subtle }:{
   };
   const cls = tone ? map[tone] : (subtle ? map.slate : 'bg-gray-100 text-gray-700 border border-gray-200');
   return <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${cls}`}>{children}</span>;
+}
+
+/* KPI-Kachel */
+function Kpi({ title, value, tone }:{ title:string; value:string; tone?:string }) {
+  return (
+    <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-3">
+      <div className="text-[11px] text-gray-500">{title}</div>
+      <div className={`text-lg font-semibold ${tone||''}`}>{value}</div>
+    </div>
+  );
 }
