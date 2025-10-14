@@ -1,23 +1,28 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import { NextRequest, NextResponse } from 'next/server';
 
 // Robustes Parsing für deutsche CSV/TSV-Exports (UTF-8).
-// Erkennt Trennzeichen (;, , oder \t) und mappt deine Header:
+// Erkennt Trennzeichen (\t, ;, ,) und mappt:
 // Feedback-ID | Verursacher | Verursacher Team | Melder | Melder Team | Booking-ID | Fehlertyp | Kommentar | Datum
 
 function normalizeHeader(h: string){
   const map: Record<string, string> = { 'ä':'ae','ö':'oe','ü':'ue','ß':'ss' };
-  let s = h.trim().toLowerCase();
-  s = s.replace(/[äöüß]/g, ch => map[ch] || ch);
-  s = s.replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g,'');
+  // eslint-disable-next-line prefer-const
+  let s = h.replace(/^\uFEFF/, '') // BOM entfernen
+           .trim().toLowerCase()
+           .replace(/[äöüß]/g, ch => map[ch] || ch)
+           .replace(/[^a-z0-9]+/g, '_')
+           .replace(/^_+|_+$/g,'');
   return s;
 }
 
-function detectDelimiter(sample: string){
-  const candidates = [',',';','\t'];
-  const counts = candidates.map(d => ({ d, n: (sample.match(new RegExp(`\\${d}`,'g'))||[]).length }));
-  counts.sort((a,b)=> b.n - a.n);
-  return counts[0].n>0 ? counts[0].d : ';';
+// Wählt den Trenner, der in der Kopfzeile die meisten Spalten erzeugt.
+// (Tab priorisiert, dann Semikolon, dann Komma)
+function detectDelimiter(lines: string[]){
+  const header = (lines.find(l => l.trim().length>0) || '').replace(/^\uFEFF/,'');
+  const candidates = ['\t','; ',','];
+  const scored = candidates.map(d => ({ d, cols: header.split(d).length }));
+  scored.sort((a,b)=> b.cols - a.cols);
+  return scored[0].d;
 }
 
 function parseGermanDate(s?: string|null){
@@ -34,25 +39,22 @@ function parseGermanDate(s?: string|null){
 }
 
 function parseCSV(text: string){
-  const lines = text.split(/\r?\n/).filter(l=>l.trim().length>0);
+  const lines = text.split(/\r?\n/).filter(l => l.length > 0);
   if (lines.length===0) return [];
-  const delim = detectDelimiter(lines.slice(0, Math.min(lines.length, 5)).join('\n'));
-  const headerRaw = lines[0].split(delim).map(s=>s.trim());
+
+  const delim = detectDelimiter(lines);
+
+  // Header parsen + normalisieren
+  const headerRaw = lines[0].replace(/^\uFEFF/, '').split(delim).map(s=>s.trim());
   const header = headerRaw.map(normalizeHeader);
 
   const idx = (keys: string[]) => header.findIndex(h => keys.includes(h));
 
-  // Deine Spalten:
-  // "Feedback-ID" -> optional (wir speichern sie nicht)
-  // "Verursacher" -> agent_name
-  // "Booking-ID"  -> booking_number
-  // "Fehlertyp"   -> incident_type
-  // "Kommentar"   -> description
-  // "Datum"       -> ts
+  // Mapping der relevanten Spalten
   const i_ts           = idx(['datum','ts','timestamp']);
   const i_type         = idx(['fehlertyp','incident_type','typ']);
-  const i_category     = idx(['category','kategorie']);          // nicht in deinem Beispiel, aber unterstützt
-  const i_severity     = idx(['severity','gewichtung','score']); // nicht in deinem Beispiel, aber unterstützt
+  const i_category     = idx(['category','kategorie']);          // optional
+  const i_severity     = idx(['severity','gewichtung','score']); // optional
   const i_desc         = idx(['kommentar','description','beschreibung']);
   const i_booking      = idx(['booking_id','bookingid','booking','buchungsnummer','bnr','booking_id_']);
   const i_agent_name   = idx(['verursacher','agent_name','berater','name']);
@@ -61,7 +63,7 @@ function parseCSV(text: string){
 
   const rows = lines.slice(1).map(line => {
     const parts = line.split(delim);
-    const val = (i: number) => (i>=0 ? (parts[i]?.trim()||null) : null);
+    const val = (i: number) => (i>=0 ? (parts[i]?.trim() || null) : null);
     const tsRaw = val(i_ts);
     const parsedTs = parseGermanDate(tsRaw);
     return {
@@ -76,6 +78,7 @@ function parseCSV(text: string){
       agent_name: val(i_agent_name),
     };
   });
+
   return rows;
 }
 
