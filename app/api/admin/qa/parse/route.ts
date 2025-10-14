@@ -17,8 +17,7 @@ type Splitter = { label: string; split: (s: string) => string[] };
 function buildCandidates(): Splitter[] {
   return [
     { label: '\\t', split: (s) => s.split('\t') },
-    { label: ';',  split: (s) => s.split(';')  },
-    { label: ',',  split: (s) => s.split(',')  },
+    
     // Fallback: mind. zwei Whitespaces als Trenner (oft bei Copy/Paste)
     { label: '\\s{2,}', split: (s) => s.trim().split(/\s{2,}/) },
   ];
