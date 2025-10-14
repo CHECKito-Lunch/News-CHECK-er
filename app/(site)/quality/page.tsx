@@ -12,8 +12,35 @@ type Item = {
   category?: string | null;
   severity?: string | null;
   description?: string | null;
-  booking_number_hash?: string | null; // ← NEU (enthält nur Ziffern)
+  booking_number_hash?: string | null; // enthält nur Ziffern
 };
+
+/* === Neu: Übersetzungen nur für Anzeige === */
+const TYPE_LABELS: Record<string, string> = {
+  mail_handling: 'Mail-Bearbeitung',
+  consulting: 'Beratung',
+  rekla: 'Reklamation',
+  booking_transfer: 'Umbuchung',
+  booking_changed: 'Buchung geändert',
+  cancellation: 'Stornierung',
+  reminder: 'Erinnerung',
+  post_booking: 'Nachbuchung',
+  additional_service: 'Zusatzleistung',
+  voucher: 'Gutschein',
+  payment_data: 'Zahlungsdaten',
+  va_contact: 'VA-Kontakt',
+  word_before_writing: 'Vor dem Schreiben',
+  privacy: 'Datenschutz',
+  special_reservation: 'Sonderreservierung',
+};
+
+const labelForType = (t?: string | null) => {
+  const k = (t || '').trim();
+  if (!k) return '—';
+  if (TYPE_LABELS[k]) return TYPE_LABELS[k];
+  return k.replace(/_/g, ' ').replace(/\b\w/g, m => m.toUpperCase());
+};
+/* === Ende: Übersetzungen === */
 
 export default function QualityPage(){
   const [from, setFrom] = useState('');
@@ -34,14 +61,17 @@ export default function QualityPage(){
 
   useEffect(() => { load(); }, [load]);
 
+  // Neu: Typen + deutsche Labels
   const incidentTypes = useMemo(() => {
     const map = new Map<string, number>();
     for (const it of items) {
-      const t = (it.incident_type || '').trim();
-      if (!t) continue;
-      map.set(t, (map.get(t) || 0) + 1);
+      const key = (it.incident_type || '').trim();
+      if (!key) continue;
+      map.set(key, (map.get(key) || 0) + 1);
     }
-    return Array.from(map.entries()).sort((a,b) => b[1]-a[1]).map(([type, count]) => ({ type, count }));
+    return Array.from(map.entries())
+      .sort((a,b) => b[1]-a[1])
+      .map(([key, count]) => ({ key, label: labelForType(key), count }));
   }, [items]);
 
   const filteredItems = useMemo(() => {
@@ -72,7 +102,6 @@ export default function QualityPage(){
     return isNaN(d.getTime()) ? input : d.toLocaleString('de-DE');
   };
 
-  // ← NEU: BO-URL Helper
   const boUrl = (n?: string | null) =>
     n && n.trim()
       ? `https://backoffice.reisen.check24.de/booking/search/?booking_id=${encodeURIComponent(n.replace(/\D+/g,''))}`
@@ -105,21 +134,21 @@ export default function QualityPage(){
           <div className="mb-4">
             <div className="text-xs text-gray-500 mb-1">Filtern nach Typ</div>
             <div className="flex flex-wrap gap-2">
-              {incidentTypes.map(({ type, count }) => {
-                const active = typeFilter.has(type);
+              {incidentTypes.map(({ key, label, count }) => {
+                const active = typeFilter.has(key);
                 return (
                   <button
-                    key={type}
-                    onClick={() => toggleType(type)}
+                    key={key}
+                    onClick={() => toggleType(key)}
                     className={[
                       "px-2.5 py-1 rounded-full border text-xs",
                       active
                         ? "bg-blue-600 text-white border-blue-600"
                         : "bg-white dark:bg-white/10 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-white/20"
                     ].join(' ')}
-                    title={`${type} (${count})`}
+                    title={`${label} (${count})`}
                   >
-                    {type} <span className={active ? "opacity-90" : "text-gray-500"}>({count})</span>
+                    {label} <span className={active ? "opacity-90" : "text-gray-500"}>({count})</span>
                   </button>
                 );
               })}
@@ -160,11 +189,12 @@ export default function QualityPage(){
                 <li key={String(it.id)} className="p-3">
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="text-sm font-medium">{it.category || it.incident_type || '—'}</div>
+                      <div className="text-sm font-medium">
+                        {it.category || labelForType(it.incident_type) || '—'}
+                      </div>
                       <div className="text-xs text-gray-500 line-clamp-1">{it.description || '—'}</div>
                     </div>
 
-                    {/* ← NEU: BO-Button rechts neben dem Datum */}
                     <div className="shrink-0 text-right flex items-center gap-2">
                       {boUrl(it.booking_number_hash) && (
                         <a
