@@ -110,7 +110,7 @@ export default function GroupsHub() {
   const previewTotal = previewEntries.reduce((n, it) => n + (it.posts?.length || 0), 0);
 
   return (
-    <div className="container max-w-6xl mx-auto py-8 space-y-6">
+    <div className="w-full max-w-[1920px] mx-auto px-4 py-6">
       {/* Header + Suche + Als-gelesen */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold flex items-center gap-2">

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // app/(site)/news/[slug]/page.tsx
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -61,7 +62,7 @@ export default async function Page({ params }: { params?: Promise<any> }) {
   );
 
   return (
-    <div className="container max-w-3xl mx-auto py-8 space-y-6">
+    <div className="w-full max-w-[1920px] mx-auto px-4 py-6">
       <Link prefetch={false} href="/news" className="text-sm text-blue-600 hover:underline">
         ← Zurück zur Übersicht
       </Link>

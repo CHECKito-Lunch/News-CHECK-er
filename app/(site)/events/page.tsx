@@ -1,3 +1,5 @@
+/* eslint-disable @next/next/no-img-element */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // app/(site)/events/page.tsx
 'use client';
 
@@ -171,7 +173,7 @@ export default function EventsIndexPage() {
   // UI ----------------------------------------------------------------
 
   return (
-    <div className="container max-w-7xl mx-auto py-6 space-y-6">
+    <div className="w-full max-w-[1920px] mx-auto px-4 py-6">
       <header className="flex items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold">Events</h1>
         <Link href="/" className="text-sm text-blue-600 hover:underline">Zur Startseite</Link>

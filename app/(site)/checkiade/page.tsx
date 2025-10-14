@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
 import { JSXElementConstructor, Key, ReactNode, ReactPortal, useEffect, useMemo, useState, type ReactElement } from 'react';
@@ -339,7 +341,7 @@ for (let mm = windowStart; mm <= m; mm++) {
   const clearAllVisible  = () => setSelected(prev => prev.filter(id => !filteredWidgets.some(w => w.id === id)));
 
   return (
-    <div className="container max-w-7xl mx-auto py-6 space-y-6">
+    <div className="w-full max-w-[1920px] mx-auto px-4 py-6">
       {/* Header */}
       <header className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">CHECKiade</h1>

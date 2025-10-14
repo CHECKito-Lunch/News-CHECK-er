@@ -36,7 +36,7 @@ type FeedbackRes = { ok: boolean; items: FeedbackItem[] };
 
 export default function FeedbackPage() {
   return (
-    <div className="container max-w-7xl mx-auto py-6 space-y-6">
+    <div className="w-full max-w-[1920px] mx-auto px-4 py-6">
       <header className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Kunden-Feedback</h1>
         <Link href="/" className="text-sm text-blue-600 hover:underline">

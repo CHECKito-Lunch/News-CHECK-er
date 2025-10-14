@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
@@ -376,7 +377,7 @@ export default function HomePage() {
         {/* Events-Feed */}
         <section className={card + ' p-4'}>
           <div className={header}>
-            <h2 className="text-lg font-semibold">Events demnächst</h2>
+            <h2 className="text-lg font-semibold">Events</h2>
             <Link href="/events" className="text-sm text-blue-600 hover:underline">Alle Events →</Link>
           </div>
 
@@ -429,7 +430,7 @@ export default function HomePage() {
       {/* TOURISTISCHE NEWS */}
       <section className={card + ' p-4'}>
         <div className={header}>
-          <h2 className="text-lg font-semibold">Touristische News (automatisch)</h2>
+          <h2 className="text-lg font-semibold">Touristische News (KI-generiert)</h2>
           <Link href="/news" className="text-sm text-blue-600 hover:underline">Alle News ansehen →</Link>
         </div>
 

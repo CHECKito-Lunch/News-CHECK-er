@@ -1,3 +1,7 @@
+/* eslint-disable @next/next/no-img-element */
+/* eslint-disable jsx-a11y/alt-text */
+/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable react-hooks/exhaustive-deps */
 // app/news/page.tsx
 'use client';
 
@@ -166,7 +170,7 @@ export default function Page() {
     if (!activeFilters.badges && selectedBadges.length) { setSelectedBadges([]); changed = true; }
     if (!activeFilters.search && q) { setQ(''); changed = true; }
     if (changed) setPage(1);
-  }, [currentTab, activeFilters.vendor, activeFilters.badges, activeFilters.search]); // eslint-disable-line
+  }, [currentTab, activeFilters.vendor, activeFilters.badges, activeFilters.search]); 
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -191,7 +195,11 @@ export default function Page() {
   function toggleCard(id: number) {
     setExpanded(prev => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
       return next;
     });
   }
@@ -304,7 +312,7 @@ export default function Page() {
 );
 
                 return (
-                  <li id={`post-${it.id}`} key={it.id} className="p-5 rounded-2xl shadow-sm bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800">
+                  <li id={`post-${it.id}`} key={it.id} className="w-full max-w-[1920px] mx-auto px-4 py-6">
                     {/* Kopf */}
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">

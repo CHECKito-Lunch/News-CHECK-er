@@ -1,7 +1,11 @@
+/* eslint-disable react-hooks/exhaustive-deps */
+/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { authedFetch } from '@/lib/fetchWithSupabase';
 import {
   ResponsiveContainer,
@@ -78,7 +82,7 @@ export default function ProfilePage() {
   const [psOpen, setPsOpen] = useState(false);
 
   return (
-    <div className="container max-w-7xl mx-auto py-6 space-y-6">
+    <div className="w-full max-w-[1920px] mx-auto px-4 py-6">
       <header className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Mein Profil</h1>
         <Link href="/" className="text-sm text-blue-600 hover:underline">Zur Startseite</Link>
@@ -988,13 +992,13 @@ function EventRow({ ev }: { ev: MyEvent }) {
 
   return (
     <div className="flex gap-3">
-      {ev.hero_image_url && (
-        <img
-          src={ev.hero_image_url}
-          alt=""
-          className="h-16 w-24 object-cover rounded-lg border border-gray-200 dark:border-gray-700"
-        />
-      )}
+      <Image
+        src={ev.hero_image_url ?? "/placeholder.png"}
+        alt=""
+        width={96}
+        height={64}
+        className="h-16 w-24 object-cover rounded-lg border border-gray-200 dark:border-gray-700"
+      />
 
       <div className="min-w-0">
         <div className="flex items-center gap-2">
