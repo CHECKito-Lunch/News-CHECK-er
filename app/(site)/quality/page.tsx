@@ -1,10 +1,9 @@
+/* eslint-disable @typescript-eslint/no-unused-expressions */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { authedFetch } from '@/lib/fetchWithSupabase';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
-
-// API: /api/me/qa – siehe unten
 
 type Item = {
   id: number|string;
@@ -13,7 +12,7 @@ type Item = {
   category?: string | null;
   severity?: string | null;
   description?: string | null;
-  booking_number_hash?: string | null; 
+  booking_number_hash?: string | null; // ← NEU (enthält nur Ziffern)
 };
 
 export default function QualityPage(){
@@ -21,8 +20,6 @@ export default function QualityPage(){
   const [to, setTo] = useState('');
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
-
-  // NEW: Filter-State für incident_type
   const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
@@ -37,7 +34,6 @@ export default function QualityPage(){
 
   useEffect(() => { load(); }, [load]);
 
-  // NEW: Alle vorhandenen incident_types + Count
   const incidentTypes = useMemo(() => {
     const map = new Map<string, number>();
     for (const it of items) {
@@ -45,18 +41,9 @@ export default function QualityPage(){
       if (!t) continue;
       map.set(t, (map.get(t) || 0) + 1);
     }
-    return Array.from(map.entries())
-      .sort((a,b) => b[1]-a[1])
-      .map(([type, count]) => ({ type, count }));
+    return Array.from(map.entries()).sort((a,b) => b[1]-a[1]).map(([type, count]) => ({ type, count }));
   }, [items]);
 
-const boUrl = (n?: string | null) =>
-  n && n.trim()
-    ? `https://backoffice.reisen.check24.de/booking/search/?booking_id=${encodeURIComponent(n.replace(/\D+/g,''))}`
-    : null;
-
-
-  // NEW: Gefilterte Items (wenn keine Chips aktiv → alles zeigen)
   const filteredItems = useMemo(() => {
     if (typeFilter.size === 0) return items;
     return items.filter(i => {
@@ -66,7 +53,6 @@ const boUrl = (n?: string | null) =>
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, JSON.stringify(Array.from(typeFilter).sort())]);
 
-  // Chart auf Basis der gefilterten Items
   const byMonth = useMemo(()=>{
     const FE_TZ = 'Europe/Berlin';
     const ymKey = (iso?:string|null)=>{
@@ -80,22 +66,22 @@ const boUrl = (n?: string | null) =>
     return arr.map(([k,v])=>({ month:k, count:v }));
   },[filteredItems]);
 
-  // Kleine Helper fürs Datum (optional, aber hübscher)
   const fmtDate = (input?: string | null) => {
     if (!input) return '—';
     const d = new Date(input);
     return isNaN(d.getTime()) ? input : d.toLocaleString('de-DE');
   };
 
-  // NEW: Chip-Interaktionen
+  // ← NEU: BO-URL Helper
+  const boUrl = (n?: string | null) =>
+    n && n.trim()
+      ? `https://backoffice.reisen.check24.de/booking/search/?booking_id=${encodeURIComponent(n.replace(/\D+/g,''))}`
+      : null;
+
   const toggleType = (t: string) => {
     setTypeFilter(prev => {
       const next = new Set(prev);
-      if (next.has(t)) {
-        next.delete(t);
-      } else {
-        next.add(t);
-      }
+      next.has(t) ? next.delete(t) : next.add(t);
       return next;
     });
   };
@@ -114,7 +100,7 @@ const boUrl = (n?: string | null) =>
           <input type="date" value={to} onChange={(e)=>setTo(e.target.value)} className="px-2 py-1.5 border rounded" />
         </div>
 
-        {/* NEW: Filterchips */}
+        {/* Chips */}
         {incidentTypes.length > 0 && (
           <div className="mb-4">
             <div className="text-xs text-gray-500 mb-1">Filtern nach Typ</div>
@@ -172,28 +158,30 @@ const boUrl = (n?: string | null) =>
             <ul className="divide-y divide-gray-200 dark:divide-gray-800 rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden">
               {(filteredItems||[]).map(it=> (
                 <li key={String(it.id)} className="p-3">
-  <div className="flex items-center justify-between gap-3">
-    <div className="min-w-0">
-      <div className="text-sm font-medium">{it.category || it.incident_type || '—'}</div>
-      <div className="text-xs text-gray-500 line-clamp-1">{it.description || '—'}</div>
-    </div>
-    <div className="shrink-0 text-right flex items-center gap-2">
-      {boUrl(it.booking_number_hash) && (
-        <a
-          href={boUrl(it.booking_number_hash)!}
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex items-center px-2 py-0.5 rounded border text-xs
-                     bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
-          title="Im Backoffice öffnen"
-        >
-          BO
-        </a>
-      )}
-      <div className="text-xs text-gray-500">{fmtDate(it.ts)}</div>
-    </div>
-  </div>
-</li>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium">{it.category || it.incident_type || '—'}</div>
+                      <div className="text-xs text-gray-500 line-clamp-1">{it.description || '—'}</div>
+                    </div>
+
+                    {/* ← NEU: BO-Button rechts neben dem Datum */}
+                    <div className="shrink-0 text-right flex items-center gap-2">
+                      {boUrl(it.booking_number_hash) && (
+                        <a
+                          href={boUrl(it.booking_number_hash)!}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center px-2 py-0.5 rounded border text-xs
+                                     bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
+                          title="Im Backoffice öffnen"
+                        >
+                          BO
+                        </a>
+                      )}
+                      <div className="text-xs text-gray-500">{fmtDate(it.ts)}</div>
+                    </div>
+                  </div>
+                </li>
               ))}
               {(filteredItems||[]).length===0 && <li className="p-3 text-sm text-gray-500">Keine Einträge im Zeitraum.</li>}
             </ul>

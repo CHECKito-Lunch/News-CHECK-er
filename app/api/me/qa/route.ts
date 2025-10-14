@@ -14,7 +14,7 @@ export async function GET(req: NextRequest){
 
   const sb = supabaseServer();
   let q = (await sb)  .from('qa_incidents')
-  .select('id, ts, incident_type, category, severity, description, booking_number_hash') // ← neu
+  .select('id, ts, incident_type, category, severity, description, booking_number_hash')
   .eq('user_id', userId)
   .order('ts', { ascending:false });
   if (from) q = q.gte('ts', from);

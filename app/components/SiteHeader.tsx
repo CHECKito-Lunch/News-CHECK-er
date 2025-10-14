@@ -23,12 +23,11 @@ type UnreadRes = {
 export default function SiteHeader() {
   const pathname = usePathname();
 
-  // ✅ ALLE Hooks stehen jetzt im Funktionskörper der Komponente
+  // ✅ ALLE Hooks in der Komponente
   const [me, setMe] = useState<Me['user']>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [counts, setCounts] = useState({ total: 0, invites: 0, groups: 0, news: 0, events: 0 });
 
-  // 👇 diese beiden waren vorher außerhalb – jetzt korrekt hier drin:
   const [marking, setMarking] = useState(false);
   const [markedOk, setMarkedOk] = useState(false);
 
@@ -53,8 +52,6 @@ export default function SiteHeader() {
       window.removeEventListener('auth-changed', onAuth);
     };
   }, []);
-
- 
 
   // ---- Unread laden / Polling / auf unread-changed reagieren
   useEffect(() => {
@@ -103,53 +100,52 @@ export default function SiteHeader() {
     };
   }, [me]);
 
-async function markAllRead() {
-  if (!me || marking) return;
-  setMarking(true);
-  const prev = counts;
+  async function markAllRead() {
+    if (!me || marking) return;
+    setMarking(true);
+    const prev = counts;
 
-  // Optimistisch auf 0
-  setCounts({ total: 0, invites: 0, groups: 0, news: 0, events: 0 });
+    // Optimistisch auf 0
+    setCounts({ total: 0, invites: 0, groups: 0, news: 0, events: 0 });
 
-  try {
-    const r = await fetch('/api/unread/seen', { method: 'POST', credentials: 'include' });
-    if (!r.ok) throw new Error('failed');
-    window.dispatchEvent(new Event('unread-changed'));
-    setMarkedOk(true);              // ✓ anzeigen
-    setTimeout(() => setMarkedOk(false), 1200);
-  } catch {
-    setCounts(prev);                // Rollback
-    alert('Konnte nicht als gelesen markieren.');
-  } finally {
-    setMarking(false);
+    try {
+      const r = await fetch('/api/unread/seen', { method: 'POST', credentials: 'include' });
+      if (!r.ok) throw new Error('failed');
+      window.dispatchEvent(new Event('unread-changed'));
+      setMarkedOk(true);              // ✓ anzeigen
+      setTimeout(() => setMarkedOk(false), 1200);
+    } catch {
+      setCounts(prev);                // Rollback
+      alert('Konnte nicht als gelesen markieren.');
+    } finally {
+      setMarking(false);
+    }
   }
-}
 
   const links = useMemo(() => {
-  const arr: { href: string; label: string }[] = [
-    { href: '/', label: 'Start' },
-    { href: '/news', label: 'News' },
-    { href: '/groups', label: 'Gruppen' },
-    { href: '/events', label: 'Events' },
-    { href: '/checkiade', label: 'CHECKiade' },
-    { href: '/feedback', label: 'Kunden Feedbacks' },
-    { href: '/quality', label: 'Mitarbeiter Feedbacks' },
-  ];
+    const arr: { href: string; label: string }[] = [
+      { href: '/', label: 'Start' },
+      { href: '/news', label: 'News' },
+      { href: '/groups', label: 'Gruppen' },
+      { href: '/events', label: 'Events' },
+      { href: '/checkiade', label: 'CHECKiade' },
+      { href: '/feedback', label: 'Kunden Feedbacks' },
+      { href: '/quality', label: 'Mitarbeiter Feedbacks' },
+    ];
 
-  // 🔐 nur für Teamleiter sichtbar
-  if (me && me.role === 'teamleiter') {
-    arr.push({ href: '/teamhub', label: 'Teamhub' });
-  }
+    // 🔐 nur für Teamleiter sichtbar
+    if (me && me.role === 'teamleiter') {
+      arr.push({ href: '/teamhub', label: 'Teamhub' });
+    }
 
-  if (me) arr.push({ href: '/profile', label: 'Profil' });
+    if (me) arr.push({ href: '/profile', label: 'Profil' });
 
-  if (me && (me.role === 'admin' || me.role === 'moderator'|| me.role === 'teamleiter')) {
-    arr.push({ href: '/admin', label: 'Adminbereich' });
-  }
+    if (me && (me.role === 'admin' || me.role === 'moderator'|| me.role === 'teamleiter')) {
+      arr.push({ href: '/admin', label: 'Adminbereich' });
+    }
 
-  return arr;
-}, [me]);
-
+    return arr;
+  }, [me]);
 
   const Badge = ({ count }: { count: number }) => (
     <span
@@ -176,9 +172,6 @@ async function markAllRead() {
     return 0;
   }
 
-
-
-  
   return (
     <header className="sticky top-0 z-30 border-b border-gray-200 bg-white/70 dark:bg-gray-900/70 backdrop-blur">
       <div className="w-full max-w-full 2xl:max-w-[1920px] mx-auto px-4 py-6 flex items-center justify-between">
@@ -204,7 +197,6 @@ async function markAllRead() {
         <div className="w-10" />
       </div>
 
-      
       <AnimatePresence initial={false}>
         {menuOpen && (
           <motion.div
@@ -215,110 +207,156 @@ async function markAllRead() {
             exit={{ height: 0, opacity: 0 }}
             className="overflow-hidden backdrop-blur bg-white/70 dark:bg-gray-900/70"
           >
-            <nav className="container max-w-5xl mx-auto px-4 py-4 grid gap-2">
-              {links.map((n) => {
-                const active = pathname === n.href || (n.href !== '/' && pathname?.startsWith(n.href));
-                const c = countForLink(n.href);
-                return (
-                  <Link
-                    key={n.href}
-                    href={n.href}
-                    onClick={() => setMenuOpen(false)}
-                    className={`relative inline-flex items-center justify-between rounded-xl px-3 py-2 text-sm font-medium shadow-sm border
-                      ${active
-                        ? 'bg-blue-600 text-white border-blue-600'
-                        : 'bg-white dark:bg-white/10 text-gray-700 dark:text-gray-100 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-white/20'
-                      }`}
-                  >
-                    <span>{n.label}</span>
-                    <span className="relative inline-block w-6 h-6">
-                      {me && c > 0 && <Badge count={c} />}
-                    </span>
-                  </Link>
-                );
-              })}
+            {/* ▼▼▼ Kachel-Layout ▼▼▼ */}
+            <nav className="container max-w-5xl mx-auto px-4 py-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                {links.map((n) => {
+                  const active = pathname === n.href || (n.href !== '/' && pathname?.startsWith(n.href));
+                  const c = countForLink(n.href);
+
+                  return (
+                    <Link
+                      key={n.href}
+                      href={n.href}
+                      onClick={() => setMenuOpen(false)}
+                      aria-current={active ? 'page' : undefined}
+                      className={[
+                        'group relative block rounded-2xl border shadow-sm p-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
+                        active
+                          ? 'bg-blue-600 text-white border-blue-600'
+                          : 'bg-white/90 dark:bg-white/10 text-gray-800 dark:text-gray-100 border-gray-200 dark:border-white/10 hover:bg-gray-50 dark:hover:bg-white/20'
+                      ].join(' ')}
+                    >
+                      {/* Badge oben rechts */}
+                      <span className="absolute top-2 right-2 inline-block w-6 h-6">
+                        {me && c > 0 && <Badge count={c} />}
+                      </span>
+
+                      {/* Icon (cleanes Burger-Icon als Platzhalter) */}
+                      <span
+                        aria-hidden
+                        className={[
+                          'mb-3 inline-flex h-9 w-9 items-center justify-center rounded-xl border',
+                          active
+                            ? 'border-white/40 bg-white/10'
+                            : 'border-gray-200 dark:border-white/10 bg-white/70 dark:bg-white/10'
+                        ].join(' ')}
+                      >
+                        <svg viewBox="0 0 24 24" width="18" height="18">
+                          <path
+                            d="M4 7h16M4 12h16M4 17h10"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                          />
+                        </svg>
+                      </span>
+
+                      {/* Label + kleiner Chevron */}
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm font-semibold leading-5">{n.label}</span>
+                        <svg
+                          viewBox="0 0 24 24"
+                          width="16"
+                          height="16"
+                          aria-hidden
+                          className={active ? 'opacity-100' : 'opacity-60 group-hover:opacity-100'}
+                        >
+                          <path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </div>
+
+                      {/* dezenter Verlauf / Glow */}
+                      <span
+                        className={[
+                          'pointer-events-none absolute inset-0 rounded-2xl ring-1 ring-inset',
+                          active ? 'ring-white/30' : 'ring-gray-200/70 dark:ring-white/10'
+                        ].join(' ')}
+                      />
+                    </Link>
+                  );
+                })}
+              </div>
 
               {/* 🆕 Alles-als-gelesen */}
-{me && (
-  <motion.button
-    type="button"
-    onClick={markAllRead}
-    disabled={marking}
-    initial={false}
-    animate={{ scale: markedOk ? 1.01 : 1, boxShadow: markedOk ? '0 8px 24px rgba(59,130,246,.25)' : '0 1px 3px rgba(0,0,0,.06)' }}
-    className={`
-      relative mt-3 inline-flex w-full items-center justify-between gap-3 rounded-2xl px-4 py-3 text-sm font-medium
-      border bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-900
-      dark:from-white/5 dark:to-white/[.03] dark:text-blue-200
-      border-blue-100 dark:border-white/10
-      hover:from-blue-100 hover:to-indigo-100 dark:hover:from-white/10 dark:hover:to-white/[.07]
-      disabled:opacity-60
-    `}
-  >
-    <span className="inline-flex items-center gap-2">
-      {/* Icon / Spinner / Check */}
-      {marking ? (
-        <svg viewBox="0 0 24 24" width="16" height="16" className="animate-spin" aria-hidden>
-          <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" opacity=".25"/>
-          <path d="M21 12a9 9 0 0 0-9-9" fill="none" stroke="currentColor" strokeWidth="2"/>
-        </svg>
-      ) : markedOk ? (
-        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden>
-          <path d="M20 7l-9 9-5-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-        </svg>
-      ) : (
-        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden>
-          <path d="M3 12h12M3 6h18M3 18h18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-        </svg>
-      )}
-
-      <span className="truncate">
-        {markedOk ? 'Alles gelesen!' : 'Alles als gelesen markieren'}
-      </span>
-    </span>
-
-    {/* rechte Seite: kleiner Subtext + Badge */}
-    <span className="flex items-center gap-3">
-      <span className="hidden sm:block text-[11px] opacity-70">
-        News · Events · Gruppen
-      </span>
-      {counts.total > 0 && !markedOk && (
-        <span className="
-          inline-flex min-w-[1.5rem] h-6 px-2 items-center justify-center rounded-full text-[11px] font-semibold
-          bg-blue-600 text-white dark:bg-blue-500 shadow-sm
-        ">
-          {counts.total > 99 ? '99+' : counts.total}
-        </span>
-      )}
-    </span>
-
-    {/* sanfter Glanz beim Hover */}
-    <span className="pointer-events-none absolute inset-0 rounded-2xl ring-1 ring-inset ring-blue-200/50 dark:ring-white/10" />
-  </motion.button>
-)}
-
-              {me ? (
-                <form action="/api/logout" method="post" onSubmit={() => setMenuOpen(false)} className="mt-2">
-                  <button
-                    type="submit"
-                    className="inline-flex items-center gap-2 rounded-xl bg-red-600 hover:bg-red-700 text-white px-3 py-2 text-sm shadow-sm"
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden className="shrink-0">
-                      <path d="M12 2v10m6.36-6.36a9 9 0 11-12.72 0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
-                    Abmelden
-                  </button>
-                </form>
-              ) : (
-                <Link
-                  href="https://www.karl-marx-checknitz.de/"
-                  onClick={() => setMenuOpen(false)}
-                  className="inline-flex items-center gap-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-white/10 hover:bg-gray-50 dark:hover:bg-white/20 px-3 py-2 text-sm text-blue-600 dark:text-blue-300 shadow-sm mt-2"
+              {me && (
+                <motion.button
+                  type="button"
+                  onClick={markAllRead}
+                  disabled={marking}
+                  initial={false}
+                  animate={{ scale: markedOk ? 1.01 : 1, boxShadow: markedOk ? '0 8px 24px rgba(59,130,246,.25)' : '0 1px 3px rgba(0,0,0,.06)' }}
+                  className={`
+                    relative mt-4 inline-flex w-full items-center justify-between gap-3 rounded-2xl px-4 py-3 text-sm font-medium
+                    border bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-900
+                    dark:from-white/5 dark:to-white/[.03] dark:text-blue-200
+                    border-blue-100 dark:border-white/10
+                    hover:from-blue-100 hover:to-indigo-100 dark:hover:from-white/10 dark:hover:to-white/[.07]
+                    disabled:opacity-60
+                  `}
                 >
-                  Anmelden
-                </Link>
+                  <span className="inline-flex items-center gap-2">
+                    {marking ? (
+                      <svg viewBox="0 0 24 24" width="16" height="16" className="animate-spin" aria-hidden>
+                        <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" opacity=".25"/>
+                        <path d="M21 12a9 9 0 0 0-9-9" fill="none" stroke="currentColor" strokeWidth="2"/>
+                      </svg>
+                    ) : markedOk ? (
+                      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden>
+                        <path d="M20 7l-9 9-5-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    ) : (
+                      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden>
+                        <path d="M3 12h12M3 6h18M3 18h18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                      </svg>
+                    )}
+                    <span className="truncate">
+                      {markedOk ? 'Alles gelesen!' : 'Alles als gelesen markieren'}
+                    </span>
+                  </span>
+
+                  <span className="flex items-center gap-3">
+                    <span className="hidden sm:block text-[11px] opacity-70">News · Events · Gruppen</span>
+                    {counts.total > 0 && !markedOk && (
+                      <span className="
+                        inline-flex min-w-[1.5rem] h-6 px-2 items-center justify-center rounded-full text-[11px] font-semibold
+                        bg-blue-600 text-white dark:bg-blue-500 shadow-sm
+                      ">
+                        {counts.total > 99 ? '99+' : counts.total}
+                      </span>
+                    )}
+                  </span>
+                  <span className="pointer-events-none absolute inset-0 rounded-2xl ring-1 ring-inset ring-blue-200/50 dark:ring-white/10" />
+                </motion.button>
               )}
+
+              {/* Login / Logout */}
+              <div className="mt-3">
+                {me ? (
+                  <form action="/api/logout" method="post" onSubmit={() => setMenuOpen(false)}>
+                    <button
+                      type="submit"
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-red-600 hover:bg-red-700 text-white px-3 py-2 text-sm shadow-sm"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden className="shrink-0">
+                        <path d="M12 2v10m6.36-6.36a9 9 0 11-12.72 0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                      Abmelden
+                    </button>
+                  </form>
+                ) : (
+                  <Link
+                    href="https://www.karl-marx-checknitz.de/"
+                    onClick={() => setMenuOpen(false)}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-white/10 hover:bg-gray-50 dark:hover:bg-white/20 px-3 py-2 text-sm text-blue-600 dark:text-blue-300 shadow-sm"
+                  >
+                    Anmelden
+                  </Link>
+                )}
+              </div>
             </nav>
+            {/* ▲▲▲ Kachel-Layout ▲▲▲ */}
           </motion.div>
         )}
       </AnimatePresence>

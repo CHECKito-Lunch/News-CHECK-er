@@ -1,4 +1,5 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable prefer-const */
+ 
 import { NextRequest, NextResponse } from 'next/server';
 
 function normalizeHeader(h: string){
