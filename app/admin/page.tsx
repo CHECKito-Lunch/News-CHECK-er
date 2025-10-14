@@ -39,6 +39,7 @@ const tiles: Array<{
   { href: '/admin/users',         label: 'Benutzer',             icon: UserCircle2,  roles: ['admin','moderator','teamleiter'] },
   { href: '/admin/checkiade',     label: 'CHECKiade',            icon: Trophy,       roles: ['admin','teamleiter'] },
   { href: '/admin/feedback',      label: 'Feedbacks',            icon: Vote,         roles: ['admin','teamleiter'] },
+  { href: '/admin/qa',      label: 'Mitarbeiter Feedbacks',                    icon: Tags,         roles: ['admin','teamleiter'] },
 ];
 
 async function absoluteUrl(path: string) {

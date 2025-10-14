@@ -1,11 +1,40 @@
 {
   "name": "News-CHECK-er (Next.js)",
   "image": "mcr.microsoft.com/devcontainers/typescript-node:20",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
+      "version": "latest",
+      "moby": false
+    }
+  },
+  "mounts": [
+    "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind"
+  ],
   "forwardPorts": [3000],
   "postCreateCommand": "sudo apt-get update && sudo apt-get install -y git-lfs && git lfs install && npm ci",
+  "postStartCommand": "sudo sysctl -w fs.inotify.max_user_watches=524288 && sudo sysctl -w fs.inotify.max_user_instances=1024 && sudo sysctl -w fs.inotify.max_queued_events=32768",
   "customizations": {
     "vscode": {
-      "extensions": ["dbaeumer.vscode-eslint", "esbenp.prettier-vscode"]
+      "extensions": ["dbaeumer.vscode-eslint", "esbenp.prettier-vscode"],
+      "settings": {
+        "files.watcherExclude": {
+          "**/node_modules/**": true,
+          "**/.git/**": true,
+          "**/.next/**": true,
+          "**/out/**": true,
+          "**/build/**": true,
+          "**/dist/**": true,
+          "**/.turbo/**": true,
+          "**/.cache/**": true,
+          "**/coverage/**": true
+        },
+        "search.exclude": {
+          "**/node_modules/**": true,
+          "**/.next/**": true,
+          "**/dist/**": true,
+          "**/build/**": true
+        }
+      }
     }
   },
   "remoteUser": "node",

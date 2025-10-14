@@ -60,13 +60,24 @@ const boLinkFor = (f: FeedbackItem): string | null => {
   if (raw) return `${BO_BASE}?booking_number=${encodeURIComponent(String(raw).replace(/\D+/g,''))}`;
   return null;
 };
+
+// ⟵ NEU: Durchschnitt aus allen vorhandenen 4 Feldern
 const avgScore = (f: FeedbackItem) => {
-  const parts = [f.beraterfreundlichkeit, f.beraterqualifikation, f.angebotsattraktivitaet]
-    .filter((x): x is number => Number.isFinite(x as number) && (x as number) >= 1);
-  if (parts.length >= 2) return parts.reduce((s, n) => s + n, 0) / parts.length;
-  if (Number.isFinite(f.bewertung as number) && (f.bewertung as number) >= 1) return f.bewertung as number;
-  return null;
+  const vals = [
+    f.bewertung,
+    f.beraterfreundlichkeit,
+    f.beraterqualifikation,
+    f.angebotsattraktivitaet,
+  ].filter((x): x is number =>
+    Number.isFinite(x as number) &&
+    (x as number) >= 1 &&
+    (x as number) <= 5
+  );
+
+  if (vals.length === 0) return null;
+  return vals.reduce((s, n) => s + n, 0) / vals.length;
 };
+
 const fmtAvg = (n: number | null) => Number.isFinite(n as any) ? (n as number).toFixed(2) : '–';
 const noteColor = (v: number | null | undefined) =>
   !Number.isFinite(v as any) ? 'text-gray-500'
@@ -290,13 +301,23 @@ export default function TeamHubPage() {
   const kpis = useMemo(()=>{
     const arr = sortedItems;
     const n = arr.length;
-    const scores = arr.map(avgScore).filter((x): x is number => Number.isFinite(x as any));
+
+    // per-Feedback-Ø auf Basis der vier Felder
+    const scores = arr
+      .map(avgScore)
+      .filter((x): x is number => Number.isFinite(x as any));
+
     const avg = scores.length ? (scores.reduce((s,n)=>s+n,0)/scores.length) : null;
+
+    // Negativ-Anzahl und -Prozent bezogen auf per-Feedback-Ø
     const neg = scores.filter(s=>s<=3.0).length;
+    const negPct = scores.length ? Math.round(100*neg/scores.length) : 0;
+
     const rekla = arr.filter(f=>isTrueish(f.rekla)).length;
     const offen = arr.filter(f=>!isTrueish(f.geklaert)).length;
     const geloest = n - offen;
-    return { n, avg, neg, rekla, offen, geloest, negPct: n? Math.round(100*neg/n):0 };
+
+    return { n, avg, neg, rekla, offen, geloest, negPct };
   }, [sortedItems]);
 
   // Hilfsfunktionen: Gruppen öffnen/schließen

@@ -377,7 +377,7 @@ export default function HomePage() {
         {/* Events-Feed */}
         <section className={card + ' p-4'}>
           <div className={header}>
-            <h2 className="text-lg font-semibold">Events</h2>
+            <h2 className="text-lg font-semibold">Die Events</h2>
             <Link href="/events" className="text-sm text-blue-600 hover:underline">Alle Events →</Link>
           </div>
 

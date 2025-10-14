@@ -34,6 +34,7 @@ const NAV_ALL: Group[] = [
       { href: '/admin/tools',        label: 'Tools',             icon: Wrench,      roles: ['admin','moderator','teamleiter'] },
       { href: '/admin/kpis',         label: 'KPIs',              icon: Activity,    roles: ['admin','teamleiter'] },
       { href: '/admin/feedback',     label: 'Feedbacks',         icon: Vote,        roles: ['admin','teamleiter'] },
+      { href: '/admin/qa',     label: 'Mitarbeiter Feedbacks',         icon: Vote,        roles: ['admin','teamleiter'] },
     ],
   },
   {

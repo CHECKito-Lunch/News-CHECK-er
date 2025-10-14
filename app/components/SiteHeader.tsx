@@ -132,7 +132,8 @@ async function markAllRead() {
     { href: '/groups', label: 'Gruppen' },
     { href: '/events', label: 'Events' },
     { href: '/checkiade', label: 'CHECKiade' },
-    { href: '/feedback', label: 'deine Feedbacks' },
+    { href: '/feedback', label: 'Kunden Feedbacks' },
+    { href: '/quality', label: 'Mitarbeiter Feedbacks' },
   ];
 
   // 🔐 nur für Teamleiter sichtbar
