@@ -223,7 +223,7 @@ export default function AdminQAPage(){
                   {rows.map((r,idx)=>{
                     const hidden = dropDupes && dupInfo.dupIdx.has(idx);
                     const boDirect = r.booking_number
-  ? `https://backoffice.reisen.check24.de/booking/search/?booking_number=${encodeURIComponent(`id:${r.booking_number}`)}`
+  ? `https://backoffice.reisen.check24.de/booking/search/?booking_id=${encodeURIComponent(String(r.booking_number).replace(/\D+/g,''))}`
   : null;
                     return (
                       <tr key={idx} className={`border-t border-gray-100 dark:border-gray-800 ${hidden? 'opacity-50' : ''}`}>

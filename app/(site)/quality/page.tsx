@@ -13,6 +13,7 @@ type Item = {
   category?: string | null;
   severity?: string | null;
   description?: string | null;
+  booking_number_hash?: string | null; 
 };
 
 export default function QualityPage(){
@@ -48,6 +49,12 @@ export default function QualityPage(){
       .sort((a,b) => b[1]-a[1])
       .map(([type, count]) => ({ type, count }));
   }, [items]);
+
+const boUrl = (n?: string | null) =>
+  n && n.trim()
+    ? `https://backoffice.reisen.check24.de/booking/search/?booking_id=${encodeURIComponent(n.replace(/\D+/g,''))}`
+    : null;
+
 
   // NEW: Gefilterte Items (wenn keine Chips aktiv → alles zeigen)
   const filteredItems = useMemo(() => {
@@ -165,16 +172,28 @@ export default function QualityPage(){
             <ul className="divide-y divide-gray-200 dark:divide-gray-800 rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden">
               {(filteredItems||[]).map(it=> (
                 <li key={String(it.id)} className="p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-sm font-medium">{it.category || it.incident_type || '—'}</div>
-                      <div className="text-xs text-gray-500 line-clamp-1">{it.description || '—'}</div>
-                    </div>
-                    <div className="shrink-0 text-right">
-                      <div className="text-xs text-gray-500">{fmtDate(it.ts)}</div>
-                    </div>
-                  </div>
-                </li>
+  <div className="flex items-center justify-between gap-3">
+    <div className="min-w-0">
+      <div className="text-sm font-medium">{it.category || it.incident_type || '—'}</div>
+      <div className="text-xs text-gray-500 line-clamp-1">{it.description || '—'}</div>
+    </div>
+    <div className="shrink-0 text-right flex items-center gap-2">
+      {boUrl(it.booking_number_hash) && (
+        <a
+          href={boUrl(it.booking_number_hash)!}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center px-2 py-0.5 rounded border text-xs
+                     bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
+          title="Im Backoffice öffnen"
+        >
+          BO
+        </a>
+      )}
+      <div className="text-xs text-gray-500">{fmtDate(it.ts)}</div>
+    </div>
+  </div>
+</li>
               ))}
               {(filteredItems||[]).length===0 && <li className="p-3 text-sm text-gray-500">Keine Einträge im Zeitraum.</li>}
             </ul>

@@ -13,7 +13,10 @@ export async function GET(req: NextRequest){
   if (authError || !userId) return NextResponse.json({ ok:false, error:'unauthorized' }, { status: 401 });
 
   const sb = supabaseServer();
-  let q = (await sb).from('qa_incidents').select('id, ts, incident_type, category, severity, description').eq('user_id', userId).order('ts', { ascending:false });
+  let q = (await sb)  .from('qa_incidents')
+  .select('id, ts, incident_type, category, severity, description, booking_number_hash') // ← neu
+  .eq('user_id', userId)
+  .order('ts', { ascending:false });
   if (from) q = q.gte('ts', from);
   if (to)   q = q.lte('ts', to);
   const { data, error } = await q;

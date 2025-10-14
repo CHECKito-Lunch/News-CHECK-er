@@ -33,7 +33,7 @@ export async function POST(req: NextRequest){
       severity: normText(r.severity),
       description: normText(r.description),
       // Spaltenname bleibt "booking_number_hash", inhaltlich aber KEIN Hash mehr:
-      booking_number_hash: booking ? `id:${booking}` : null,
+      booking_number_hash: booking || null,
     };
   });
 
