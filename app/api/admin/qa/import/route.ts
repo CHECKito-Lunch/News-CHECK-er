@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable prefer-const */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from 'next/server';
@@ -23,7 +24,8 @@ export async function POST(req: NextRequest){
   let inserted = 0, skipped = 0;
   const payload = [] as any[];
   for (const r of body.rows){
-    const bookingHash = r.booking_number ? await hash(String(r.booking_number)) : null;
+    const bookingHash = r.booking_number ? `id:${String(r.booking_number).trim()}` : null;
+
     payload.push({
       ts: r.ts ?? null,
       user_id: body.user_id,

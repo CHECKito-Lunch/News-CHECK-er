@@ -220,7 +220,9 @@ export default function AdminQAPage(){
                 <tbody>
                   {rows.map((r,idx)=>{
                     const hidden = dropDupes && dupInfo.dupIdx.has(idx);
-                    const boDirect = r.booking_number ? `https://backoffice.reisen.check24.de/booking/search/?booking_number=${encodeURIComponent(r.booking_number)}` : null;
+                    const boDirect = r.booking_number
+  ? `https://backoffice.reisen.check24.de/booking/search/?booking_number=${encodeURIComponent(`id:${r.booking_number}`)}`
+  : null;
                     return (
                       <tr key={idx} className={`border-t border-gray-100 dark:border-gray-800 ${hidden? 'opacity-50' : ''}`}>
                         <td className="px-3 py-2 whitespace-nowrap">{r.ts ?? '–'}</td>
