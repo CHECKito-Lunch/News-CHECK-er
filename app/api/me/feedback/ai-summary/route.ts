@@ -36,19 +36,25 @@ export async function POST(req: NextRequest) {
       text: (i.kommentar || '').trim(),
     }));
 
-    const sys = [
-      'Du bist eine Assistenz, die Kundenfeedback wertschätzend, neutral und präzise zu kurzen Stichpunkten zusammenfasst.',
-      'Sprache: Deutsch. Zielgruppe: internes Serviceteam.',
-      'Gib ausschließlich JSON zurück im Format {"praise":[],"neutral":[],"improve":[]}.',
-      'Jeder Bulletpunkt sollte 1 Satz sein, maximal ~18 Wörter, keine Schuldzuweisung, keine personenbezogenen Daten, in "Du" Form, du sprichst sozusagen Feedback an den Mitarbeiter aus.',
-      'Nutze neutrale Begriffe (z.B. "könnte" statt "muss"). Fasse Redundanzen zusammen.',
-    ].join(' ');
+const sys = [
+  'Du bist eine Assistenz, die Mitarbeiterfeedback entlang der CHECK24-Firmenwerte analysiert und in wertschätzende, klare und kurze Stichpunkte überführt.',
+  'Sprache: Deutsch. Zielgruppe: internes Serviceteam (Führungskraft + Mitarbeiter).',
+  'Strukturiere dein Feedback im JSON-Format {"praise":[],"neutral":[],"improve":[]}.',
+  'Jeder Stichpunkt bezieht sich auf mindestens einen der folgenden Werte: Zielgerichtete Kommunikation, Offenheit & Lernbereitschaft, Kundenorientierung, Fachkompetenz, Excellence in Execution, Ergebnisorientierung, Commitment.',
+  'Jeder Stichpunkt soll 1 präziser Satz sein, maximal 18 Wörter, ohne Schuldzuweisungen oder personenbezogene Daten.',
+  'Sprich in der "Du"-Form (direktes, respektvolles Feedback an den Mitarbeiter).',
+  'Verwende neutrale, motivierende Formulierungen ("könntest", "zeigt", "achtet auf", "unterstützt").',
+  'Fasse Redundanzen zusammen, halte den Ton professionell, lösungsorientiert und positiv. Keine Floskeln, kein künstliches Lob.',
+].join(' ');
 
-    const user = [
-      'Erzeuge eine kurze Auswertung in drei Kategorien: 1) Was wird gelobt? 2) Was ist neutral? 3) Was ist verbesserungswürdig?',
-      'Nutze die folgenden Einträge (JSON):',
-      JSON.stringify({ items: compact }).slice(0, 120_000), // Sicherheitsgrenze
-    ].join('\n');
+const user = [
+  'Erzeuge eine kurze Auswertung in drei Kategorien:',
+  '1) Was wird gelobt (praise)?',
+  '2) Was ist neutral (neutral)?',
+  '3) Was ist verbesserungswürdig (improve)?',
+  'Berücksichtige dabei die CHECK24-Verhaltensanker und leite sie aus den folgenden Einträgen ab:',
+  JSON.stringify({ items: compact }).slice(0, 120_000),
+].join('\n');
 
     const resp = await client.chat.completions.create({
       model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
