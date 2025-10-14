@@ -6,9 +6,6 @@ import { useEffect, useState } from 'react';
 import { ArrowUp } from 'lucide-react';
 import SiteHeader from '../components/SiteHeader';
 
-// gleiche Breite wie im Admin (bei Bedarf hier zentral ändern):
-const SHELL_WIDTH = 'max-w-30xl';
-
 function ScrollToTopButton() {
   const [visible, setVisible] = useState(false);
 
@@ -45,9 +42,9 @@ export default function SiteLayout({ children }: { children: ReactNode }) {
     <div className="min-h-screen relative">
       <SiteHeader />
 
-      <main className={`container max-w-15xl mx-auto px-4 py-6`}>
-        {children}
-      </main>
+ <main className="w-full max-w-[1920px] mx-auto px-4 py-6">
+  {children}
+</main>
 
       {/* Global Sticky "UP" Button */}
       <ScrollToTopButton />

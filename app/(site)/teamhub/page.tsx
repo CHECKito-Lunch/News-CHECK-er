@@ -457,43 +457,6 @@ export default function TeamHubPage() {
               <option value="">Alle Kanäle</option>
               {allChannels.map(c => (<option key={c} value={c}>{c}</option>))}
             </select>
-
-            <input
-              value={fTemplate}
-              onChange={e=>setFTemplate(e.target.value)}
-              placeholder="Template suchen…"
-              className="w-64 md:w-72 px-2 py-1.5 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10"
-              aria-label="Template"
-            />
-
-            <input
-              value={fComment}
-              onChange={e=>setFComment(e.target.value)}
-              placeholder="Kommentar suchen…"
-              className="w-64 md:w-80 px-2 py-1.5 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10"
-              aria-label="Kommentar"
-            />
-
-            <input
-              value={fScoreMin}
-              onChange={e=>setFScoreMin(e.target.value)}
-              placeholder="Ø min"
-              inputMode="decimal"
-              className="w-24 px-2 py-1.5 rounded-lg border text-right dark:border-gray-700 bg-white dark:bg-white/10"
-              aria-label="Mindestscore"
-            />
-
-            <select
-              value={fRekla}
-              onChange={e=>setFRekla(e.target.value as any)}
-              className="w-40 px-2 py-1.5 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10"
-              aria-label="Reklamation"
-            >
-              <option value="any">Rekla: Alle</option>
-              <option value="rekla">Nur Rekla</option>
-              <option value="none">Ohne Rekla</option>
-            </select>
-
             <select
               value={fStatus}
               onChange={e=>setFStatus(e.target.value as any)}

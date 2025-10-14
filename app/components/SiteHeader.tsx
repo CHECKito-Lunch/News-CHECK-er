@@ -180,7 +180,7 @@ async function markAllRead() {
   
   return (
     <header className="sticky top-0 z-30 border-b border-gray-200 bg-white/70 dark:bg-gray-900/70 backdrop-blur">
-      <div className="container max-w-15xl mx-auto flex items-center justify-between py-3">
+      <div className="w-full max-w-full 2xl:max-w-[1920px] mx-auto px-4 py-6 flex items-center justify-between">
         <div className="w-10 flex items-center">
           <button
             className="relative inline-flex items-center justify-center w-9 h-9 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-white/10 hover:bg-gray-50 dark:hover:bg-white/20 shadow-sm"

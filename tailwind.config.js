@@ -1,5 +1,7 @@
 /** @type {import('tailwindcss').Config} */
-module.exports = {
+import typography from '@tailwindcss/typography';
+
+const config = {
   darkMode: 'class', // statt 'media'
   content: [
     "./app/**/*.{js,ts,jsx,tsx}",
@@ -7,7 +9,13 @@ module.exports = {
     "./components/**/*.{js,ts,jsx,tsx}"
   ],
   theme: {
-    extend: {}
+    extend: {
+      maxWidth: {
+        'site': '1980px', // eigener Name
+      },
+    },
   },
-  plugins: [require('@tailwindcss/typography')],
+  plugins: [typography],
 };
+
+export default config;

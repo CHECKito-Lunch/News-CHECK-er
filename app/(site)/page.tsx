@@ -297,7 +297,7 @@ export default function HomePage() {
   );
 
   return (
-    <div className="container max-w-7xl mx-auto py-6 space-y-8">
+    <div className="w-full max-w-full 2xl:max-w-[1920px] mx-auto py-6 space-y-8">
       {/* KPIs · Tools · Kalender */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* KPIs */}

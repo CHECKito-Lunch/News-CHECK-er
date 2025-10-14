@@ -29,7 +29,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
 
         {/* Main */}
         <main className="flex-1 px-4 sm:px-8 py-6">
-          <div className="mx-auto max-w-[1920px]">
+          <div className="w-full max-w-full 2xl:max-w-[1920px] mx-auto px-4 py-6">
             <div className="rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 p-6 shadow-sm">
               {children}
             </div>
