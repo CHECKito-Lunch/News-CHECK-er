@@ -1,13 +1,8 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { NextRequest, NextResponse } from 'next/server';
 
-// Robustes Parsing für deutsche CSV/TSV-Exports (UTF-8).
-// Erkennt Trennzeichen (\t, ;, ,) und mappt:
-// Feedback-ID | Verursacher | Verursacher Team | Melder | Melder Team | Booking-ID | Fehlertyp | Kommentar | Datum
-
 function normalizeHeader(h: string){
   const map: Record<string, string> = { 'ä':'ae','ö':'oe','ü':'ue','ß':'ss' };
-  // eslint-disable-next-line prefer-const
   let s = h.replace(/^\uFEFF/, '') // BOM entfernen
            .trim().toLowerCase()
            .replace(/[äöüß]/g, ch => map[ch] || ch)
@@ -16,34 +11,43 @@ function normalizeHeader(h: string){
   return s;
 }
 
-// Wählt den Delimiter, der über die ersten Zeilen die stabilste/größte Spaltenzahl ergibt.
-function detectDelimiter(lines: string[]){
-  const candidates: string[] = ['\t','; ',',']; // Tab, Semikolon, Komma
-  const sample = lines.slice(0, Math.min(lines.length, 10)).map(l => l.replace(/^\uFEFF/, ''));
+// Kandidaten inkl. Fallback: 2+ Whitespaces
+type Splitter = { label: string; split: (s: string) => string[] };
 
-  const score = (d:string) => {
-    const counts = sample.map(l => l.split(d).length);
-    // Wir bevorzugen Delimiter mit >1 Spalten; Metrik: Median, dann Max als Tiebreaker
-    const sorted = counts.slice().sort((a,b)=>a-b);
-    const median = sorted[Math.floor(sorted.length/2)] || 0;
-    const max = Math.max(...counts);
-    return { median, max };
-  };
+function buildCandidates(): Splitter[] {
+  return [
+    { label: '\\t', split: (s) => s.split('\t') },
+    { label: ';',  split: (s) => s.split(';')  },
+    { label: ',',  split: (s) => s.split(',')  },
+    // Fallback: mind. zwei Whitespaces als Trenner (oft bei Copy/Paste)
+    { label: '\\s{2,}', split: (s) => s.trim().split(/\s{2,}/) },
+  ];
+}
 
-  const ranked = candidates
-    .map(d => ({ d, ...score(d) }))
-    .sort((a,b) => (b.median - a.median) || (b.max - a.max));
-  const best = ranked[0];
+function pickSplitter(lines: string[]): Splitter {
+  const header = (lines.find(l => l.trim().length>0) || '').replace(/^\uFEFF/,'');
+  const candidates = buildCandidates();
+  // Scoren nach Spaltenanzahl
+  const scored = candidates.map(c => ({ c, cols: c.split(header).length }));
+  scored.sort((a,b)=> b.cols - a.cols);
+  // Wenn alle nur 1 Spalte ergeben, nimm den Whitespaces-Fallback
+  return scored[0].cols > 1 ? scored[0].c : candidates[candidates.length-1];
+}
 
-  // Fallback auf Semikolon, falls nichts Sinnvolles gefunden wird
-  return (best && (best.median > 1 || best.max > 1)) ? best.d : ';';
+// immer string zurückgeben → TS-typsicher
+function dequote(v?: string | null): string {
+  if (v == null) return '';
+  let s = v.trim();
+  if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) {
+    s = s.slice(1, -1).replace(/""/g, '"');
+  }
+  return s;
 }
 
 function parseGermanDate(s?: string|null){
   if (!s) return null;
-  // z.B. "16.09.25 07:22" oder "16.09.2025 07:22"
   const m = String(s).trim().match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})(?:\s+(\d{1,2}):(\d{2}))?$/);
-  if (!m) return s; // wenn unbekanntes Format, Rohwert zurückgeben
+  if (!m) return s; // unbekanntes Format => Rohwert belassen
   const dd = parseInt(m[1],10), MM = parseInt(m[2],10), yy = parseInt(m[3],10);
   const HH = m[4] ? parseInt(m[4],10) : 0;
   const mm = m[5] ? parseInt(m[5],10) : 0;
@@ -53,15 +57,14 @@ function parseGermanDate(s?: string|null){
 }
 
 function parseCSV(text: string){
-  // Zeilen holen (auch leere am Ende raus)
   const lines = text.split(/\r?\n/).filter(l => l.length > 0);
   if (lines.length===0) return [];
 
-  const delim = detectDelimiter(lines);
+  const splitter = pickSplitter(lines);
 
-  // Header parsen + normalisieren (BOM weg)
-  const headerRaw = lines[0].replace(/^\uFEFF/, '').split(delim).map(s=>s.trim());
-  const header = headerRaw.map(normalizeHeader);
+  // Header parsen + normalisieren
+  const headerRaw: string[] = splitter.split(lines[0].replace(/^\uFEFF/, '')).map(s => dequote(s));
+  const header: string[] = headerRaw.map(h => normalizeHeader(h));
 
   const idx = (keys: string[]) => header.findIndex(h => keys.includes(h));
 
@@ -77,8 +80,8 @@ function parseCSV(text: string){
   const i_agent_last   = idx(['agent_last','nachname']);
 
   const rows = lines.slice(1).map(line => {
-    const parts = line.split(delim);
-    const val = (i: number) => (i>=0 ? (parts[i]?.trim() || null) : null);
+    const parts: string[] = splitter.split(line).map(p => dequote(p));
+    const val = (i: number) => (i>=0 ? ((parts[i] ?? '').trim() || null) : null);
     const tsRaw = val(i_ts);
     const parsedTs = parseGermanDate(tsRaw);
     return {

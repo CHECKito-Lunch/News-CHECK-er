@@ -76,6 +76,8 @@ export default function AdminQAPage(){
         const j = await r.json().catch(()=>({ ok:false }));
         if (r.ok && j?.ok) {
           const parsed: ParsedRow[] = Array.isArray(j.rows) ? j.rows : [];
+          // Debug-Ausgabe , um zu sehen, was aus der API kommt:
+  console.log('parsed example row', Array.isArray(j.rows) ? j.rows[0] : j.rows);
           setRows(parsed);
           setSelectedIdx(new Set(parsed.map((_,i)=>i)));
           // erkannte Agenten sammeln
