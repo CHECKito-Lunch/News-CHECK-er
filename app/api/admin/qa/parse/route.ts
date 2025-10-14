@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import { NextRequest, NextResponse } from 'next/server';
 
 // Robustes Parsing für deutsche CSV/TSV-Exports (UTF-8).
@@ -15,14 +16,27 @@ function normalizeHeader(h: string){
   return s;
 }
 
-// Wählt den Trenner, der in der Kopfzeile die meisten Spalten erzeugt.
-// (Tab priorisiert, dann Semikolon, dann Komma)
+// Wählt den Delimiter, der über die ersten Zeilen die stabilste/größte Spaltenzahl ergibt.
 function detectDelimiter(lines: string[]){
-  const header = (lines.find(l => l.trim().length>0) || '').replace(/^\uFEFF/,'');
-  const candidates = ['\t','; ',','];
-  const scored = candidates.map(d => ({ d, cols: header.split(d).length }));
-  scored.sort((a,b)=> b.cols - a.cols);
-  return scored[0].d;
+  const candidates: string[] = ['\t','; ',',']; // Tab, Semikolon, Komma
+  const sample = lines.slice(0, Math.min(lines.length, 10)).map(l => l.replace(/^\uFEFF/, ''));
+
+  const score = (d:string) => {
+    const counts = sample.map(l => l.split(d).length);
+    // Wir bevorzugen Delimiter mit >1 Spalten; Metrik: Median, dann Max als Tiebreaker
+    const sorted = counts.slice().sort((a,b)=>a-b);
+    const median = sorted[Math.floor(sorted.length/2)] || 0;
+    const max = Math.max(...counts);
+    return { median, max };
+  };
+
+  const ranked = candidates
+    .map(d => ({ d, ...score(d) }))
+    .sort((a,b) => (b.median - a.median) || (b.max - a.max));
+  const best = ranked[0];
+
+  // Fallback auf Semikolon, falls nichts Sinnvolles gefunden wird
+  return (best && (best.median > 1 || best.max > 1)) ? best.d : ';';
 }
 
 function parseGermanDate(s?: string|null){
@@ -39,18 +53,19 @@ function parseGermanDate(s?: string|null){
 }
 
 function parseCSV(text: string){
+  // Zeilen holen (auch leere am Ende raus)
   const lines = text.split(/\r?\n/).filter(l => l.length > 0);
   if (lines.length===0) return [];
 
   const delim = detectDelimiter(lines);
 
-  // Header parsen + normalisieren
+  // Header parsen + normalisieren (BOM weg)
   const headerRaw = lines[0].replace(/^\uFEFF/, '').split(delim).map(s=>s.trim());
   const header = headerRaw.map(normalizeHeader);
 
   const idx = (keys: string[]) => header.findIndex(h => keys.includes(h));
 
-  // Mapping der relevanten Spalten
+  // Mapping der relevanten Spalten (case-insensitive dank normalizeHeader)
   const i_ts           = idx(['datum','ts','timestamp']);
   const i_type         = idx(['fehlertyp','incident_type','typ']);
   const i_category     = idx(['category','kategorie']);          // optional
