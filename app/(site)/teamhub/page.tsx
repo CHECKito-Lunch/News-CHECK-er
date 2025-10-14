@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { authedFetch } from '@/lib/fetchWithSupabase';
+import QAWidget from './QAWidget';
 
 /* ---------------- Types ---------------- */
 type Member = { user_id: string; name: string };
@@ -689,6 +690,8 @@ function LabelChips({
     </div>
   );
 }
+
+<QAWidget />
 
 /* ---------------- Label-Manager (Modal) ---------------- */
 function LabelManagerButton() {
