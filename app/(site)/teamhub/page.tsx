@@ -595,64 +595,106 @@ export default function TeamHubPage() {
   );
 }
 
-/* ---------------- Kommentar-Thread Hub ---------------- */
-function CommentThreadHub({ ownerId, onJumpToFeedback }:{ ownerId:string; onJumpToFeedback:(feedbackId:number|string)=>void }){
+/* ---------------- Kommentar-Thread Hub (an API angepasst) ---------------- */
+function CommentThreadHub({
+  ownerId,
+  onJumpToFeedback,
+}: {
+  ownerId: string;
+  onJumpToFeedback: (feedbackId: number | string) => void;
+}) {
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState<ThreadListItem[]>([]);
-  const [onlyUnread, setOnlyUnread] = useState(true);
+  const [onlyUnread, setOnlyUnread] = useState<boolean>(false); // Start: ALLE Threads zeigen
   const [q, setQ] = useState('');
 
-  useEffect(()=>{(async()=>{
-    if (!ownerId) { setItems([]); return; }
-    setLoading(true);
-    try {
-      // Falls dein Backend einen anderen Mode/Path hat, hier anpassen:
-      const r = await authedFetch(`/api/teamhub/threads?owner_id=${encodeURIComponent(ownerId)}&mode=hub&limit=50`, { cache:'no-store' });
-      const j = await r.json().catch(()=>null);
-      const arr: ThreadListItem[] = Array.isArray(j?.items) ? j.items : [];
-      setItems(arr);
-    } finally { setLoading(false); }
-  })()}, [ownerId]);
+  // API -> View-Model mappen
+  function normalize(rows: any[]): ThreadListItem[] {
+    return (rows || []).map((r: any, i: number) => ({
+      thread_id: r.feedback_id ?? i,
+      feedback_id: r.feedback_id ?? i,
+      // sinnvolles Subject bauen: "Max Mustermann · channel"
+      subject: [r.member_name, r.channel].filter(Boolean).join(' · ') || '—',
+      // API liefert keinen Autor des letzten Kommentars -> ersatzweise Membername
+      last_author: r.member_name || '—',
+      last_body: r.last_comment_snippet || '',
+      last_at: r.last_comment_at || new Date(0).toISOString(),
+      unread_total: Number(r.unread ?? 0),
+      // API liefert (noch) kein last_by_owner -> weglassen/false
+      last_by_owner: undefined,
+    }));
+  }
 
-  const filtered = useMemo(()=>{
+  useEffect(() => {
+    (async () => {
+      if (!ownerId) {
+        setItems([]);
+        return;
+      }
+      setLoading(true);
+      try {
+        const r = await authedFetch(
+          `/api/teamhub/threads?owner_id=${encodeURIComponent(ownerId)}&mode=threads&limit=50&only_unread=${onlyUnread ? 'true' : 'false'}`,
+          { cache: 'no-store' }
+        );
+        const j = await r.json().catch(() => null);
+        const arr = Array.isArray(j?.items) ? normalize(j.items) : [];
+        // sort nach letztem Kommentar
+        arr.sort((a, b) => new Date(b.last_at).getTime() - new Date(a.last_at).getTime());
+        setItems(arr);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [ownerId, onlyUnread]);
+
+  const filtered = useMemo(() => {
     let arr = items;
-    if (onlyUnread) arr = arr.filter(t=> (t.unread_total||0) > 0);
     if (q.trim()) {
       const s = q.trim().toLowerCase();
-      arr = arr.filter(t=>
-        t.subject.toLowerCase().includes(s) ||
-        t.last_body.toLowerCase().includes(s) ||
-        t.last_author.toLowerCase().includes(s)
+      arr = arr.filter(
+        (t) =>
+          (t.subject || '').toLowerCase().includes(s) ||
+          (t.last_body || '').toLowerCase().includes(s) ||
+          (t.last_author || '').toLowerCase().includes(s)
       );
     }
-    return arr.sort((a,b)=> new Date(b.last_at).getTime() - new Date(a.last_at).getTime());
-  }, [items, onlyUnread, q]);
+    return arr;
+  }, [items, q]);
 
   return (
     <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
       <div className="p-3 border-b border-gray-100 dark:border-gray-800 flex items-center gap-2">
         <div className="font-semibold text-sm">Kommentar-Threads</div>
-        <span className="ml-auto text-xs text-gray-500">{loading? 'lädt…' : `${filtered.length}/${items.length}`}</span>
+        <span className="ml-auto text-xs text-gray-500">
+          {loading ? 'lädt…' : `${filtered.length}/${items.length}`}
+        </span>
       </div>
+
       <div className="p-3 flex items-center gap-2">
         <input
           value={q}
-          onChange={e=>setQ(e.target.value)}
+          onChange={(e) => setQ(e.target.value)}
           placeholder="Suchen…"
           className="flex-1 px-2 py-1.5 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10 text-sm"
         />
         <label className="text-xs inline-flex items-center gap-2 select-none">
-          <input type="checkbox" checked={onlyUnread} onChange={e=>setOnlyUnread(e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={onlyUnread}
+            onChange={(e) => setOnlyUnread(e.target.checked)}
+          />
           nur Ungelesene
         </label>
       </div>
+
       <ul className="divide-y divide-gray-100 dark:divide-gray-800 max-h-[520px] overflow-auto">
-        {filtered.length===0 && !loading && (
+        {filtered.length === 0 && !loading && (
           <li className="p-3 text-sm text-gray-500">Keine Threads</li>
         )}
-        {filtered.map(t=> (
+        {filtered.map((t) => (
           <li key={String(t.thread_id)} className="p-3 hover:bg-gray-50 dark:hover:bg-white/5 transition">
-            <button className="w-full text-left" onClick={()=>onJumpToFeedback(t.feedback_id)}>
+            <button className="w-full text-left" onClick={() => onJumpToFeedback(t.feedback_id)}>
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0">
                   <div className="text-sm font-medium truncate">{t.subject}</div>
@@ -661,13 +703,17 @@ function CommentThreadHub({ ownerId, onJumpToFeedback }:{ ownerId:string; onJump
                     <span> · {fmtDateTimeBerlin(t.last_at)}</span>
                   </div>
                 </div>
-                {t.unread_total>0 && (
+                {t.unread_total > 0 && (
                   <span className="shrink-0 inline-flex items-center justify-center text-[11px] min-w-6 h-6 px-2 rounded-full bg-rose-100 text-rose-700 border border-rose-200">
                     {t.unread_total}
                   </span>
                 )}
               </div>
-              <p className="mt-1 text-[13px] text-gray-700 dark:text-gray-300 line-clamp-2 whitespace-pre-wrap">{t.last_body}</p>
+              {t.last_body && (
+                <p className="mt-1 text-[13px] text-gray-700 dark:text-gray-300 line-clamp-2 whitespace-pre-wrap">
+                  {t.last_body}
+                </p>
+              )}
             </button>
           </li>
         ))}
@@ -676,6 +722,7 @@ function CommentThreadHub({ ownerId, onJumpToFeedback }:{ ownerId:string; onJump
     </div>
   );
 }
+
 
 /* ---------------- Label-Chips ---------------- */
 function LabelChips({
