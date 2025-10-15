@@ -96,6 +96,18 @@ const fmtMonthYearDE = (y: number, m1to12: number) => {
   return new Intl.DateTimeFormat('de-DE', { month: 'long', year: 'numeric' }).format(d);
 };
 
+/* --------------- Marks ------------------ */
+
+type MarkValue = -1 | 0 | 1 | 2;         // 👎 = -1, ⭐ = 1, 👍 = 2
+type MarkMap = Record<string, MarkValue>;
+
+type CommentRow = {
+  id: number|string;
+  body: string;
+  created_at: string;
+  author: string;
+};
+
 /* --------------- Page ------------------ */
 export default function TeamHubPage() {
   const [members, setMembers] = useState<Member[]>([]);
@@ -118,6 +130,8 @@ export default function TeamHubPage() {
   const [fStatus, setFStatus]     = useState<'any'|'offen'|'geklärt'>('any');
   const [fComment, setFComment]   = useState<string>(''); // contains
   const [fLabelId, setFLabelId]   = useState<number|''>(''); // by label id
+  const [marks, setMarks] = useState<MarkMap>({});
+  const [showOnlyMarked, setShowOnlyMarked] = useState(false);
 
   // Sortierung
   const [sort, setSort] = useState<'newest'|'score_desc'>('newest');
@@ -129,6 +143,33 @@ export default function TeamHubPage() {
 
   // Gruppen: offen/zu
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({}); // key => open?
+
+  // Marks laden
+  useEffect(() => {
+    (async () => {
+      if (!userId) { setMarks({}); return; }
+      const r = await authedFetch(`/api/teamhub/marks?owner_id=${encodeURIComponent(userId)}`, { cache: 'no-store' });
+      const j = await r.json().catch(()=>null);
+      const map: MarkMap = {};
+      for (const row of (j?.items||[])) map[String(row.feedback_id)] = (row.mark ?? 0) as MarkValue;
+      setMarks(map);
+    })();
+  }, [userId]);
+
+  async function setMark(feedbackId: number|string, next: MarkValue) {
+    const k = String(feedbackId);
+    const prev = marks[k] ?? 0;
+    // Toggle: erneuter Klick auf aktiven Zustand -> 0
+    const normalized: MarkValue = (prev === next) ? 0 : next;
+
+    setMarks(m => ({ ...m, [k]: normalized }));
+    const r = await authedFetch('/api/teamhub/marks', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json' },
+      body: JSON.stringify({ feedback_id: feedbackId, mark: normalized, owner_id: userId }),
+    });
+    if (!r.ok) setMarks(m => ({ ...m, [k]: prev })); // rollback
+  }
 
   useEffect(() => {
     const ac = new AbortController();
@@ -236,6 +277,7 @@ export default function TeamHubPage() {
       const isGekl = isTrueish(f.geklaert);
       if (fStatus === 'offen' && isGekl) return false;
       if (fStatus === 'geklärt' && !isGekl) return false;
+      if (showOnlyMarked && !(marks[String(f.id)] && marks[String(f.id)] !== 0)) return false;
       if (fComment && !(f.kommentar||'').toLowerCase().includes(fComment.toLowerCase())) return false;
       if (fLabelId !== '') {
         const ids = new Set((f.labels||[]).map(l=>l.id));
@@ -243,7 +285,7 @@ export default function TeamHubPage() {
       }
       return true;
     });
-  }, [items, fDateFrom, fDateTo, fKanal, fTemplate, fScoreMin, fRekla, fStatus, fComment, fLabelId]);
+  }, [items, fDateFrom, fDateTo, fKanal, fTemplate, fScoreMin, fRekla, fStatus, fComment, fLabelId, showOnlyMarked, marks]);
 
   // ---- SORTIEREN ----
   const sortedItems = useMemo(()=>{
@@ -462,13 +504,17 @@ export default function TeamHubPage() {
 
                 {/* Sortierung + Counter + Reset + Gruppen-Buttons */}
                 <div className="flex items-center gap-2 ml-auto">
+                  <label className="flex items-center gap-2 text-xs">
+                    <input type="checkbox" checked={showOnlyMarked} onChange={e=>setShowOnlyMarked(e.target.checked)} />
+                    nur Markierte
+                  </label>
                   <SortSwitcher sort={sort} setSort={setSort} />
                   <span className="text-xs text-gray-500 whitespace-nowrap">{sortedItems.length} Treffer</span>
                   <button
                     onClick={()=>{
                       setFDateFrom(''); setFDateTo(''); setFKanal('');
                       setFTemplate(''); setFScoreMin(''); setFRekla('any');
-                      setFStatus('any'); setFComment(''); setFLabelId('');
+                      setFStatus('any'); setFComment(''); setFLabelId(''); setShowOnlyMarked(false);
                     }}
                     className="px-2 py-1.5 rounded-lg border text-xs"
                   >
@@ -514,6 +560,7 @@ export default function TeamHubPage() {
                               const bo = boLinkFor(f);
                               const um = unreadMap[String(f.id)];
                               const hasNewFromOwner = !!(um && um.last_by_owner && um.unread_total > 0);
+                              const myMark = marks[String(f.id)] ?? 0;
                               return (
                                 <li id={`feedback-${f.id}`} key={String(f.id)} className="p-3 md:p-4 hover:bg-gray-50/60 dark:hover:bg-white/5 transition-colors">
                                   <div className="flex items-start gap-3">
@@ -536,6 +583,13 @@ export default function TeamHubPage() {
                                         </div>
 
                                         <div className="shrink-0 flex items-center gap-2">
+                                          {/* Markierungen */}
+                                          <div className="inline-flex items-center gap-1 mr-1">
+                                            <MarkBtn active={myMark===-1} title="Daumen runter" onClick={()=>setMark(f.id, -1)}>👎</MarkBtn>
+                                            <MarkBtn active={myMark===1}  title="Merken (Stern)" onClick={()=>setMark(f.id, 1)}>⭐</MarkBtn>
+                                            <MarkBtn active={myMark===2}  title="Daumen hoch"   onClick={()=>setMark(f.id, 2)}>👍</MarkBtn>
+                                          </div>
+
                                           {bo && (
                                             <a
                                               href={bo}
@@ -561,9 +615,10 @@ export default function TeamHubPage() {
                                         <p className="mt-2 text-sm text-gray-700 dark:text-gray-300 line-clamp-2">{f.kommentar}</p>
                                       )}
 
-                                      {/* Labels + Aktionen */}
+                                      {/* Labels + Aktionen + Kommentare */}
                                       <div className="mt-2 flex items-center gap-2 flex-wrap">
                                         <LabelChips feedbackId={f.id} labels={f.labels ?? []} allLabels={allLabelsGlobal} />
+                                        <FeedbackComments feedbackId={f.id} />
                                       </div>
                                     </div>
                                   </div>
@@ -908,6 +963,122 @@ function Kpi({ title, value, tone }:{ title:string; value:string; tone?:string }
     <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-3">
       <div className="text-[11px] text-gray-500">{title}</div>
       <div className={`text-lg font-semibold ${tone||''}`}>{value}</div>
+    </div>
+  );
+}
+
+/* ---------------- Mark-Button ---------------- */
+function MarkBtn({ active, onClick, title, children }:{
+  active:boolean; onClick:()=>void; title:string; children:React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      className={`inline-flex items-center justify-center w-7 h-7 rounded-full border text-[13px]
+                  ${active ? 'bg-amber-50 text-amber-700 border-amber-300'
+                           : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+/* ---------------- Kommentare (inline) ---------------- */
+function FeedbackComments({ feedbackId }: { feedbackId: number|string }) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [items, setItems] = useState<CommentRow[]>([]);
+  const [body, setBody] = useState('');
+  const [posting, setPosting] = useState(false);
+
+  async function load() {
+    setLoading(true);
+    try {
+      const r = await authedFetch(`/api/feedback/${feedbackId}/comments?limit=200`, { cache:'no-store' });
+      const j = await r.json().catch(()=>null);
+      const arr: CommentRow[] = Array.isArray(j?.items) ? j.items.map((x:any)=>({
+        id: x.id, body: x.body, created_at: x.created_at, author: x.author
+      })) : [];
+      setItems(arr.reverse()); // neueste unten
+    } finally { setLoading(false); }
+  }
+
+  useEffect(()=>{ if (open) load(); }, [open]);
+
+  async function submit() {
+    const text = body.trim();
+    if (!text) return;
+    setPosting(true);
+    try {
+      // optimistic
+      const temp: CommentRow = {
+        id: `tmp-${Date.now()}`,
+        author: 'Ich',
+        body: text,
+        created_at: new Date().toISOString(),
+      };
+      setItems(prev => [...prev, temp]);
+      setBody('');
+
+      const r = await authedFetch(`/api/feedback/${feedbackId}/comments`, {
+        method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ body: text })
+      });
+      if (!r.ok) {
+        // rollback
+        setItems(prev => prev.filter(c => c.id !== temp.id));
+        setBody(text);
+      } else {
+        load(); // IDs/Order syncen
+      }
+    } finally { setPosting(false); }
+  }
+
+  return (
+    <div className="w-full">
+      <button
+        onClick={()=>setOpen(o=>!o)}
+        className="text-[12px] px-2 py-1 rounded-full border hover:bg-gray-50"
+        title="Kommentare anzeigen / beantworten"
+      >
+        {open ? 'Kommentare ausblenden' : 'Kommentare anzeigen'}
+      </button>
+
+      {open && (
+        <div className="mt-2 rounded-lg border border-gray-200 dark:border-gray-800 w-full">
+          {/* Composer */}
+          <div className="p-2 border-b border-gray-100 dark:border-gray-800">
+            <div className="flex items-end gap-2">
+              <textarea
+                value={body}
+                onChange={e=>setBody(e.target.value)}
+                rows={2}
+                placeholder="Antwort schreiben…"
+                className="flex-1 px-2 py-1.5 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10 text-sm"
+              />
+              <button onClick={submit} disabled={posting||!body.trim()}
+                className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm disabled:opacity-60">
+                Senden
+              </button>
+            </div>
+          </div>
+
+          {/* Liste */}
+          <div className="max-h-64 overflow-auto divide-y divide-gray-100 dark:divide-gray-800">
+            {loading && <div className="p-3 text-sm text-gray-500">lädt…</div>}
+            {!loading && items.length===0 && <div className="p-3 text-sm text-gray-500">Keine Kommentare</div>}
+            {items.map(c=>(
+              <div key={String(c.id)} className="p-2 text-[13px]">
+                <div className="text-[11px] text-gray-500 mb-1">
+                  <span className="font-medium">{c.author||'—'}</span>
+                  <span> · {fmtDateTimeBerlin(c.created_at)}</span>
+                </div>
+                <pre className="whitespace-pre-wrap text-gray-800 dark:text-gray-200">{c.body}</pre>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
