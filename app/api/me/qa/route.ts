@@ -1,4 +1,4 @@
-// app/api/me/incidents/route.ts
+// app/api/me/qa/route.ts
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseServer } from '@/lib/supabase-server';
@@ -24,16 +24,14 @@ function addOneDayISO(dateYYYYMMDD: string) {
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    // erlauben sowohl komplette ISO-Timestamps als auch YYYY-MM-DD
     const fromParam = searchParams.get('from');
     const toParam   = searchParams.get('to');
 
-    // ---- Auth + UUID auflösen ------------------------------------------------
+    // --- Auth + UUID auflösen (robust) ---
     const me = await getUserFromRequest(req);
     const authError = me && 'error' in me ? (me as any).error : undefined;
     if (authError) return NextResponse.json({ ok:false, error:'unauthorized' }, { status:401 });
 
-    // Kandidaten aus Token/Objekt
     const cand =
       (me as any)?.sub ??
       (me as any)?.user?.sub ??
@@ -65,20 +63,18 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ ok:false, error:'invalid_user_uuid' }, { status:400 });
     }
 
-    // ---- Query ----------------------------------------------------------------
+    // --- Query ---
     let q = sb
       .from('qa_incidents')
       .select('id, ts, incident_type, category, severity, description, booking_number_hash')
       .eq('user_id', uuid)
       .order('ts', { ascending: false });
 
-    // Datumsfilter: wenn nur YYYY-MM-DD übergeben, dann:
-    //  from: gte(ts, from 00:00Z)
-    //  to:   lt(ts, (to + 1 Tag) 00:00Z)    -> exklusiv
+    // Datumsfilter: YYYY-MM-DD → inkl./exkl. sauber lösen
     if (fromParam) {
       const fromDateOnly = toISODateOnly(fromParam);
       if (fromDateOnly) {
-        q = q.gte('ts', fromDateOnly); // Supabase versteht YYYY-MM-DD als 00:00:00Z
+        q = q.gte('ts', fromDateOnly); // interpretiert als 00:00Z
       } else {
         q = q.gte('ts', fromParam);
       }
@@ -87,7 +83,7 @@ export async function GET(req: NextRequest) {
       const toDateOnly = toISODateOnly(toParam);
       if (toDateOnly) {
         const toPlus1 = addOneDayISO(toDateOnly);
-        q = q.lt('ts', toPlus1); // exklusiv (bis Vortag 23:59:59)
+        q = q.lt('ts', toPlus1); // exklusiv
       } else {
         q = q.lte('ts', toParam);
       }
@@ -98,7 +94,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ ok:true, items: data ?? [] });
   } catch (e) {
-    console.error('[me/incidents GET]', e);
+    console.error('[me/qa GET]', e);
     return NextResponse.json({ ok:false, error:'internal' }, { status:500 });
   }
 }
