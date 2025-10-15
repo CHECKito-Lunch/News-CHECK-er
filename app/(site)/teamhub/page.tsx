@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 /* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -30,12 +30,15 @@ type FeedbackItem = {
   labels?: Array<{id:number; name:string; color?:string}>;
 };
 
-type RecentComment = {
-  id: number;
-  feedback_id: number;
-  author: string;
-  body: string;
-  created_at: string;
+type ThreadListItem = {
+  thread_id: string|number;
+  feedback_id: string|number;
+  subject: string;
+  last_author: string;
+  last_body: string;
+  last_at: string; // ISO
+  unread_total: number; // for current viewer
+  last_by_owner?: boolean; // whether last msg is by owner
 };
 
 /* ---------------- Helpers ---------------- */
@@ -62,7 +65,7 @@ const boLinkFor = (f: FeedbackItem): string | null => {
   return null;
 };
 
-// ⟵ NEU: Durchschnitt aus allen vorhandenen 4 Feldern
+// ⟵ Ø aus allen vorhandenen 4 Feldern
 const avgScore = (f: FeedbackItem) => {
   const vals = [
     f.bewertung,
@@ -101,10 +104,6 @@ export default function TeamHubPage() {
   const [to, setTo]           = useState<string>('');
   const [items, setItems]     = useState<FeedbackItem[]>([]);
   const [loading, setLoading] = useState(false);
-
-  // Mitarbeiter-Kommentar-Karte
-  const [recent, setRecent] = useState<RecentComment[]>([]);
-  const [recentLoading, setRecentLoading] = useState(false);
 
   // Unread-Map (für „Neu vom Mitarbeiter“-Marker)
   const [unreadMap, setUnreadMap] = useState<Record<string, { last_by_owner:boolean; unread_total:number; last_comment_at:string }>>({});
@@ -180,20 +179,7 @@ export default function TeamHubPage() {
   useEffect(() => { load(); }, [userId]);
   useEffect(() => { if (userId) load(); }, [from, to]);
 
-  // Mitarbeiter-Kommentare laden
-  useEffect(() => {
-    if (!userId) { setRecent([]); return; }
-    (async () => {
-      setRecentLoading(true);
-      try {
-        const r = await authedFetch(`/api/teamhub/threads?mode=recent_owner_comments&owner_id=${encodeURIComponent(userId)}&limit=20`, { cache: 'no-store' });
-        const j = await r.json().catch(()=>null);
-        setRecent(Array.isArray(j?.items) ? j.items : []);
-      } finally { setRecentLoading(false); }
-    })();
-  }, [userId]);
-
-  // Unread-Map laden
+  // Unread-Map laden (für rote Punkte in der Liste + Hub)
   useEffect(()=>{(async()=>{
     if (!userId) { setUnreadMap({}); return; }
     const r = await authedFetch(`/api/teamhub/unread-map?owner_id=${encodeURIComponent(userId)}`, { cache:'no-store' });
@@ -333,7 +319,7 @@ export default function TeamHubPage() {
     setOpenGroups(prev => Object.keys(prev).length ? prev : initial);
   }, [groups.map(g=>g.key).join(',')]);
 
-  // Scroll zu Feedback aus „Neueste Kommentare des Mitarbeiters“
+  // Scroll zu Feedback (vom Thread-Hub aus)
   function scrollToFeedback(feedbackId:number|string){
     // Monatsgruppe ermitteln & öffnen
     const item = items.find(i => String(i.id) === String(feedbackId));
@@ -403,225 +389,290 @@ export default function TeamHubPage() {
         {labelsError && <span className="ml-2 text-xs text-red-600">{labelsError}</span>}
       </div>
 
-      {/* KPI-Übersicht (neu) */}
-      <section className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3 md:p-4">
-        <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-          <Kpi title="Ø-Score" value={fmtAvg(kpis.avg)} tone={kpis.avg!=null?noteColor(kpis.avg):'text-gray-500'} />
-          <Kpi title="Feedbacks" value={String(kpis.n)} />
-          <Kpi title="Negativ ≤3,0" value={`${kpis.neg} (${kpis.negPct}%)`} />
-          <Kpi title="Rekla" value={String(kpis.rekla)} />
-          <Kpi title="offen" value={String(kpis.offen)} />
-          <Kpi title="geklärt" value={String(kpis.geloest)} />
-        </div>
-      </section>
-
-      {/* Neueste Kommentare des Mitarbeiters */}
-      <section className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4">
-        <div className="flex items-center justify-between mb-2">
-          <div className="text-sm font-semibold">Neueste Kommentare des Mitarbeiters</div>
-          <div className="text-xs text-gray-500">{recentLoading ? 'lädt…' : `${recent.length} Einträge`}</div>
-        </div>
-        {recent.length === 0 ? (
-          <div className="text-sm text-gray-500">Keine Mitarbeiter-Kommentare vorhanden.</div>
-        ) : (
-          <ul className="divide-y divide-gray-200 dark:divide-gray-800">
-            {recent.map(rc => (
-              <li key={rc.id}>
-                <button
-                  onClick={()=>scrollToFeedback(rc.feedback_id)}
-                  className="w-full text-left py-2 hover:bg-gray-50 dark:hover:bg-white/5 rounded transition"
-                  title="Zum Feedback springen"
-                >
-                  <div className="text-[12px] text-gray-500 mb-1">
-                    <span className="font-medium">{rc.author}</span>
-                    <span> · {new Date(rc.created_at).toLocaleString('de-DE')}</span>
-                    <span className="ml-2 text-blue-600">zum Feedback springen ↘</span>
-                  </div>
-                  <p className="text-sm line-clamp-2 whitespace-pre-wrap">{rc.body}</p>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      {loading && <div className="text-sm text-gray-500">Lade…</div>}
-
-      {/* INBOX-LAYOUT */}
-      {!loading && (
-        <section className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
-          {/* Filterleiste (kompakt) */}
-          <div className="p-3 flex flex-wrap md:flex-nowrap items-center gap-2 border-b border-gray-100 dark:border-gray-800 text-sm">
-            <div className="flex items-center gap-2">
-              <input
-                type="date"
-                value={fDateFrom}
-                onChange={e=>setFDateFrom(e.target.value)}
-                className="w-40 px-2 py-1.5 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10"
-                aria-label="Von"
-              />
-              <span className="text-gray-400">–</span>
-              <input
-                type="date"
-                value={fDateTo}
-                onChange={e=>setFDateTo(e.target.value)}
-                className="w-40 px-2 py-1.5 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10"
-                aria-label="Bis"
-              />
-            </div>
-
-            <select
-              value={fKanal}
-              onChange={e=>setFKanal(e.target.value)}
-              className="w-48 px-2 py-1.5 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10"
-              aria-label="Kanal"
-            >
-              <option value="">Alle Kanäle</option>
-              {allChannels.map(c => (<option key={c} value={c}>{c}</option>))}
-            </select>
-            <select
-              value={fStatus}
-              onChange={e=>setFStatus(e.target.value as any)}
-              className="w-36 px-2 py-1.5 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10"
-              aria-label="Status"
-            >
-              <option value="any">Status: Alle</option>
-              <option value="offen">offen</option>
-              <option value="geklärt">geklärt</option>
-            </select>
-
-            <select
-              value={String(fLabelId)}
-              onChange={e=>setFLabelId(e.target.value===''?'':Number(e.target.value))}
-              className="w-56 px-2 py-1.5 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10"
-              aria-label="Label"
-            >
-              <option value="">Alle Labels</option>
-              {labelFilterOptions.map(([id,name])=> (
-                <option key={id} value={id}>{name}</option>
-              ))}
-            </select>
-
-            {/* Sortierung + Counter + Reset + Gruppen-Buttons */}
-            <div className="flex items-center gap-2 ml-auto">
-              <SortSwitcher sort={sort} setSort={setSort} />
-              <span className="text-xs text-gray-500 whitespace-nowrap">{sortedItems.length} Treffer</span>
-              <button
-                onClick={()=>{
-                  setFDateFrom(''); setFDateTo(''); setFKanal('');
-                  setFTemplate(''); setFScoreMin(''); setFRekla('any');
-                  setFStatus('any'); setFComment(''); setFLabelId('');
-                }}
-                className="px-2 py-1.5 rounded-lg border text-xs"
-              >
-                Filter zurücksetzen
-              </button>
-              <button onClick={()=>setAllGroups(true)} className="px-2 py-1.5 rounded-lg border text-xs">Alle öffnen</button>
-              <button onClick={()=>setAllGroups(false)} className="px-2 py-1.5 rounded-lg border text-xs">Alle schließen</button>
+      {/* KPI + Right Rail (Thread-Hub + QA) */}
+      <section className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+        <div className="lg:col-span-2 space-y-4">
+          {/* KPI-Übersicht */}
+          <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3 md:p-4">
+            <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+              <Kpi title="Ø-Score" value={fmtAvg(kpis.avg)} tone={kpis.avg!=null?noteColor(kpis.avg):'text-gray-500'} />
+              <Kpi title="Feedbacks" value={String(kpis.n)} />
+              <Kpi title="Negativ ≤3,0" value={`${kpis.neg} (${kpis.negPct}%)`} />
+              <Kpi title="Rekla" value={String(kpis.rekla)} />
+              <Kpi title="offen" value={String(kpis.offen)} />
+              <Kpi title="geklärt" value={String(kpis.geloest)} />
             </div>
           </div>
 
-          {/* Ergebnisliste (Monatsgruppen, einklappbar) */}
-          {loading ? (
-            <div className="p-6 text-sm text-gray-500">Lade…</div>
-          ) : groups.length === 0 ? (
-            <div className="p-6 text-sm text-gray-500">Keine Treffer</div>
-          ) : (
-            <div>
-              {groups.map(g => {
-                const open = !!openGroups[g.key];
-                return (
-                  <div key={g.key} className="border-b last:border-b-0 border-gray-100 dark:border-gray-800">
-                    <button
-                      onClick={()=>setOpenGroups(p=>({ ...p, [g.key]: !p[g.key] }))}
-                      className="w-full px-3 py-2 bg-gray-50/80 dark:bg-gray-800/80 backdrop-blur text-sm font-semibold border-b border-gray-100 dark:border-gray-800 capitalize flex items-center justify-between"
-                    >
-                      <div className="flex items-center gap-2">
-                        {/* roter Punkt links, wenn neue Mitarbeiter-Kommentare im Monat */}
-                        {g.hasNewOwner && !open && (
-                          <span className="inline-block w-2.5 h-2.5 rounded-full bg-rose-500" title="Neue Mitarbeiter-Kommentare" />
-                        )}
-                        <span>{g.label}</span>
-                      </div>
-                      <div className="flex items-center gap-3 text-xs text-gray-500">
-                        <span>{g.items.length} Feedbacks</span>
-                        <span className="text-gray-400">{open ? '▾' : '▸'}</span>
-                      </div>
-                    </button>
+          {/* INBOX-LAYOUT */}
+          {loading && <div className="text-sm text-gray-500">Lade…</div>}
+          {!loading && (
+            <section className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+              {/* Filterleiste (kompakt) */}
+              <div className="p-3 flex flex-wrap md:flex-nowrap items-center gap-2 border-b border-gray-100 dark:border-gray-800 text-sm">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="date"
+                    value={fDateFrom}
+                    onChange={e=>setFDateFrom(e.target.value)}
+                    className="w-40 px-2 py-1.5 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10"
+                    aria-label="Von"
+                  />
+                  <span className="text-gray-400">–</span>
+                  <input
+                    type="date"
+                    value={fDateTo}
+                    onChange={e=>setFDateTo(e.target.value)}
+                    className="w-40 px-2 py-1.5 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10"
+                    aria-label="Bis"
+                  />
+                </div>
 
-                    {open && (
-                      <ul className="divide-y divide-gray-100 dark:divide-gray-800">
-                        {g.items.map(f=>{
-                          const s  = avgScore(f);
-                          const bo = boLinkFor(f);
-                          const um = unreadMap[String(f.id)];
-                          const hasNewFromOwner = !!(um && um.last_by_owner && um.unread_total > 0);
-                          return (
-                            <li id={`feedback-${f.id}`} key={String(f.id)} className="p-3 md:p-4 hover:bg-gray-50/60 dark:hover:bg-white/5 transition-colors">
-                              <div className="flex items-start gap-3">
-                                {/* Neu-Dot */}
-                                <div className="pt-2">
-                                  {hasNewFromOwner && <span title="Neuer Kommentar vom Mitarbeiter" className="inline-block w-2.5 h-2.5 rounded-full bg-rose-500" />}
-                                </div>
+                <select
+                  value={fKanal}
+                  onChange={e=>setFKanal(e.target.value)}
+                  className="w-48 px-2 py-1.5 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10"
+                  aria-label="Kanal"
+                >
+                  <option value="">Alle Kanäle</option>
+                  {allChannels.map(c => (<option key={c} value={c}>{c}</option>))}
+                </select>
+                <select
+                  value={fStatus}
+                  onChange={e=>setFStatus(e.target.value as any)}
+                  className="w-36 px-2 py-1.5 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10"
+                  aria-label="Status"
+                >
+                  <option value="any">Status: Alle</option>
+                  <option value="offen">offen</option>
+                  <option value="geklärt">geklärt</option>
+                </select>
 
-                                {/* Hauptinhalt */}
-                                <div className="min-w-0 flex-1">
-                                  {/* Kopfzeile */}
-                                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                                    <div className="min-w-0 flex items-center gap-2 flex-wrap">
-                                      <span className="font-medium truncate max-w-[40ch]">{f.template_name ?? f.feedbacktyp}</span>
-                                      <Chip subtle>{f.feedbacktyp}</Chip>
-                                      {isTrueish(f.rekla) && (<Chip tone="amber">Rekla</Chip>)}
-                                      <Chip tone={isTrueish(f.geklaert) ? 'emerald' : 'slate'}>
-                                        {isTrueish(f.geklaert) ? 'geklärt' : 'offen'}
-                                      </Chip>
+                <select
+                  value={String(fLabelId)}
+                  onChange={e=>setFLabelId(e.target.value===''?'':Number(e.target.value))}
+                  className="w-56 px-2 py-1.5 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10"
+                  aria-label="Label"
+                >
+                  <option value="">Alle Labels</option>
+                  {labelFilterOptions.map(([id,name])=> (
+                    <option key={id} value={id}>{name}</option>
+                  ))}
+                </select>
+
+                {/* Sortierung + Counter + Reset + Gruppen-Buttons */}
+                <div className="flex items-center gap-2 ml-auto">
+                  <SortSwitcher sort={sort} setSort={setSort} />
+                  <span className="text-xs text-gray-500 whitespace-nowrap">{sortedItems.length} Treffer</span>
+                  <button
+                    onClick={()=>{
+                      setFDateFrom(''); setFDateTo(''); setFKanal('');
+                      setFTemplate(''); setFScoreMin(''); setFRekla('any');
+                      setFStatus('any'); setFComment(''); setFLabelId('');
+                    }}
+                    className="px-2 py-1.5 rounded-lg border text-xs"
+                  >
+                    Filter zurücksetzen
+                  </button>
+                  <button onClick={()=>setAllGroups(true)} className="px-2 py-1.5 rounded-lg border text-xs">Alle öffnen</button>
+                  <button onClick={()=>setAllGroups(false)} className="px-2 py-1.5 rounded-lg border text-xs">Alle schließen</button>
+                </div>
+              </div>
+
+              {/* Ergebnisliste (Monatsgruppen, einklappbar) */}
+              {loading ? (
+                <div className="p-6 text-sm text-gray-500">Lade…</div>
+              ) : groups.length === 0 ? (
+                <div className="p-6 text-sm text-gray-500">Keine Treffer</div>
+              ) : (
+                <div>
+                  {groups.map(g => {
+                    const open = !!openGroups[g.key];
+                    return (
+                      <div key={g.key} className="border-b last:border-b-0 border-gray-100 dark:border-gray-800">
+                        <button
+                          onClick={()=>setOpenGroups(p=>({ ...p, [g.key]: !p[g.key] }))}
+                          className="w-full px-3 py-2 bg-gray-50/80 dark:bg-gray-800/80 backdrop-blur text-sm font-semibold border-b border-gray-100 dark:border-gray-800 capitalize flex items-center justify-between"
+                        >
+                          <div className="flex items-center gap-2">
+                            {/* roter Punkt links, wenn neue Mitarbeiter-Kommentare im Monat */}
+                            {g.hasNewOwner && !open && (
+                              <span className="inline-block w-2.5 h-2.5 rounded-full bg-rose-500" title="Neue Mitarbeiter-Kommentare" />
+                            )}
+                            <span>{g.label}</span>
+                          </div>
+                          <div className="flex items-center gap-3 text-xs text-gray-500">
+                            <span>{g.items.length} Feedbacks</span>
+                            <span className="text-gray-400">{open ? '▾' : '▸'}</span>
+                          </div>
+                        </button>
+
+                        {open && (
+                          <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+                            {g.items.map(f=>{
+                              const s  = avgScore(f);
+                              const bo = boLinkFor(f);
+                              const um = unreadMap[String(f.id)];
+                              const hasNewFromOwner = !!(um && um.last_by_owner && um.unread_total > 0);
+                              return (
+                                <li id={`feedback-${f.id}`} key={String(f.id)} className="p-3 md:p-4 hover:bg-gray-50/60 dark:hover:bg-white/5 transition-colors">
+                                  <div className="flex items-start gap-3">
+                                    {/* Neu-Dot */}
+                                    <div className="pt-2">
+                                      {hasNewFromOwner && <span title="Neuer Kommentar vom Mitarbeiter" className="inline-block w-2.5 h-2.5 rounded-full bg-rose-500" />}
                                     </div>
 
-                                    <div className="shrink-0 flex items-center gap-2">
-                                      {bo && (
-                                        <a
-                                          href={bo}
-                                          target="_blank"
-                                          rel="noreferrer"
-                                          className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"
-                                          title="Im Backoffice suchen"
-                                        >
-                                          🔎 BO
-                                        </a>
+                                    {/* Hauptinhalt */}
+                                    <div className="min-w-0 flex-1">
+                                      {/* Kopfzeile */}
+                                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                                        <div className="min-w-0 flex items-center gap-2 flex-wrap">
+                                          <span className="font-medium truncate max-w-[40ch]">{f.template_name ?? f.feedbacktyp}</span>
+                                          <Chip subtle>{f.feedbacktyp}</Chip>
+                                          {isTrueish(f.rekla) && (<Chip tone="amber">Rekla</Chip>)}
+                                          <Chip tone={isTrueish(f.geklaert) ? 'emerald' : 'slate'}>
+                                            {isTrueish(f.geklaert) ? 'geklärt' : 'offen'}
+                                          </Chip>
+                                        </div>
+
+                                        <div className="shrink-0 flex items-center gap-2">
+                                          {bo && (
+                                            <a
+                                              href={bo}
+                                              target="_blank"
+                                              rel="noreferrer"
+                                              className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"
+                                              title="Im Backoffice suchen"
+                                            >
+                                              🔎 BO
+                                            </a>
+                                          )}
+                                          <span className="text-[11px] px-2 py-1 rounded-full bg-slate-50 text-slate-700 border border-slate-200">
+                                            {fmtDateTimeBerlin(getTs(f))}
+                                          </span>
+                                          <span className={`ml-2 text-xs px-2 py-1 rounded-full border ${noteColor(s)}`}>
+                                            Ø {fmtAvg(s)}
+                                          </span>
+                                        </div>
+                                      </div>
+
+                                      {/* Kommentar-Preview */}
+                                      {f.kommentar && (
+                                        <p className="mt-2 text-sm text-gray-700 dark:text-gray-300 line-clamp-2">{f.kommentar}</p>
                                       )}
-                                      <span className="text-[11px] px-2 py-1 rounded-full bg-slate-50 text-slate-700 border border-slate-200">
-                                        {fmtDateTimeBerlin(getTs(f))}
-                                      </span>
-                                      <span className={`ml-2 text-xs px-2 py-1 rounded-full border ${noteColor(s)}`}>
-                                        Ø {fmtAvg(s)}
-                                      </span>
+
+                                      {/* Labels + Aktionen */}
+                                      <div className="mt-2 flex items-center gap-2 flex-wrap">
+                                        <LabelChips feedbackId={f.id} labels={f.labels ?? []} allLabels={allLabelsGlobal} />
+                                      </div>
                                     </div>
                                   </div>
-
-                                  {/* Kommentar-Preview */}
-                                  {f.kommentar && (
-                                    <p className="mt-2 text-sm text-gray-700 dark:text-gray-300 line-clamp-2">{f.kommentar}</p>
-                                  )}
-
-                                  {/* Labels + Aktionen */}
-                                  <div className="mt-2 flex items-center gap-2 flex-wrap">
-                                    <LabelChips feedbackId={f.id} labels={f.labels ?? []} allLabels={allLabelsGlobal} />
-                                    {/* „öffnen“ Link entfernt wie gewünscht */}
-                                  </div>
-                                </div>
-                              </div>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
           )}
-        </section>
-      )}
+        </div>
+
+        {/* Right Rail: Kommentar-Thread Hub & QA */}
+        <aside className="space-y-4 sticky top-4">
+          <CommentThreadHub ownerId={userId} onJumpToFeedback={scrollToFeedback} />
+          <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3">
+            <div className="text-sm font-semibold mb-2">QA-Assistent</div>
+            {/* Das Widget ordentlich eingebettet mit Card-Styling */}
+            <QAWidget />
+          </div>
+        </aside>
+      </section>
+    </div>
+  );
+}
+
+/* ---------------- Kommentar-Thread Hub ---------------- */
+function CommentThreadHub({ ownerId, onJumpToFeedback }:{ ownerId:string; onJumpToFeedback:(feedbackId:number|string)=>void }){
+  const [loading, setLoading] = useState(false);
+  const [items, setItems] = useState<ThreadListItem[]>([]);
+  const [onlyUnread, setOnlyUnread] = useState(true);
+  const [q, setQ] = useState('');
+
+  useEffect(()=>{(async()=>{
+    if (!ownerId) { setItems([]); return; }
+    setLoading(true);
+    try {
+      // Falls dein Backend einen anderen Mode/Path hat, hier anpassen:
+      const r = await authedFetch(`/api/teamhub/threads?owner_id=${encodeURIComponent(ownerId)}&mode=hub&limit=50`, { cache:'no-store' });
+      const j = await r.json().catch(()=>null);
+      const arr: ThreadListItem[] = Array.isArray(j?.items) ? j.items : [];
+      setItems(arr);
+    } finally { setLoading(false); }
+  })()}, [ownerId]);
+
+  const filtered = useMemo(()=>{
+    let arr = items;
+    if (onlyUnread) arr = arr.filter(t=> (t.unread_total||0) > 0);
+    if (q.trim()) {
+      const s = q.trim().toLowerCase();
+      arr = arr.filter(t=>
+        t.subject.toLowerCase().includes(s) ||
+        t.last_body.toLowerCase().includes(s) ||
+        t.last_author.toLowerCase().includes(s)
+      );
+    }
+    return arr.sort((a,b)=> new Date(b.last_at).getTime() - new Date(a.last_at).getTime());
+  }, [items, onlyUnread, q]);
+
+  return (
+    <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+      <div className="p-3 border-b border-gray-100 dark:border-gray-800 flex items-center gap-2">
+        <div className="font-semibold text-sm">Kommentar-Threads</div>
+        <span className="ml-auto text-xs text-gray-500">{loading? 'lädt…' : `${filtered.length}/${items.length}`}</span>
+      </div>
+      <div className="p-3 flex items-center gap-2">
+        <input
+          value={q}
+          onChange={e=>setQ(e.target.value)}
+          placeholder="Suchen…"
+          className="flex-1 px-2 py-1.5 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10 text-sm"
+        />
+        <label className="text-xs inline-flex items-center gap-2 select-none">
+          <input type="checkbox" checked={onlyUnread} onChange={e=>setOnlyUnread(e.target.checked)} />
+          nur Ungelesene
+        </label>
+      </div>
+      <ul className="divide-y divide-gray-100 dark:divide-gray-800 max-h-[520px] overflow-auto">
+        {filtered.length===0 && !loading && (
+          <li className="p-3 text-sm text-gray-500">Keine Threads</li>
+        )}
+        {filtered.map(t=> (
+          <li key={String(t.thread_id)} className="p-3 hover:bg-gray-50 dark:hover:bg-white/5 transition">
+            <button className="w-full text-left" onClick={()=>onJumpToFeedback(t.feedback_id)}>
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium truncate">{t.subject}</div>
+                  <div className="text-[12px] text-gray-500 truncate">
+                    <span className="font-medium">{t.last_author}</span>
+                    <span> · {fmtDateTimeBerlin(t.last_at)}</span>
+                  </div>
+                </div>
+                {t.unread_total>0 && (
+                  <span className="shrink-0 inline-flex items-center justify-center text-[11px] min-w-6 h-6 px-2 rounded-full bg-rose-100 text-rose-700 border border-rose-200">
+                    {t.unread_total}
+                  </span>
+                )}
+              </div>
+              <p className="mt-1 text-[13px] text-gray-700 dark:text-gray-300 line-clamp-2 whitespace-pre-wrap">{t.last_body}</p>
+            </button>
+          </li>
+        ))}
+        {loading && <li className="p-3 text-sm text-gray-500">lädt…</li>}
+      </ul>
     </div>
   );
 }
@@ -690,8 +741,6 @@ function LabelChips({
     </div>
   );
 }
-
-<QAWidget />
 
 /* ---------------- Label-Manager (Modal) ---------------- */
 function LabelManagerButton() {

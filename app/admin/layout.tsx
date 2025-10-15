@@ -4,7 +4,7 @@ import { cookies } from 'next/headers';
 import { verifyToken, AUTH_COOKIE, type Role } from '@/lib/auth';
 import AdminHeader from '../components/AdminHeader';
 import AdminTabs from './shared/AdminTabs';
-import ScrollToTopButton from '../components/ScrollToTopButton'; // ⬅️ neu
+import ScrollToTopButton from '../components/ScrollToTopButton';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -20,7 +20,8 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex flex-col">
+    // Hintergrund: transparent lassen, damit RootLayout-Gradient sichtbar ist
+    <div className="min-h-screen bg-transparent flex flex-col">
       <AdminHeader initialRole={role} />
 
       <div className="flex flex-1 gap-6">
@@ -30,7 +31,8 @@ export default async function AdminLayout({ children }: { children: ReactNode })
         {/* Main */}
         <main className="flex-1 px-4 sm:px-8 py-6">
           <div className="w-full max-w-full 2xl:max-w-[1920px] mx-auto px-4 py-6">
-            <div className="rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 p-6 shadow-sm">
+            {/* Nutzt die neue .card Utility aus globals.css */}
+            <div className="card p-6">
               {children}
             </div>
           </div>

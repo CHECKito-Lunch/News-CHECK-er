@@ -15,7 +15,7 @@ type Item = {
   booking_number_hash?: string | null; // enthält nur Ziffern
 };
 
-/* === Neu: Übersetzungen nur für Anzeige === */
+/* ==== Übersetzungen nur für Anzeige ==== */
 const TYPE_LABELS: Record<string, string> = {
   mail_handling: 'Mail-Bearbeitung',
   consulting: 'Beratung',
@@ -32,15 +32,26 @@ const TYPE_LABELS: Record<string, string> = {
   word_before_writing: 'Vor dem Schreiben',
   privacy: 'Datenschutz',
   special_reservation: 'Sonderreservierung',
+  sonstiges: 'Sonstiges',
 };
-
 const labelForType = (t?: string | null) => {
   const k = (t || '').trim();
   if (!k) return '—';
   if (TYPE_LABELS[k]) return TYPE_LABELS[k];
   return k.replace(/_/g, ' ').replace(/\b\w/g, m => m.toUpperCase());
 };
-/* === Ende: Übersetzungen === */
+/* ==== Ende Übersetzungen ==== */
+
+/* ==== KI-Typen ==== */
+type AiCategory = {
+  key: string;                // EN key (z.B. mail_handling)
+  label: string;              // DE Label
+  count: number;
+  reasons: string[];
+  example_ids: Array<string|number>;
+  confidence?: 'low'|'medium'|'high';
+};
+/* ==== Ende KI-Typen ==== */
 
 export default function QualityPage(){
   const [from, setFrom] = useState('');
@@ -48,6 +59,11 @@ export default function QualityPage(){
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
   const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set());
+
+  // KI-State
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiCategories, setAiCategories] = useState<AiCategory[] | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -61,7 +77,7 @@ export default function QualityPage(){
 
   useEffect(() => { load(); }, [load]);
 
-  // Neu: Typen + deutsche Labels
+  // Typen + deutsche Labels
   const incidentTypes = useMemo(() => {
     const map = new Map<string, number>();
     for (const it of items) {
@@ -116,10 +132,43 @@ export default function QualityPage(){
   };
   const resetTypes = () => setTypeFilter(new Set());
 
+  // === KI: Kategorien laden auf Knopfdruck (nimmt die aktuell sichtbaren Items) ===
+  const runAi = useCallback(async () => {
+    if (filteredItems.length === 0) return;
+    setAiLoading(true); setAiError(null);
+    try{
+      const r = await fetch('/api/me/qa/ai-categories', {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json' },
+        body: JSON.stringify({ items: filteredItems }),
+      });
+      const j = await r.json();
+      if (!j?.ok) throw new Error(j?.error || 'Analyse fehlgeschlagen');
+      const cats: AiCategory[] = Array.isArray(j.categories) ? j.categories : [];
+      // Labels aus lokalem Mapping absichern
+      setAiCategories(cats.map(c => ({ ...c, label: TYPE_LABELS[c.key] || c.label || c.key })));
+    } catch (e:any){
+      setAiError(e?.message || 'Analyse fehlgeschlagen');
+      setAiCategories(null);
+    } finally {
+      setAiLoading(false);
+    }
+  }, [filteredItems]);
+
   return (
     <div className="w-full max-w-[1920px] mx-auto px-4 py-6">
       <header className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Meine QA-Vorfälle</h1>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={runAi}
+            disabled={aiLoading || filteredItems.length===0}
+            className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-sm"
+            title="KI-Kategorisierung der aktuell sichtbaren Einträge"
+          >
+            {aiLoading ? 'Analysiere…' : 'KI-Kategorisierung'}
+          </button>
+        </div>
       </header>
 
       <section className="p-5 rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
@@ -161,6 +210,52 @@ export default function QualityPage(){
                   Zurücksetzen
                 </button>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* KI-Auswertung */}
+        {aiError && (
+          <div className="mb-4 text-sm text-red-600">{aiError}</div>
+        )}
+        {aiCategories && aiCategories.length > 0 && (
+          <div className="mb-4 rounded-xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50/60 dark:bg-emerald-900/20 p-3">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-sm font-medium">KI-Kategorisierung (sichtbarer Zeitraum)</div>
+              <div className="text-xs text-gray-500">{aiCategories.reduce((a,c)=>a+c.count,0)} Einträge</div>
+            </div>
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {aiCategories.map(cat => (
+                <div key={cat.key} className="rounded-lg border border-gray-200 dark:border-gray-800 p-3 bg-white dark:bg-gray-950">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-sm font-medium">{cat.label}</div>
+                    <div className="text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800">{cat.count}</div>
+                  </div>
+                  {cat.reasons.length>0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {cat.reasons.map((r,idx)=> (
+                        <span key={idx} className="text-xs px-2 py-0.5 rounded-full border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300">
+                          {r}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <div className="mt-3 flex items-center gap-2">
+                    <button
+                      onClick={() => toggleType(cat.key)}
+                      className="text-xs px-2 py-1 rounded border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100"
+                      title="Diese Kategorie filtern"
+                    >
+                      Nach {cat.label} filtern
+                    </button>
+                    {cat.example_ids.length>0 && (
+                      <span className="text-[11px] text-gray-500">
+                        Beispiele: {cat.example_ids.slice(0,3).map(String).join(', ')}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         )}

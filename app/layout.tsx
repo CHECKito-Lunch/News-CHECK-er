@@ -11,23 +11,23 @@ export const metadata: Metadata = {
   title: 'News-CHECK',
   appleWebApp: {
     title: 'News-CHECK',
-    capable: true, // bewirkt: <meta name="apple-mobile-web-app-capable" content="yes" />
-    statusBarStyle: 'default', // Optionen: 'default' | 'black' | 'black-translucent'
+    capable: true,
+    statusBarStyle: 'default',
   },
 };
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#ffffff' },
-    { media: '(prefers-color-scheme: dark)',  color: '#111827' },
+    { media: '(prefers-color-scheme: light)', color: '#EDF3FF' },
+    { media: '(prefers-color-scheme: dark)',  color: '#0E1B38' },
   ],
 };
-
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="de">
-      <body className="min-h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100">
+      {/* Hintergrund mit sanftem Verlauf für Hellmodus */}
+      <body className="min-h-screen text-gray-900 dark:text-gray-100 bg-[linear-gradient(180deg,#EDF3FF_0%,#FFFFFF_85%)] dark:bg-[var(--app-bg)]">
         {children}
         <Analytics />
         <SpeedInsights />

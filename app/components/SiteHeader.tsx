@@ -23,7 +23,6 @@ type UnreadRes = {
 export default function SiteHeader() {
   const pathname = usePathname();
 
-  // ✅ ALLE Hooks in der Komponente
   const [me, setMe] = useState<Me['user']>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [counts, setCounts] = useState({ total: 0, invites: 0, groups: 0, news: 0, events: 0 });
@@ -31,7 +30,6 @@ export default function SiteHeader() {
   const [marking, setMarking] = useState(false);
   const [markedOk, setMarkedOk] = useState(false);
 
-  // ---- User laden / auf Auth-Events hören
   useEffect(() => {
     let mounted = true;
     const load = async () => {
@@ -53,7 +51,6 @@ export default function SiteHeader() {
     };
   }, []);
 
-  // ---- Unread laden / Polling / auf unread-changed reagieren
   useEffect(() => {
     if (!me) { setCounts({ total: 0, invites: 0, groups: 0, news: 0, events: 0 }); return; }
 
@@ -87,7 +84,7 @@ export default function SiteHeader() {
     timer = window.setInterval(loadUnread, 60_000);
 
     const onAuth = () => loadUnread();
-    const onUnread = () => loadUnread(); // z.B. nach POST /api/unread/seen
+    const onUnread = () => loadUnread();
     window.addEventListener('auth-changed', onAuth);
     window.addEventListener('unread-changed', onUnread);
 
@@ -105,17 +102,16 @@ export default function SiteHeader() {
     setMarking(true);
     const prev = counts;
 
-    // Optimistisch auf 0
     setCounts({ total: 0, invites: 0, groups: 0, news: 0, events: 0 });
 
     try {
       const r = await fetch('/api/unread/seen', { method: 'POST', credentials: 'include' });
       if (!r.ok) throw new Error('failed');
       window.dispatchEvent(new Event('unread-changed'));
-      setMarkedOk(true);              // ✓ anzeigen
+      setMarkedOk(true);
       setTimeout(() => setMarkedOk(false), 1200);
     } catch {
-      setCounts(prev);                // Rollback
+      setCounts(prev);
       alert('Konnte nicht als gelesen markieren.');
     } finally {
       setMarking(false);
@@ -133,13 +129,10 @@ export default function SiteHeader() {
       { href: '/quality', label: 'Mitarbeiter Feedbacks' },
     ];
 
-    // 🔐 nur für Teamleiter sichtbar
     if (me && me.role === 'teamleiter') {
       arr.push({ href: '/teamhub', label: 'Teamhub' });
     }
-
     if (me) arr.push({ href: '/profile', label: 'Profil' });
-
     if (me && (me.role === 'admin' || me.role === 'moderator'|| me.role === 'teamleiter')) {
       arr.push({ href: '/admin', label: 'Adminbereich' });
     }
@@ -156,21 +149,33 @@ export default function SiteHeader() {
     </span>
   );
 
-  // ESC: Menü schließen
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // Hilfsfunktion: per Link den korrekten Badge-Wert liefern
   function countForLink(href: string) {
-    if (href === '/profile') return counts.invites;                // nur Einladungen
-    if (href === '/groups')  return counts.groups;                 // nur Gruppennews
-    if (href === '/news')    return counts.news + counts.events;   // News + Events
-    // /events kriegt keinen eigenen Badge (ist Teil von /news)
+    if (href === '/profile') return counts.invites;
+    if (href === '/groups')  return counts.groups;
+    if (href === '/news')    return counts.news + counts.events;
     return 0;
   }
+
+  // ✔ Icon-Auswahl pro Link
+  const iconFor = (href: string) => {
+    if (href === '/') return <IconHome />;
+    if (href.startsWith('/news')) return <IconNews />;
+    if (href.startsWith('/groups')) return <IconGroups />;
+    if (href.startsWith('/events')) return <IconCalendar />;
+    if (href.startsWith('/checkiade')) return <IconTrophy />;
+    if (href.startsWith('/feedback')) return <IconChat />;
+    if (href.startsWith('/quality')) return <IconClipboardCheck />;
+    if (href.startsWith('/teamhub')) return <IconTeam />;
+    if (href.startsWith('/profile')) return <IconUser />;
+    if (href.startsWith('/admin')) return <IconShield />;
+    return <IconHome />;
+  };
 
   return (
     <header className="sticky top-0 z-30 border-b border-gray-200 bg-white/70 dark:bg-gray-900/70 backdrop-blur">
@@ -183,9 +188,7 @@ export default function SiteHeader() {
             aria-controls="global-menu"
             aria-label="Menü"
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden>
-              <path d="M4 6h16M4 12h16M4 18h16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-            </svg>
+            <IconMenu />
             {me && counts.total > 0 && <Badge count={counts.total} />}
           </button>
         </div>
@@ -232,7 +235,7 @@ export default function SiteHeader() {
                         {me && c > 0 && <Badge count={c} />}
                       </span>
 
-                      {/* Icon (cleanes Burger-Icon als Platzhalter) */}
+                      {/* ✔ passendes Icon */}
                       <span
                         aria-hidden
                         className={[
@@ -242,29 +245,13 @@ export default function SiteHeader() {
                             : 'border-gray-200 dark:border-white/10 bg-white/70 dark:bg-white/10'
                         ].join(' ')}
                       >
-                        <svg viewBox="0 0 24 24" width="18" height="18">
-                          <path
-                            d="M4 7h16M4 12h16M4 17h10"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                          />
-                        </svg>
+                        {iconFor(n.href)}
                       </span>
 
                       {/* Label + kleiner Chevron */}
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-sm font-semibold leading-5">{n.label}</span>
-                        <svg
-                          viewBox="0 0 24 24"
-                          width="16"
-                          height="16"
-                          aria-hidden
-                          className={active ? 'opacity-100' : 'opacity-60 group-hover:opacity-100'}
-                        >
-                          <path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
+                        <IconChevron className={active ? 'opacity-100' : 'opacity-60 group-hover:opacity-100'} />
                       </div>
 
                       {/* dezenter Verlauf / Glow */}
@@ -298,18 +285,11 @@ export default function SiteHeader() {
                 >
                   <span className="inline-flex items-center gap-2">
                     {marking ? (
-                      <svg viewBox="0 0 24 24" width="16" height="16" className="animate-spin" aria-hidden>
-                        <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" opacity=".25"/>
-                        <path d="M21 12a9 9 0 0 0-9-9" fill="none" stroke="currentColor" strokeWidth="2"/>
-                      </svg>
+                      <IconSpinner />
                     ) : markedOk ? (
-                      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden>
-                        <path d="M20 7l-9 9-5-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                      </svg>
+                      <IconCheck />
                     ) : (
-                      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden>
-                        <path d="M3 12h12M3 6h18M3 18h18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-                      </svg>
+                      <IconMenuThin />
                     )}
                     <span className="truncate">
                       {markedOk ? 'Alles gelesen!' : 'Alles als gelesen markieren'}
@@ -339,9 +319,7 @@ export default function SiteHeader() {
                       type="submit"
                       className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-red-600 hover:bg-red-700 text-white px-3 py-2 text-sm shadow-sm"
                     >
-                      <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden className="shrink-0">
-                        <path d="M12 2v10m6.36-6.36a9 9 0 11-12.72 0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                      </svg>
+                      <IconPower />
                       Abmelden
                     </button>
                   </form>
@@ -361,5 +339,124 @@ export default function SiteHeader() {
         )}
       </AnimatePresence>
     </header>
+  );
+}
+
+/* ===== Icons ===== */
+function IconMenu() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden>
+      <path d="M4 6h16M4 12h16M4 18h16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+function IconMenuThin(){
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden>
+      <path d="M3 12h12M3 6h18M3 18h18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+    </svg>
+  );
+}
+function IconSpinner(){
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" className="animate-spin" aria-hidden>
+      <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2" opacity=".25"/>
+      <path d="M21 12a9 9 0 0 0-9-9" fill="none" stroke="currentColor" strokeWidth="2"/>
+    </svg>
+  );
+}
+function IconCheck(){
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden>
+      <path d="M20 7l-9 9-5-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+function IconChevron({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden className={className}>
+      <path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function IconHome(){
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden>
+      <path d="M3 10l9-7 9 7v9a2 2 0 0 1-2 2h-4V12H9v9H5a2 2 0 0 1-2-2z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+function IconNews(){
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden>
+      <path d="M4 5h12v14H6a2 2 0 0 1-2-2V5zM16 7h4v10a2 2 0 0 1-2 2h-2" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/>
+      <path d="M8 9h6M8 13h6M8 17h4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+    </svg>
+  );
+}
+function IconGroups(){
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden>
+      <path d="M16 11a4 4 0 1 0-8 0M3 20a7 7 0 0 1 18 0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+function IconCalendar(){
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden>
+      <path d="M7 3v4M17 3v4M3 9h18M5 9h14v11H5z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+function IconTrophy(){
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden>
+      <path d="M8 21h8M12 17a5 5 0 0 0 5-5V4H7v8a5 5 0 0 0 5 5zM5 6H3a3 3 0 0 0 3 3M19 6h2a3 3 0 0 1-3 3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+function IconChat(){
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden>
+      <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/>
+      <path d="M7 9h10M7 13h6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+    </svg>
+  );
+}
+function IconClipboardCheck(){
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden>
+      <path d="M9 5h6a2 2 0 0 1 2 2v12H7V7a2 2 0 0 1 2-2z" fill="none" stroke="currentColor" strokeWidth="2"/>
+      <path d="M9 3h6v2H9zM9 12l2 2 4-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+function IconTeam(){
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden>
+      <path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Zm6 8a6 6 0 0 0-12 0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+function IconUser(){
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden>
+      <path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5Zm7 8a7 7 0 0 0-14 0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+function IconShield(){
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden>
+      <path d="M12 3l7 4v5c0 5-3.5 8.5-7 9-3.5-.5-7-4-7-9V7l7-4z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/>
+      <path d="M9 12l2 2 4-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+function IconPower(){
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden className="shrink-0">
+      <path d="M12 2v10m6.36-6.36a9 9 0 11-12.72 0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
   );
 }

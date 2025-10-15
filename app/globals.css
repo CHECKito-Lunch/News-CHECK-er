@@ -3,158 +3,184 @@
 @tailwind components;
 @tailwind utilities;
 
+/* =========================
+   CHECK24 Brand Theme Tokens
+   ========================= */
+:root {
+  /* Brand */
+  --brand-24:        #005AE0;  /* Hauptblau */
+  --brand-24-hover:  #004cc0;  /* Hover für Buttons/Links */
+  --brand-24-ink:    #0E1B38;  /* dunkles Blau für Headlines */
 
-/* Basis-Form-Controls lieber im base-Layer (Element-Selektoren) */
+  /* Surface / Backgrounds (Light) */
+  --app-bg:        #EDF3FF;    /* helles, weiches Blau */
+  --app-gradient:  linear-gradient(180deg, #EDF3FF 0%, #FFFFFF 85%);
+
+  /* Text & Lines (Light) */
+  --ink:           #111827;    /* grauschwarz */
+  --muted-ink:     #4B5563;    /* muted */
+  --line:          #D8E4FF;    /* feine Linien auf hellen Flächen */
+
+  /* Accents */
+  --accent:        #09ad00;    /* Erfolgsgrün */
+  --danger:        #dc2626;    /* Rot */
+  --shadow:        0 6px 20px 0 rgba(0, 90, 224, 0.07);
+}
+
+.dark {
+  /* Surface / Backgrounds (Dark) */
+  --app-bg:       #0E1B38;     /* Navy – nicht zu dunkel */
+  --app-gradient: none;        /* im Dark-Mode kein Verlauf, ruhiger Look */
+
+  /* Text & Lines (Dark) */
+  --ink:          #E5E7EB;
+  --muted-ink:    #A7B1C2;
+  --line:         #1e2a42;
+
+  --shadow:       0 6px 20px 0 rgba(36, 160, 255, 0.10);
+}
+
+/* Globale Hintergründe (wir setzen zusätzlich die Token im Layout) */
+html, body { background: var(--app-gradient); }
+.dark html, .dark body { background: var(--app-bg); }
+
+
+/* =========================
+   Base: Inputs etc.
+   ========================= */
 @layer base {
   /* alle Inputs außer Farbwähler */
   input:not([type="color"]), select, textarea {
-    @apply w-full rounded-lg px-3 py-2 border border-gray-300 bg-white text-gray-900 placeholder-gray-500
-           focus:outline-none focus:ring-2 focus:ring-blue-500
+    @apply w-full rounded-lg px-3 py-2 border bg-white text-gray-900 placeholder-gray-500
+           focus:outline-none focus:ring-2 focus:ring-blue-500 border-gray-300
            dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder-gray-400;
   }
+
+  /* Brand-Linkfarbe global (optional) */
+  a { color: var(--brand-24); }
+  a:hover { color: var(--brand-24-hover); }
 }
 
-/* Wiederverwendbare Komponenten-Utilities */
+
+/* =========================
+   Components
+   ========================= */
 @layer components {
+  /* Cards */
+  .card        { @apply rounded-2xl border bg-white shadow-sm dark:bg-gray-900; border-color: var(--line); box-shadow: var(--shadow); }
+  .form-label  { @apply block text-sm font-medium mb-1; color: var(--ink); }
+
   /* Buttons */
   .btn {
     @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium
-           transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500
-           focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900
+           transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2
            disabled:opacity-50 disabled:pointer-events-none;
+    --btn-bg: transparent; --btn-fg: var(--ink); --btn-bd: transparent;
+    background: var(--btn-bg); color: var(--btn-fg); border: 1px solid var(--btn-bd);
   }
-  .btn-primary   { @apply bg-blue-600 text-white hover:bg-blue-700; }
-  .btn-secondary { @apply bg-gray-100 text-gray-900 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700; }
-  .btn-outline   { @apply border border-gray-300 bg-white text-gray-900 hover:bg-gray-50 dark:border-gray-700 dark:bg-transparent dark:text-gray-100 dark:hover:bg-gray-800; }
-  .btn-ghost     { @apply bg-transparent text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800; }
-  .btn-danger    { @apply bg-red-600 text-white hover:bg-red-700; }
+  .btn-primary   {
+    --btn-bg: var(--brand-24); --btn-fg: #fff; --btn-bd: var(--brand-24);
+  }
+  .btn-primary:hover { background: var(--brand-24-hover); border-color: var(--brand-24-hover); }
+
+  .btn-secondary { @apply dark:text-gray-100; --btn-bg: #f3f4f6; --btn-fg: #111827; --btn-bd: #e5e7eb; }
+  .btn-secondary:hover { --btn-bg: #e5e7eb; }
+  .dark .btn-secondary { --btn-bg:#111827; --btn-fg:#E5E7EB; --btn-bd:#374151; }
+  .dark .btn-secondary:hover { --btn-bg:#1f2937; }
+
+  .btn-outline   { --btn-bg:#ffffff; --btn-fg:#111827; --btn-bd:#d1d5db; }
+  .btn-outline:hover { --btn-bg:#f9fafb; }
+  .dark .btn-outline { --btn-bg:transparent; --btn-fg:#E5E7EB; --btn-bd:#374151; }
+  .dark .btn-outline:hover { --btn-bg:#111827; }
+
+  .btn-ghost     { --btn-bg:transparent; --btn-fg:#374151; --btn-bd:transparent; }
+  .btn-ghost:hover { --btn-bg:#f3f4f6; }
+  .dark .btn-ghost { --btn-fg:#E5E7EB; }
+  .dark .btn-ghost:hover { --btn-bg:#111827; }
+
+  .btn-danger    { --btn-bg:#dc2626; --btn-fg:#fff; --btn-bd:#dc2626; }
+  .btn-danger:hover { --btn-bg:#b91c1c; --btn-bd:#b91c1c; }
+
   .btn-sm        { @apply px-3 py-1 text-xs rounded-lg; }
   .btn-lg        { @apply px-5 py-3 text-base; }
 
-  /* Tabs (wie in deinem Admin) */
+  /* Tabs */
   .tab         { @apply px-3 py-2 text-sm font-medium rounded-lg; }
-  .tab-active  { @apply bg-white text-gray-900 border border-b-0 border-gray-200 -mb-px
-                        dark:bg-gray-900 dark:text-white dark:border-gray-700; }
-  .tab-inactive{ @apply text-gray-600 hover:text-gray-900 bg-transparent border border-transparent
-                        dark:text-gray-300 dark:hover:text-white; }
-
-  /* Karten & Labels, die du schon nutzt */
-  .card        { @apply rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900; }
-  .form-label  { @apply block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1; }
+  .tab-active  { @apply bg-white text-gray-900 border border-b-0 -mb-px dark:bg-gray-900 dark:text-white; border-color: var(--line); }
+  .tab-inactive{ @apply text-gray-600 hover:text-gray-900 bg-transparent border border-transparent dark:text-gray-300 dark:hover:text-white; }
 }
 
 
-/* ---------- Tiptap Tables – nicer look ---------- */
+/* =========================
+   Tiptap Tables – nicer look
+   (jetzt mit Theme-Variablen)
+   ========================= */
 .tiptap table {
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
-  border: 1px solid hsl(210 20% 90%);
-  border-radius: 12px;         /* runde Ecken */
-  overflow: hidden;            /* rounded header/edges sichtbar */
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
   background: #fff;
+  box-shadow: var(--shadow);
 }
-
 .dark .tiptap table {
-  border-color: hsl(220 13% 18%);
-  background: hsl(220 13% 12%);
+  background: #0b1426;
 }
 
 .tiptap thead th {
-  background: hsl(210 20% 98%);
-  color: hsl(215 25% 20%);
+  background: color-mix(in oklab, var(--app-bg) 70%, #fff 30%);
+  color: var(--brand-24-ink);
   font-weight: 600;
   text-align: left;
-  border-bottom: 1px solid hsl(210 20% 90%);
+  border-bottom: 1px solid var(--line);
   padding: 10px 12px;
   vertical-align: middle;
 }
-
 .dark .tiptap thead th {
-  background: hsl(220 13% 16%);
-  color: hsl(210 40% 90%);
-  border-bottom-color: hsl(220 13% 18%);
+  background: #12213d;
+  color: #e3ecff;
 }
 
 .tiptap tbody td {
   padding: 10px 12px;
   vertical-align: top;
-  border-bottom: 1px solid hsl(210 20% 90%);
-}
-
-.dark .tiptap tbody td {
-  border-bottom-color: hsl(220 13% 18%);
+  border-bottom: 1px solid var(--line);
 }
 
 /* Zebra-Streifen + Hover */
 .tiptap tbody tr:nth-child(odd) td {
-  background: hsl(210 20% 99%);
+  background: color-mix(in oklab, var(--app-bg) 80%, #fff 20%);
 }
-.dark .tiptap tbody tr:nth-child(odd) td {
-  background: hsl(220 13% 14%);
-}
+.dark .tiptap tbody tr:nth-child(odd) td { background: #0f1c33; }
 
-.tiptap tbody tr:hover td {
-  background: hsl(210 20% 97%);
-}
-.dark .tiptap tbody tr:hover td {
-  background: hsl(220 13% 16%);
-}
+.tiptap tbody tr:hover td { background: color-mix(in oklab, var(--app-bg) 65%, #fff 35%); }
+.dark .tiptap tbody tr:hover td { background: #132544; }
 
-/* Zellränder links/rechts weicher machen */
+/* Zellränder links/rechts */
 .tiptap td + td,
-.tiptap th + th {
-  border-left: 1px solid hsl(210 20% 90%);
-}
-.dark .tiptap td + td,
-.dark .tiptap th + th {
-  border-left-color: hsl(220 13% 18%);
-}
+.tiptap th + th { border-left: 1px solid var(--line); }
 
-/* Spalten-Resize-Handle (wenn Table.configure({ resizable: true })) */
+/* Spalten-Resize-Handle */
 .tiptap .column-resize-handle {
-  position: absolute;
-  right: -2px;
-  top: 0;
-  bottom: 0;
-  width: 4px;
-  background: hsl(215 85% 55%);
-  opacity: 0.25;
-  pointer-events: none;
+  position: absolute; right: -2px; top: 0; bottom: 0; width: 4px;
+  background: var(--brand-24); opacity: 0.25; pointer-events: none;
 }
-.tiptap .resize-cursor {
-  cursor: col-resize;
-}
+.tiptap .resize-cursor { cursor: col-resize; }
 
-/* Optional: kleine Caption-Optik (falls du mal <caption> nutzt) */
+/* Caption */
 .tiptap table caption {
-  caption-side: bottom;
-  padding: 8px 12px;
-  font-size: 12px;
-  color: hsl(215 15% 40%);
-}
-.dark .tiptap table caption {
-  color: hsl(210 10% 70%);
+  caption-side: bottom; padding: 8px 12px; font-size: 12px; color: var(--muted-ink);
 }
 
 
-/* === Color Theme Variables === */
-:root {
-  --background: #f7faff;     /* CHECK24-hellblau */
-  --foreground: #1a2947;     /* dunkles CHECK24-blau */
-  --primary: #0056b3;        /* CHECK24-blau */
-  --primary-light: #2287f9;  /* leichtes blau */
-  --accent: #09ad00;         /* accent grün */
-  --divider: #cce3fa;        /* zarte Trennlinie */
-  --shadow: 0 6px 20px 0 rgba(0, 87, 179, 0.07);
-}
-
-.dark {
-  --background: #0a1828;
-  --foreground: #e6eefa;
-  --primary: #449aff;
-  --primary-light: #2563eb;
-  --accent: #4de77e;
-  --divider: #12385d;
-  --shadow: 0 6px 20px 0 rgba(36, 160, 255, 0.10);
+/* =========================
+   Extra Utilities (optional)
+   ========================= */
+@layer utilities {
+  .bg-brand { background-color: var(--brand-24); }
+  .text-brand { color: var(--brand-24); }
+  .border-brand { border-color: var(--brand-24); }
+  .ring-brand { box-shadow: 0 0 0 2px var(--brand-24); }
 }
