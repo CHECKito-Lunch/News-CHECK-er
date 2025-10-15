@@ -28,14 +28,14 @@ export async function GET(req: NextRequest){
 
   // simple Agg
   const total = data?.length ?? 0;
-  const byCategory = new Map<string, number>();
+  const byIncidentType = new Map<string, number>();
   const byAgent = new Map<string, number>();
   (data||[]).forEach(r=>{
-    if (r.category) byCategory.set(r.category, (byCategory.get(r.category)||0)+1);
+    if (r.incident_type) byIncidentType.set(r.incident_type, (byIncidentType.get(r.incident_type)||0)+1);
     if (r.agent_name) byAgent.set(r.agent_name, (byAgent.get(r.agent_name)||0)+1);
   });
 
   const top = (m:Map<string,number>) => [...m.entries()].sort((a,b)=> b[1]-a[1])[0] || null;
 
-  return NextResponse.json({ ok:true, total, topCategory: top(byCategory), topAgent: top(byAgent) });
+  return NextResponse.json({ ok:true, total, topIncidentType: top(byIncidentType), topAgent: top(byAgent) });
 }

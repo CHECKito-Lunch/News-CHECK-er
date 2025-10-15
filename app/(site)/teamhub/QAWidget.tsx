@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 
 export default function QAWidget(){
-  const [data, setData] = useState<{ ok:boolean; total:number; topCategory?:[string,number]; topAgent?:[string,number] }|null>(null);
+  const [data, setData] = useState<{ ok:boolean; total:number; topIncidentType?:[string,number]; topAgent?:[string,number] }|null>(null);
   const [loading, setLoading] = useState(true);
   useEffect(()=>{(async()=>{
     try{
@@ -19,7 +19,7 @@ export default function QAWidget(){
       <div className="text-sm font-medium mb-1">QA (30 Tage)</div>
       <div className="text-2xl font-semibold">{data.total}</div>
       <div className="mt-2 text-sm text-gray-600 dark:text-gray-300 space-y-1">
-        <div>Top-Kategorie: <b>{data.topCategory?.[0] ?? '—'}</b> ({data.topCategory?.[1] ?? 0})</div>
+        <div>Top-Kategorie: <b>{data.topIncidentType?.[0] ?? '—'}</b> ({data.topIncidentType?.[1] ?? 0})</div>
         <div>Top-Agent: <b>{data.topAgent?.[0] ?? '—'}</b> ({data.topAgent?.[1] ?? 0})</div>
       </div>
     </div>
