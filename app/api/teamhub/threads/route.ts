@@ -6,6 +6,8 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { sql } from '@/lib/db';
 import { getUserFromCookies } from '@/lib/auth';
 
+
+
 // Eigener JSON-Helper (vermeidet Typ-Probleme mit NextResponse.json)
 const json = (data: unknown, status = 200) =>
   new NextResponse(JSON.stringify(data), {

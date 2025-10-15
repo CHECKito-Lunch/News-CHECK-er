@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseServer } from '@/lib/supabase-server';
 import { getUserFromRequest } from '@/lib/getUserFromRequest';
 
+type Role = 'admin' | 'moderator' | 'teamleiter' | 'user';
+
 // Aggregation für Teamhub: letzte 30 Tage – Anzahl, Top-Kategorie, Top-Agent (optional)
 export async function GET(req: NextRequest){
   const userOrNull = await getUserFromRequest(req);
