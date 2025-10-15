@@ -5,18 +5,18 @@ export const dynamic = 'force-dynamic';
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
-import { getAdminFromCookies } from '@/lib/admin-auth';
+import { requireUser } from '@/lib/auth-server'; // ✅ statt getAdminFromCookies
 
 const BO_BASE = 'https://backoffice.reisen.check24.de/booking/search/';
 const isHex64 = (s: string) => /^[0-9a-f]{64}$/i.test(s);
 const onlyDigits = (s: string) => s.replace(/\D+/g, '');
 
 export async function GET(req: NextRequest) {
-  // Admin-Check
-  const admin = await getAdminFromCookies(req).catch(() => null);
-  if (!admin) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
+  // ✅ nur noch "eingeloggt?" prüfen — kein Admin-Zwang
+  const me = await requireUser(req).catch(() => null);
+  if (!me) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
 
-  // param aus der URL ziehen (ohne zweiten Funktions-Parameter)
+  // Param aus der URL ziehen
   const pathname = req.nextUrl?.pathname || new URL(req.url).pathname;
   const rawParam = pathname.split('/').pop() || '';
   const raw = decodeURIComponent(rawParam).trim();
