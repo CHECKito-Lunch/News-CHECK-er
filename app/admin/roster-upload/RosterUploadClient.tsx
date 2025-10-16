@@ -6,13 +6,13 @@ import { useEffect, useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
 
 type TeamRow = { team_id: string; name: string };
-type Member = { user_id: string; name: string };
+type Member  = { user_id: string; name: string };
 
 type ParsedSheet = { name: string; headers: string[]; rows: string[][] };
 
 function normalizeHeader(h: string){
   const map: Record<string,string> = { 'ä':'ae','ö':'oe','ü':'ue','ß':'ss' };
-  return h.trim().toLowerCase()
+  return String(h||'').trim().toLowerCase()
     .replace(/[äöüß]/g, ch => map[ch] || ch)
     .replace(/[^a-z0-9]+/g,'_')
     .replace(/^_+|_+$/g,'');
@@ -24,16 +24,15 @@ function excelToSheets(file: File): Promise<ParsedSheet[]> {
     fr.onerror = () => reject(fr.error);
     fr.onload = () => {
       try {
-        const data = new Uint8Array(fr.result as ArrayBuffer);
-        const wb = XLSX.read(data, { type: 'array' });
+        const wb = XLSX.read(new Uint8Array(fr.result as ArrayBuffer), { type: 'array' });
         const out: ParsedSheet[] = [];
         for (const name of wb.SheetNames) {
           const ws = wb.Sheets[name];
           if (!ws) continue;
-          const aoa = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1, raw: true });
-          const rows = (aoa as any[]).filter(r => Array.isArray(r) && r.length>0) as string[][];
+          const aoa = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1, raw: true }) as any[];
+          const rows = (aoa || []).filter(r => Array.isArray(r) && r.length>0) as string[][];
           if (!rows.length) continue;
-          const headers = (rows[0] || []).map(v => String(v ?? ''));
+          const headers = (rows[0] || []).map(v => String(v ?? '').trim());
           const body = rows.slice(1).map(r => headers.map((_,i)=>String(r[i] ?? '')));
           out.push({ name, headers, rows: body });
         }
@@ -44,16 +43,17 @@ function excelToSheets(file: File): Promise<ParsedSheet[]> {
   });
 }
 
-// "Mittwoch, 1. Oktober 2025" -> true?
+// "Mittwoch, 1. Oktober 2025"
 const deLongDateRx = /^[A-Za-zÄÖÜäöüß]+,\s*\d{1,2}\.\s*[A-Za-zÄÖÜäöüß]+\s+\d{4}\s*$/;
 
-function compactSpaces(s: string){ return s.trim().replace(/\s+/g,' '); }
+const compactSpaces = (s: string) => s.trim().replace(/\s+/g, ' ');
+const normName = (s: string) => compactSpaces(s).toLowerCase();
 
 export default function RosterUploadPage() {
   const [teams, setTeams] = useState<TeamRow[]>([]);
   const [teamId, setTeamId] = useState<string>('');
 
-  const [members, setMembers] = useState<Member[]>([]); // Team-Mitglieder für Mapping
+  const [members, setMembers] = useState<Member[]>([]);
   const [membersLoadedFor, setMembersLoadedFor] = useState<string>('');
 
   const [file, setFile] = useState<File|null>(null);
@@ -63,19 +63,19 @@ export default function RosterUploadPage() {
 
   // Mapping der Excel-Header
   const [firstNameCol, setFirstNameCol] = useState('');
-  const [lastNameCol, setLastNameCol]   = useState('');
-  const [fullNameCol, setFullNameCol]   = useState('');
-  const [roleCol, setRoleCol]           = useState('');
-  const [dateCols, setDateCols]         = useState<string[]>([]);
+  const [lastNameCol,  setLastNameCol]  = useState('');
+  const [fullNameCol,  setFullNameCol]  = useState('');
+  const [roleCol,      setRoleCol]      = useState('');
+  const [dateCols,     setDateCols]     = useState<string[]>([]);
 
-  // Name -> user_id (Dropdown)
+  // Excel-Name -> user_id (Dropdown)
   const [assignments, setAssignments] = useState<Array<{sheetName:string; user_id:string|''}>>([]);
 
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState('');
-  const [out, setOut] = useState('');
+  const [err,  setErr]  = useState('');
+  const [out,  setOut]  = useState('');
 
-  // Teams laden
+  /* ========== 1) Teams laden ========== */
   useEffect(()=>{(async()=>{
     const r = await fetch('/api/teamhub/my-teams', { cache:'no-store' });
     const j = await r.json().catch(()=>null);
@@ -84,21 +84,26 @@ export default function RosterUploadPage() {
     if (!teamId && arr.length) setTeamId(arr[0].team_id);
   })()},[]);
 
-  // Team-Mitglieder laden, wenn teamId gewählt
+  /* ========== 2) Team-Mitglieder laden ========== */
   useEffect(()=>{(async()=>{
     if (!teamId) { setMembers([]); setMembersLoadedFor(''); return; }
-    // einfache Team-Members-API (du kannst /api/teamhub/members?team_id=… anbieten – hier Beispiel):
+    // Deine /members-Route kann optional ?team_id verstehen – wenn nicht, ignoriert sie den Param.
     const r = await fetch(`/api/teamhub/members?team_id=${encodeURIComponent(teamId)}`, { cache:'no-store' });
     const j = await r.json().catch(()=>null);
+    // Erwartetes Format: { members: [{user_id, name}, ...] }
     const arr: Member[] = Array.isArray(j?.members) ? j.members : [];
     setMembers(arr);
     setMembersLoadedFor(teamId);
   })()},[teamId]);
 
-  // Datei einlesen
+  /* ========== 3) Datei einlesen ========== */
   async function onFileChange(f: File|null){
-    setFile(f); setSheets([]); setErr(''); setOut('');
-    setFirstNameCol(''); setLastNameCol(''); setFullNameCol(''); setRoleCol(''); setDateCols([]);
+    setFile(f);
+    setSheets([]);
+    setErr('');
+    setOut('');
+    setFirstNameCol(''); setLastNameCol(''); setFullNameCol(''); setRoleCol('');
+    setDateCols([]);
     setAssignments([]);
     if (!f) return;
     const parsed = await excelToSheets(f);
@@ -106,78 +111,91 @@ export default function RosterUploadPage() {
     setSheetIdx(0);
   }
 
-  // Auto-Guess bei Sheetwechsel
+  /* ========== 4) Auto-Guess / Neuaufbau bei Sheet- oder Mapping-Änderungen ========== */
   useEffect(()=>{
     if (!cur) return;
-    const norm = cur.headers.map(h=>({ raw:h, norm: normalizeHeader(h) }));
-    const find = (keys: string[]) => norm.find(h=>keys.includes(h.norm))?.raw || '';
 
-    // Namensspalten erkennen
-    const guessedLast  = find(['nachname','name_nachname']);
-    const guessedFirst = find(['vorname','name_vorname']);
-    const guessedFull  = find(['name','mitarbeiter','vollname','fullname']);
+    // 4a) Heuristik für Spaltenvorschläge nur beim ersten Betreten des Sheets
+    if (!firstNameCol && !lastNameCol && !fullNameCol && !roleCol && !dateCols.length) {
+      const norm = cur.headers.map(h=>({ raw:h, norm: normalizeHeader(h) }));
+      const find = (keys: string[]) => norm.find(h=>keys.includes(h.norm))?.raw || '';
 
-    setLastNameCol(guessedLast);
-    setFirstNameCol(guessedFirst);
-    setFullNameCol(guessedFull);
+      setLastNameCol (find(['nachname','name_nachname']));
+      setFirstNameCol(find(['vorname','name_vorname']));
+      setFullNameCol (find(['name','mitarbeiter','vollname','fullname']));
+      setRoleCol     (find(['aufgabe','rolle','role','position','funktion']));
 
-    const guessedRole  = find(['aufgabe','rolle','role','position','funktion']);
-    setRoleCol(guessedRole);
-
-    // Datums-Spalten
-    const dCols = cur.headers.filter(h => deLongDateRx.test(String(h).trim()));
-    setDateCols(dCols);
-
-    // Einmalige Personenliste bauen
-    const seen = new Set<string>();
-    const people: string[] = [];
-    for (const row of cur.rows) {
-      const full = fullNameCol ? pick(cur.headers, row, fullNameCol) : null;
-      const first = firstNameCol ? pick(cur.headers, row, firstNameCol) : null;
-      const last  = lastNameCol   ? pick(cur.headers, row, lastNameCol)   : null;
-      const sheetName = full
-        ? compactSpaces(String(full))
-        : compactSpaces([last, first].filter(Boolean).join(' '));
-      if (!sheetName) continue;
-      const key = sheetName.toLowerCase();
-      if (!seen.has(key)) { seen.add(key); people.push(sheetName); }
+      const dCols = cur.headers.filter(h => deLongDateRx.test(String(h).trim()));
+      setDateCols(dCols);
     }
 
-    // Automatching auf Team-Mitglieder
-    const assigns = people.map(p => {
-      const pNorm = p.toLowerCase();
-      const hit = members.find(m => m.name?.toLowerCase?.() === pNorm);
-      return { sheetName: p, user_id: hit ? hit.user_id : '' };
+    // 4b) Personenliste auf Basis der (aktuellen) Mapping-Auswahl
+    const idx = (label:string) => cur.headers.indexOf(label);
+    const peopleSeen = new Set<string>();
+    const people: string[] = [];
+    const iFull  = idx(fullNameCol);
+    const iFirst = idx(firstNameCol);
+    const iLast  = idx(lastNameCol);
+
+    for (const row of cur.rows) {
+      const full  = iFull  >= 0 ? row[iFull]  : '';
+      const first = iFirst >= 0 ? row[iFirst] : '';
+      const last  = iLast  >= 0 ? row[iLast]  : '';
+      const person = full ? compactSpaces(String(full)) : compactSpaces([last, first].filter(Boolean).join(' '));
+      if (!person) continue;
+      const key = normName(person);
+      if (!peopleSeen.has(key)) { peopleSeen.add(key); people.push(person); }
+    }
+
+    // 4c) Assignments neu bauen, bisherige Wahl dabei erhalten
+    setAssignments(prev=>{
+      const prevMap = new Map(prev.map(a=>[normName(a.sheetName), a.user_id]));
+      const next = people.map(p=>{
+        const keep = prevMap.get(normName(p)) || '';
+        if (keep) return { sheetName: p, user_id: keep };
+        // Auto-Match, wenn Excel-Name exakt Team-Mitgliedsname
+        const hit = members.find(m => normName(m.name||'') === normName(p));
+        return { sheetName: p, user_id: hit?.user_id || '' };
+      });
+      return next;
     });
-    setAssignments(assigns);
-   
-  }, [sheetIdx, cur?.headers.join('|'), members.map(m=>m.user_id).join(',')]);
 
-  function pick(headers: string[], row: string[], col?: string|null){
-    if (!col) return '';
-    const idx = headers.indexOf(col);
-    return idx >= 0 ? (row[idx] ?? '') : '';
-  }
+  // Dependencies: wenn sich Sheet, Header, Mapping oder Mitglieder ändern → neu berechnen
+  }, [
+    sheetIdx,
+    cur?.headers.join('|'),
+    cur?.rows.length,
+    firstNameCol, lastNameCol, fullNameCol, roleCol,
+    members.map(m=>m.user_id).join(',')
+  ]);
 
+  /* ========== 5) Helpers ========== */
   const headerOptions = useMemo(()=> (cur?.headers||[]).map(h=>({value:h,label:h})), [cur?.headers]);
 
   function setAssign(name:string, user_id:string){
     setAssignments(prev => prev.map(a => a.sheetName===name ? { ...a, user_id } : a));
   }
 
-  // Vorschau: die ersten 20 Personen × die ausgewählten DateCols (Zellrohtext)
+  // Vorschau: erste 20 Zeilen, nur die gewählten Tages-Spalten
   const previewRows = useMemo(()=>{
     if (!cur) return [];
+    const idx = (label:string) => cur.headers.indexOf(label);
+    const iFull  = idx(fullNameCol);
+    const iFirst = idx(firstNameCol);
+    const iLast  = idx(lastNameCol);
+    const di = dateCols.map(h => idx(h));
+
     return cur.rows.slice(0, 20).map(r => {
-      const full = fullNameCol ? pick(cur.headers, r, fullNameCol) : '';
-      const first = firstNameCol ? pick(cur.headers, r, firstNameCol) : '';
-      const last  = lastNameCol   ? pick(cur.headers, r, lastNameCol)   : '';
-      const person = full ? compactSpaces(full) : compactSpaces([last, first].filter(Boolean).join(' '));
-      const cols = dateCols.map(h => pick(cur.headers, r, h));
+      const full  = iFull  >= 0 ? r[iFull]  : '';
+      const first = iFirst >= 0 ? r[iFirst] : '';
+      const last  = iLast  >= 0 ? r[iLast]  : '';
+      const person = full ? compactSpaces(String(full)) : compactSpaces([last, first].filter(Boolean).join(' '));
+      const cols = di.map(i => i>=0 ? String(r[i] ?? '') : '');
       return { person, cols };
     });
   }, [cur, firstNameCol, lastNameCol, fullNameCol, dateCols]);
 
+  /* ========== 6) Submit ========== */
   async function submit(e:React.FormEvent){
     e.preventDefault();
     setErr(''); setOut('');
@@ -194,7 +212,7 @@ export default function RosterUploadPage() {
         method:'POST',
         headers:{ 'Content-Type':'application/json' },
         body: JSON.stringify({
-          team_id: teamId,
+          team_id: Number(teamId),
           sheet_name: cur.name,
           headers: cur.headers,
           rows: cur.rows,
@@ -209,14 +227,12 @@ export default function RosterUploadPage() {
         })
       });
       const j = await res.json().catch(()=>null);
-      if (!res.ok) {
-        setErr(j?.error || `Fehler ${res.status}`);
-      } else {
-        setOut(JSON.stringify(j, null, 2));
-      }
+      if (!res.ok) setErr(j?.error || `Fehler ${res.status}`);
+      else setOut(JSON.stringify(j, null, 2));
     } finally { setBusy(false); }
   }
 
+  /* ========== UI ========== */
   return (
     <div className="space-y-6">
       <h1 className="text-xl font-semibold">Dienstplan hochladen (Excel – breite Tagesspalten)</h1>
@@ -233,9 +249,11 @@ export default function RosterUploadPage() {
       {/* Datei */}
       <div className="max-w-xl space-y-2">
         <label className="block text-sm font-medium">Excel (.xlsx/.xls)</label>
-        <input type="file"
+        <input
+          type="file"
           accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
-          onChange={e=>onFileChange(e.target.files?.[0] ?? null)} />
+          onChange={e=>onFileChange(e.target.files?.[0] ?? null)}
+        />
         {file && <div className="text-xs text-gray-500">Datei: {file.name}</div>}
       </div>
 
@@ -255,13 +273,13 @@ export default function RosterUploadPage() {
         <div className="max-w-4xl space-y-3">
           <div className="text-sm font-medium">Spalten-Zuordnung</div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            <MapSelect label="Nachname"   value={lastNameCol} onChange={setLastNameCol} options={headerOptions} />
-            <MapSelect label="Vorname"    value={firstNameCol} onChange={setFirstNameCol} options={headerOptions} />
-            <MapSelect label="Name (voll)" value={fullNameCol} onChange={setFullNameCol} options={headerOptions} />
-            <MapSelect label="Aufgabe/Rolle" value={roleCol} onChange={setRoleCol} options={headerOptions} />
+            <MapSelect label="Nachname"     value={lastNameCol}  onChange={setLastNameCol}  options={headerOptions} />
+            <MapSelect label="Vorname"      value={firstNameCol} onChange={setFirstNameCol} options={headerOptions} />
+            <MapSelect label="Name (voll)"  value={fullNameCol}  onChange={setFullNameCol}  options={headerOptions} />
+            <MapSelect label="Aufgabe/Rolle" value={roleCol}     onChange={setRoleCol}      options={headerOptions} />
           </div>
 
-          {/* Date Columns Auswahl (auto-gefüllt, aber editierbar) */}
+          {/* Date Columns Auswahl */}
           <div>
             <div className="text-sm font-medium mb-1">Datums-Spalten</div>
             <div className="flex flex-wrap gap-2">
@@ -301,7 +319,7 @@ export default function RosterUploadPage() {
             ))}
           </ul>
           <div className="text-xs text-gray-500">
-            Tipp: Die Liste ist vorbefüllt, wenn der Excel-Name exakt dem Team-Mitgliedsnamen entspricht.
+            Tipp: Automatisch zugeordnet, wenn Excel-Name exakt dem Team-Mitgliedsnamen entspricht.
           </div>
         </div>
       )}
