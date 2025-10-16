@@ -7,7 +7,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { authedFetch } from '@/lib/fetchWithSupabase';
 import QAWidget from './QAWidget';
-import TeamAbsenceList from '../components/TeamAbsenceList';
+import TeamAbsenceList from '@/app/components/TeamAbsenceList';
 
 /* ---------------- Types ---------------- */
 type Member = { user_id: string; name: string };
