@@ -1,92 +1,70 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 // app/api/absence/upcoming/route.ts
-import { NextRequest, NextResponse } from 'next/server';
-import { absenceGet } from '@/lib/absenceio';
-import { getUserFromRequest } from '@/lib/getUserFromRequest';
-import { supabaseServer } from '@/lib/supabase-server';
+import { NextResponse } from 'next/server';
+import { cookies, headers } from 'next/headers';
 
-export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs'; // wichtig, falls Auth-Helpers Edge nicht mögen
 
-function toISODate(d: Date) { return d.toISOString().slice(0,10); }
+const ABSENCE_API = process.env.ABSENCE_API_URL!; // z.B. https://absence.internal/api
 
-export async function GET(req: NextRequest) {
+export async function GET(req: Request) {
   try {
-    // Auth (normaler User erlaubt)
-    const me = await getUserFromRequest(req);
-    if (!me || 'error' in (me as any)) {
-      return NextResponse.json({ ok:false, error:'unauthorized' }, { status: 401 });
+    const url = new URL(req.url);
+
+    // WICHTIG: Mehrfach-Parameter korrekt lesen
+    const memberIds = url.searchParams.getAll('member_user_id');
+    if (memberIds.length === 0) {
+      return NextResponse.json({ error: 'Missing member_user_id' }, { status: 400 });
     }
 
-    // Zeitraum (Default: heute → +7 Tage)
-    const { searchParams } = new URL(req.url);
-    const from = searchParams.get('from') || toISODate(new Date());
-    const toD  = new Date(from + 'T00:00:00Z'); toD.setUTCDate(toD.getUTCDate() + 7);
-    const to   = searchParams.get('to') || toISODate(toD);
+    // Auth besorgen – je nach Setup:
+    // Variante A: Token aus Cookie
+    const authCookie = (await cookies()).get('AUTH_COOKIE')?.value;
 
-    // Team-Mitglieder ermitteln (deine existierende Quelle):
-    // Fallback: /api/teamhub/members liefert { user_id, name }
-   
-    const sb = await supabaseServer();
-    const { data: members } = await (await sb)
-      .from('teamhub_members_view') // <- falls du eine View hast
-      .select('user_id,name,email')  // email nützlich für Mapping
-      .eq('owner_id', (me as any).id)
-      .limit(200);
+    // Variante B: Authorization-Header vom Client durchreichen (falls ihr clientseitig fetch mit Bearer macht)
+    const incomingAuth = (await headers()).get('authorization');
 
-    // Falls du keine View hast: optional fallback auf eure bestehende API:
-    // const r = await fetch(new URL(req.url).origin + '/api/teamhub/members', { headers: { cookie: req.headers.get('cookie')||'' }});
-    // const j = await r.json(); const members = Array.isArray(j?.members)? j.members : [];
+    const authHeader =
+      incomingAuth?.startsWith('Bearer ')
+        ? incomingAuth
+        : authCookie
+        ? `Bearer ${authCookie}`
+        : null;
 
-    // optional: explizite Filter per Query ?member_user_id=a&member_user_id=b
-    const memberFilter = searchParams.getAll('member_user_id');
-    const effectiveMembers = (members||[]).filter(m => memberFilter.length===0 || memberFilter.includes(m.user_id));
+    if (!authHeader) {
+      // Hier 401 zurückgeben, NICHT 500
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
-    // absence.io: Abwesenheiten abfragen
-    // Tipp: relations=['assignedToId','typeId'] liefert user + type Objekte
-    const res = await absenceGet<{ data:any[]; total:number; skip:number; limit:number }>(
-      '/absences',
-      {
-        start_gte: from,
-        end_lte: to,
-        limit: 500,
-        relations: JSON.stringify(['assignedToId','typeId']),
+    // Upstream-URL mit allen IDs bauen
+    const upstreamUrl = new URL('/upcoming', ABSENCE_API);
+    for (const id of memberIds) upstreamUrl.searchParams.append('member_user_id', id);
+
+    const upstreamRes = await fetch(upstreamUrl.toString(), {
+      method: 'GET',
+      headers: {
+        Authorization: authHeader,
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+    });
+
+    // Fehler sauber mappen – besonders 401/403 nicht als 500 verstecken
+    if (!upstreamRes.ok) {
+      const text = await upstreamRes.text().catch(() => '');
+      if (upstreamRes.status === 401 || upstreamRes.status === 403) {
+        return NextResponse.json({ error: 'Invalid credentials' }, { status: upstreamRes.status });
       }
-    );
+      console.error('[absence/upcoming] Upstream error', upstreamRes.status, text);
+      return NextResponse.json(
+        { error: 'Upstream error', status: upstreamRes.status },
+        { status: 502 }
+      );
+    }
 
-    // Nur Team-Mitglieder durchlassen (per E-Mail oder Name matchen)
-    const emailSet = new Set(
-      (effectiveMembers||[]).map((m:any) => (m.email||'').trim().toLowerCase()).filter(Boolean)
-    );
-    const nameSet = new Set(
-      (effectiveMembers||[]).map((m:any) => (m.name||'').trim().toLowerCase()).filter(Boolean)
-    );
-
-    const items = (res?.data||[])
-      .filter((a:any) => {
-        const u = a.assignedTo || a.user || {};
-        const email = String(u.email||'').trim().toLowerCase();
-        const full  = String([u.firstName,u.lastName].filter(Boolean).join(' ')).trim().toLowerCase();
-        return (email && emailSet.has(email)) || (full && nameSet.has(full));
-      })
-      .map((a:any) => ({
-        id: a._id || a.id,
-        start: a.start || a.Start,
-        end: a.end || a.End,
-        user: {
-          firstName: a.assignedTo?.firstName,
-          lastName:  a.assignedTo?.lastName,
-          email:     a.assignedTo?.email,
-        },
-        type: {
-          name: a.type?.name || a.typeName || 'Abwesenheit',
-        },
-        status: a.status,
-      }))
-      .sort((x:any,y:any) => new Date(x.start).getTime() - new Date(y.start).getTime());
-
-    return NextResponse.json({ ok:true, from, to, items });
-  } catch (e:any) {
-    console.error('[absence/upcoming GET]', e);
-    return NextResponse.json({ ok:false, error: e?.message || 'internal' }, { status: 500 });
+    const data = await upstreamRes.json();
+    return NextResponse.json(data, { status: 200 });
+  } catch (err) {
+    console.error('[absence/upcoming] Unhandled error', err);
+    return NextResponse.json({ error: 'Internal error' }, { status: 500 });
   }
 }
