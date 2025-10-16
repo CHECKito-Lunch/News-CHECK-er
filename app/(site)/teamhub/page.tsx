@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { authedFetch } from '@/lib/fetchWithSupabase';
 import QAWidget from './QAWidget';
+import TeamAbsenceList from '../components/TeamAbsenceList';
 
 /* ---------------- Types ---------------- */
 type Member = { user_id: string; name: string };
@@ -637,14 +638,16 @@ export default function TeamHubPage() {
         </div>
 
         {/* Right Rail: Kommentar-Thread Hub & QA */}
-        <aside className="space-y-4 sticky top-4">
-          <CommentThreadHub ownerId={userId} onJumpToFeedback={scrollToFeedback} />
-          <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3">
-            <div className="text-sm font-semibold mb-2">QA-Assistent</div>
-            {/* Das Widget ordentlich eingebettet mit Card-Styling */}
-            <QAWidget />
-          </div>
-        </aside>
+<aside className="space-y-4 sticky top-4">
+  {/* Neu: Abwesenheiten für die im Dropdown gelisteten Team-Mitglieder */}
+  <TeamAbsenceList members={members} />
+
+  <CommentThreadHub ownerId={userId} onJumpToFeedback={scrollToFeedback} />
+  <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3">
+    <div className="text-sm font-semibold mb-2">QA-Assistent</div>
+    <QAWidget />
+  </div>
+</aside>
       </section>
     </div>
   );

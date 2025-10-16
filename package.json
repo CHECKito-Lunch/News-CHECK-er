@@ -14,6 +14,7 @@
     "@fullcalendar/interaction": "^6.1.19",
     "@fullcalendar/list": "^6.1.19",
     "@fullcalendar/react": "^6.1.19",
+    "@hapi/hawk": "^8.0.0",
     "@supabase/auth-ui-react": "^0.4.7",
     "@supabase/auth-ui-shared": "^0.1.8",
     "@supabase/ssr": "^0.7.0",
@@ -32,6 +33,7 @@
     "@vercel/analytics": "^1.5.0",
     "@vercel/speed-insights": "^1.2.0",
     "bcryptjs": "^3.0.2",
+    "cross-fetch": "^4.1.0",
     "date-fns": "^4.1.0",
     "framer-motion": "^12.23.12",
     "iconv-lite": "^0.7.0",
@@ -56,6 +58,7 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3",
     "@tailwindcss/typography": "^0.5.16",
+    "@types/hapi__hawk": "^8.0.6",
     "@types/node": "^20",
     "@types/papaparse": "^5.3.16",
     "@types/pg": "^8.15.5",
