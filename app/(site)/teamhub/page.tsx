@@ -7,7 +7,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { authedFetch } from '@/lib/fetchWithSupabase';
 import QAWidget from './QAWidget';
-import TeamAbsenceList from '@/app/components/TeamAbsenceList';
+import TeamRosterList from '@/app/components/TeamRosterList';
+
 
 /* ---------------- Types ---------------- */
 type Member = { user_id: string; name: string };
@@ -108,6 +109,20 @@ type CommentRow = {
   created_at: string;
   author: string;
 };
+
+function FirstTeamRosterCard(){
+  const [teamId, setTeamId] = useState<number|null>(null);
+
+  useEffect(() => { (async () => {
+    const r = await authedFetch('/api/teamhub/my-teams', { cache:'no-store' });
+    const j = await r.json().catch(()=>null);
+    const first = Array.isArray(j?.items) && j.items[0]?.team_id ? Number(j.items[0].team_id) : null;
+    setTeamId(Number.isFinite(first) ? first : null);
+  })(); }, []);
+
+  if (!teamId) return null;
+  return <TeamRosterList teamId={teamId} />;
+}
 
 /* --------------- Page ------------------ */
 export default function TeamHubPage() {
@@ -637,11 +652,11 @@ export default function TeamHubPage() {
           )}
         </div>
 
+
+
         {/* Right Rail: Kommentar-Thread Hub & QA */}
 <aside className="space-y-4 sticky top-4">
-  {/* Neu: Abwesenheiten für die im Dropdown gelisteten Team-Mitglieder */}
-  <TeamAbsenceList members={members} />
-
+  <FirstTeamRosterCard />   {/* ← Dienstplan-Widget */}
   <CommentThreadHub ownerId={userId} onJumpToFeedback={scrollToFeedback} />
   <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3">
     <div className="text-sm font-semibold mb-2">QA-Assistent</div>

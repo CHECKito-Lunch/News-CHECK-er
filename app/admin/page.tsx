@@ -6,7 +6,7 @@ import { headers as nextHeaders, cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import {
   Newspaper, ListChecks, Vote, Store, Tags, Award, Trophy,
-  Users2, Wrench, CalendarDays, Bot, Activity, UserCircle2, Ticket
+  Users2, Wrench, CalendarDays, Bot, Activity, UserCircle2, Ticket, CalendarCog
 } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
@@ -40,6 +40,7 @@ const tiles: Array<{
   { href: '/admin/checkiade',     label: 'CHECKiade',            icon: Trophy,       roles: ['admin','teamleiter'] },
   { href: '/admin/feedback',      label: 'Feedbacks',            icon: Vote,         roles: ['admin','teamleiter'] },
   { href: '/admin/qa',      label: 'Mitarbeiter Feedbacks',                    icon: Tags,         roles: ['admin','teamleiter'] },
+  { href: '/admin/roster-upload',    label: 'Dienstplan Upload',           icon: CalendarCog,          roles: ['admin','teamleiter'] },
 ];
 
 async function absoluteUrl(path: string) {

@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   Newspaper, ListChecks, Vote, Store, Tags, Award, Users2, Trophy,
   Wrench, CalendarDays, Bot, Activity, UserCircle2, Ticket, ChevronLeft,
-  FilePlus, ClipboardCheck, MessageSquare
+  FilePlus, ClipboardCheck, MessageSquare, CalendarCog
 } from 'lucide-react';
 
 type Role = 'admin' | 'moderator' | 'user' | 'teamleiter';
@@ -37,6 +37,7 @@ const NAV_ALL: Group[] = [
       { href: '/admin/kpis',         label: 'KPIs',              icon: Activity,       roles: ['admin','teamleiter'] },
       { href: '/admin/feedback',     label: 'Kunden-Feedbacks',  icon: MessageSquare,  roles: ['admin','teamleiter'] },
       { href: '/admin/qa',           label: 'Mitarbeiter-Feedbacks', icon: ClipboardCheck, roles: ['admin','teamleiter'] },
+      { href: '/admin/roster-upload',           label: 'Dienstplan Upload', icon: CalendarCog, roles: ['admin','teamleiter'] },
     ],
   },
   {
