@@ -8,57 +8,98 @@ import { getUserFromCookies } from '@/lib/auth';
 
 const json = (d: unknown, s=200) => NextResponse.json(d, { status:s });
 
-type RowIn = {
-  date_raw: string;   // kann ISO, dd.mm.yyyy oder Excel-Serienzahl als String enthalten
-  start_raw: string;  // HH:MM oder Excel-Fraktion (0.5)
-  end_raw: string;
-  employee: string;
-  role?: string|null;
-  note?: string|null;
+type Mapping = {
+  firstName?: string;     // "Vorname"
+  lastName?: string;      // "Nachname"
+  fullName?: string;      // alternativ "Name" (falls kombiniert)
+  role?: string;          // "Aufgabe"
+  // frei: weitere Meta-Spalten wie Eintrittsdatum o.ä. ignorieren wir
+  dateCols: string[];     // ALLE Datums-Spalten (z.B. "Mittwoch, 1. Oktober 2025", ...)
 };
 
-function toISODate(s: string): string | null {
-  if (!s) return null;
-  const t = s.trim();
-  // Excel-Serienzahl?
-  const n = Number(t);
-  if (Number.isFinite(n) && n>0 && t === String(n)) {
-    const epoch = Date.UTC(1899, 11, 30);
-    const ms = (n - 0) * 86400000;
-    const d = new Date(epoch + ms);
-    return isNaN(d.getTime()) ? null : d.toISOString().slice(0,10);
-  }
-  // dd.mm.yyyy
-  const m = t.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/);
-  if (m) {
-    const dd = +m[1], MM = +m[2], yy = +m[3];
-    const year = m[3].length === 2 ? (2000+yy) : yy;
-    const d = new Date(Date.UTC(year, MM-1, dd));
-    return isNaN(d.getTime()) ? null : d.toISOString().slice(0,10);
-  }
-  // ISO oder parsebar
-  const d = new Date(t);
-  return isNaN(d.getTime()) ? null : d.toISOString().slice(0,10);
+type UploadBody = {
+  team_id: number|string;
+  sheet_name?: string;
+  headers: string[];        // Excel-Headerzeile
+  rows: string[][];         // Excel-Daten als 2D-Array (ohne Header)
+  mapping: Mapping;
+  // Name→user_id Mapping aus der UI (Dropdowns):
+  assignments: Array<{ sheetName: string; user_id: string|null }>;
+};
+
+/* ---------- Helpers: Header "Mittwoch, 1. Oktober 2025" -> YYYY-MM-DD ---------- */
+const DE_MONTHS: Record<string, number> = {
+  januar:1, februar:2, märz:3, maerz:3, april:4, mai:5, juni:6, juli:7,
+  august:8, september:9, oktober:10, november:11, dezember:12
+};
+function parseGermanLongDate(h: string): string | null {
+  const s = String(h ?? '').trim().toLowerCase();
+  // Beispiele:
+  // "mittwoch, 1. oktober 2025" | "donnerstag, 2. oktober 2025"
+  const m = s.match(/^\s*[a-zäöüß]+,\s*(\d{1,2})\.\s*([a-zäöüß]+)\s+(\d{4})\s*$/i);
+  if (!m) return null;
+  const dd = parseInt(m[1],10);
+  const monKey = m[2]
+    .replace('ä','ae').replace('ö','oe').replace('ü','ue').replace('ß','ss');
+  const mm = DE_MONTHS[monKey] || DE_MONTHS[monKey.normalize('NFKD').replace(/[^\x00-\x7F]/g,'')] || NaN;
+  const yyyy = parseInt(m[3],10);
+  if (!mm || isNaN(dd) || isNaN(yyyy)) return null;
+  const dt = new Date(Date.UTC(yyyy, mm-1, dd));
+  return isNaN(dt.getTime()) ? null : dt.toISOString().slice(0,10);
 }
 
-function toHHMM(s: string): string | null {
-  if (!s) return null;
-  const t = s.trim();
-  // Excel-Fraktion
-  const n = Number(t);
-  if (Number.isFinite(n) && n>0 && n<2 && t === String(n)) {
-    const min = Math.round(n*24*60);
-    const h = Math.floor(min/60), m = min%60;
-    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+/* ---------- Zellparser: extrahiert Status & Zeiten ---------- */
+type ParsedCell =
+  | { status: string; start_time?: null; end_time?: null; cross_midnight?: boolean; }
+  | { status?: null; start_time: string; end_time: string; cross_midnight: boolean; };
+
+function parseCell(raw: string): ParsedCell | null {
+  if (raw == null) return null;
+  const txt = String(raw).replace(/\r/g,'').trim();
+
+  if (!txt) return null;
+
+  // Status-Stichworte (Zeiten optional, z.B. "Krank\n13:30-22:00")
+  const statusKeywords = ['urlaub', 'krank', 'frei', 'feiertag', 'feiertag - frei', 'terminblocker'];
+  const lower = txt.toLowerCase();
+  const hasStatus = statusKeywords.find(k => lower.includes(k));
+
+  // Zeitmuster: "06:00-14:30" oder "16:30-01:00+1"
+  // Wir nehmen die LETZTE passende Zeit im Text (oft stehen zwei Zeilen: "Früh …\n06:00-14:30")
+  const allMatches = [...txt.matchAll(/(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})(\+1)?/g)];
+  const last = allMatches.length ? allMatches[allMatches.length-1] : null;
+  if (last) {
+    const sh = Math.min(23, Math.max(0, parseInt(last[1],10)));
+    const sm = Math.min(59, Math.max(0, parseInt(last[2],10)));
+    const eh = Math.min(23, Math.max(0, parseInt(last[3],10)));
+    const em = Math.min(59, Math.max(0, parseInt(last[4],10)));
+    const plus1 = !!last[5];
+    const start_time = `${String(sh).padStart(2,'0')}:${String(sm).padStart(2,'0')}`;
+    const end_time   = `${String(eh).padStart(2,'0')}:${String(em).padStart(2,'0')}`;
+    // Wenn +1 nicht angegeben ist, aber end<start → ebenfalls über Mitternacht
+    const cross_midnight = plus1 || (eh*60+em) < (sh*60+sm);
+    if (hasStatus) {
+      return { status: hasStatus, start_time: null, end_time: null, cross_midnight };
+    }
+    return { start_time, end_time, cross_midnight };
   }
-  // HH:MM
-  const m = t.match(/^(\d{1,2}):(\d{2})$/);
-  if (m) {
-    const hh = Math.min(23, Math.max(0, parseInt(m[1],10)));
-    const mi = Math.min(59, Math.max(0, parseInt(m[2],10)));
-    return `${String(hh).padStart(2,'0')}:${String(mi).padStart(2,'0')}`;
-  }
-  return null;
+
+  // nur Status ohne Zeit
+  if (hasStatus) return { status: hasStatus };
+
+  return null; // leer/irrelevant
+}
+
+function pick<T=string>(headers: string[], row: string[], colName?: string|null): T|null {
+  if (!colName) return null;
+  const idx = headers.indexOf(colName);
+  if (idx < 0) return null;
+  const v = row[idx];
+  return (v==null || v==='') ? null : (v as any);
+}
+
+function compactSpaces(s: string) {
+  return s.trim().replace(/\s+/g,' ');
 }
 
 export async function POST(req: NextRequest){
@@ -69,15 +110,20 @@ export async function POST(req: NextRequest){
       return json({ ok:false, error:'forbidden' }, 403);
     }
 
-    const form = await req.formData();
-    const teamId = Number(form.get('team_id') ?? NaN);
-    const rowsRaw = String(form.get('rows') ?? '[]');
-    const rows: RowIn[] = JSON.parse(rowsRaw);
+    // Body als JSON (wir schicken kein File mehr, sondern geparste Inhalte vom Client)
+    const body = await req.json() as UploadBody;
 
-    if (!Number.isFinite(teamId) || teamId<=0) return json({ ok:false, error:'invalid team_id' }, 400);
-    if (!Array.isArray(rows) || rows.length===0) return json({ ok:false, error:'no_rows' }, 400);
+    const teamId = Number(body?.team_id ?? NaN);
+    const headers = Array.isArray(body?.headers) ? body.headers : [];
+    const rows = Array.isArray(body?.rows) ? body.rows : [];
+    const mapping = body?.mapping as Mapping;
+    const assigns = Array.isArray(body?.assignments) ? body.assignments : [];
 
-    // Prüfen: ist requester Teamleiter dieses Teams?
+    if (!Number.isFinite(teamId) || !teamId) return json({ ok:false, error:'invalid team_id' }, 400);
+    if (!headers.length || !rows.length) return json({ ok:false, error:'no_rows' }, 400);
+    if (!mapping?.dateCols?.length) return json({ ok:false, error:'no_date_columns' }, 400);
+
+    // Berechtigung prüfen
     const can = await sql<{ok:boolean}[]>/*sql*/`
       select exists(
         select 1 from public.team_memberships tm
@@ -88,59 +134,119 @@ export async function POST(req: NextRequest){
     `;
     if (!can?.[0]?.ok && me.role !== 'admin') return json({ ok:false, error:'forbidden' }, 403);
 
-    // Normalisieren
-    const norm = rows.map(r => {
-      const date = toISODate(String(r.date_raw||''));
-      const startHHMM = toHHMM(String(r.start_raw||''));
-      const endHHMM   = toHHMM(String(r.end_raw||''));
-      const emp = String(r.employee||'').trim();
-      return {
-        roster_date: date,                 // YYYY-MM-DD
-        start_time:  startHHMM,            // HH:MM
-        end_time:    endHHMM,              // HH:MM
-        employee_name: emp || null,
-        role: (r.role ?? null) ? String(r.role).trim() : null,
-        note: (r.note ?? null) ? String(r.note).trim() : null,
-      };
-    }).filter(x => x.roster_date && x.start_time && x.end_time && x.employee_name) as Array<{
-      roster_date:string; start_time:string; end_time:string; employee_name:string; role:string|null; note:string|null;
-    }>;
+    // Name→user_id Lookuptabelle (aus Dropdown)
+    const nameToUser = new Map<string,string>(); // key = normalized sheet name
+    for (const a of assigns) {
+      const k = compactSpaces(String(a.sheetName||'').toLowerCase());
+      if (a.user_id) nameToUser.set(k, a.user_id);
+    }
 
-    if (norm.length===0) return json({ ok:false, error:'no_valid_rows' }, 400);
+    // Zielrows bauen
+    type Out = {
+      team_id: number;
+      roster_date: string;       // YYYY-MM-DD
+      start_time: string|null;
+      end_time: string|null;
+      employee_name: string;
+      user_id: string|null;
+      role: string|null;
+      status: string|null;
+      raw_cell: string|null;
+      created_by: string;
+      cross_midnight: boolean;
+    };
+    const out: Out[] = [];
 
-    // Versuch: Mitarbeiter -> user_id matchen (per Name) innerhalb des Teams
-    // (einfacher Normalizer: lower/kompakte Spaces)
+    for (const row of rows) {
+      const first = pick(headers, row, mapping.firstName);
+      const last  = pick(headers, row, mapping.lastName);
+      const full  = pick(headers, row, mapping.fullName);
+
+      const sheetName = full
+        ? compactSpaces(String(full))
+        : compactSpaces([last, first].filter(Boolean).join(' '));
+
+      if (!sheetName) continue;
+
+      const role = pick<string>(headers, row, mapping.role);
+
+      // Jede Datums-Spalte falten
+      for (const col of mapping.dateCols) {
+        const dateISO = parseGermanLongDate(col);
+        if (!dateISO) continue;
+
+        const rawCell = pick<string>(headers, row, col) ?? '';
+        if (!rawCell) continue; // leer
+
+        const parsed = parseCell(rawCell);
+        if (!parsed) continue;
+
+        const normKey = sheetName.toLowerCase(); // fürs Mapping
+        const user_id = nameToUser.get(normKey) ?? null;
+
+        if ('start_time' in parsed && parsed.start_time && parsed.end_time) {
+          out.push({
+            team_id: teamId,
+            roster_date: dateISO,
+            start_time: parsed.start_time,
+            end_time: parsed.end_time,
+            employee_name: sheetName,
+            user_id,
+            role: role ? String(role) : null,
+            status: parsed.status ?? null,
+            raw_cell: rawCell,
+            created_by: me.user_id,
+            cross_midnight: parsed.cross_midnight ?? false,
+          });
+        } else {
+          // reiner Status-Tag ohne Zeiten (Urlaub/Frei/Krank/…)
+          out.push({
+            team_id: teamId,
+            roster_date: dateISO,
+            start_time: null,
+            end_time: null,
+            employee_name: sheetName,
+            user_id,
+            role: role ? String(role) : null,
+            status: parsed.status ?? null,
+            raw_cell: rawCell,
+            created_by: me.user_id,
+            cross_midnight: false,
+          });
+        }
+      }
+    }
+
+    if (!out.length) return json({ ok:false, error:'no_parsed_rows' }, 400);
+
+    // Insert
     const res = await sql/*sql*/`
       with src as (
-        select * from jsonb_to_recordset(${sqlJson(norm)}) as r(
-          roster_date text, start_time text, end_time text,
-          employee_name text, role text, note text
+        select * from jsonb_to_recordset(${sqlJson(out)}) as r(
+          team_id bigint,
+          roster_date text,
+          start_time text,
+          end_time text,
+          employee_name text,
+          user_id uuid,
+          role text,
+          status text,
+          raw_cell text,
+          created_by uuid,
+          cross_midnight boolean
         )
-      ),
-      team_users as (
-        select au.user_id, trim(regexp_replace(lower(coalesce(au.name,'')),'\\s+',' ','g')) as nm
-        from public.app_users au
-        join public.team_memberships tm on tm.user_id = au.user_id
-        where tm.team_id = ${teamId}::bigint and tm.active = true and au.active = true
-      ),
-      prep as (
-        select
-          ${teamId}::bigint as team_id,
-          s.roster_date::date as roster_date,
-          s.start_time::time  as start_time,
-          s.end_time::time    as end_time,
-          s.employee_name,
-          tu.user_id as user_id,
-          nullif(s.role,'') as role,
-          nullif(s.note,'') as note,
-          ${me.user_id}::uuid as created_by
-        from src s
-        left join team_users tu
-          on tu.nm = trim(regexp_replace(lower(coalesce(s.employee_name,'')),'\\s+',' ','g'))
       )
-      insert into public.team_roster (team_id, roster_date, start_time, end_time, employee_name, user_id, role, note, created_by)
-      select team_id, roster_date, start_time, end_time, employee_name, user_id, role, note, created_by
-      from prep
+      insert into public.team_roster (
+        team_id, roster_date, start_time, end_time,
+        employee_name, user_id, role, status, raw_cell, created_by
+      )
+      select
+        team_id,
+        roster_date::date,
+        case when start_time is not null then start_time::time end,
+        case when end_time   is not null then end_time::time end,
+        employee_name, user_id, role, status, raw_cell, created_by
+      from src
       returning id
     `;
 
