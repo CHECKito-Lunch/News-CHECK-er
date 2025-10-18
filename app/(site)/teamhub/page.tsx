@@ -621,6 +621,7 @@ export default function TeamHubPage() {
                                       <LabelChips feedbackId={f.id} labels={f.labels ?? []} allLabels={allLabelsGlobal} />
                                       <FeedbackComments feedbackId={f.id} />
                                     </div>
+                                  <QAWidget ownerId={userId} from={from} to={to} />
                                   </div>
                                 </div>
                               </li>
@@ -640,10 +641,6 @@ export default function TeamHubPage() {
         <aside className="space-y-4 sticky top-4">
           <FirstTeamRosterCard />   {/* ← Dienstplan-Widget */}
           <CommentThreadHub ownerId={userId} onJumpToFeedback={scrollToFeedback} />
-          <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3">
-            <div className="text-sm font-semibold mb-2">QA-Assistent</div>
-            <QAWidget />
-          </div>
           <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3">
             <div className="text-sm font-semibold mb-2">Labels</div>
             <LabelManagerButton />
