@@ -621,7 +621,7 @@ export default function TeamHubPage() {
                                       <LabelChips feedbackId={f.id} labels={f.labels ?? []} allLabels={allLabelsGlobal} />
                                       <FeedbackComments feedbackId={f.id} />
                                     </div>
-                                  <QAWidget ownerId={userId} from={from} to={to} />
+                                 
                                   </div>
                                 </div>
                               </li>
@@ -634,6 +634,9 @@ export default function TeamHubPage() {
                 })}
               </div>
             )}
+
+            {/* QA (unter den Feedbacks, gleiche Kartenoptik) */}
+<QAWidget ownerId={userId} from={from} to={to} />
           </section>
         </div>
 
