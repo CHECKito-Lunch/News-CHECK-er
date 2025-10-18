@@ -118,12 +118,11 @@ export default function TeamRosterList({ teamId }: { teamId: number }) {
       {!loading && byDay.length>0 && (
         <div className="divide-y divide-gray-100 dark:divide-gray-800">
           {byDay.map(([day, arr])=>{
-            // Tages-Stats
+            // Tages-Stats (ohne Stunden in Badges)
             const work = arr.filter(a=>a.kind==='work');
             const absent = arr.filter(a=>a.kind==='absent');
             const holiday = arr.filter(a=>a.kind==='holiday');
             const free = arr.filter(a=>a.kind==='free');
-            const totalH = Math.round((work.reduce((s,x)=>s+(x.minutes_worked||0),0)/60)*10)/10;
 
             const open = !!openDays[day];
 
@@ -138,7 +137,7 @@ export default function TeamRosterList({ teamId }: { teamId: number }) {
                   <div className="min-w-0 flex items-center gap-3">
                     <span className="text-sm font-semibold text-gray-700 dark:text-gray-200 truncate">{fmtDay(day)}</span>
                     <div className="hidden sm:flex items-center gap-2">
-                      <Badge className="border-emerald-200 bg-emerald-50 text-emerald-700">Dienst {work.length}{totalH?` · ${totalH}h`:''}</Badge>
+                      <Badge className="border-emerald-200 bg-emerald-50 text-emerald-700">Dienst {work.length}</Badge>
                       <Badge className="border-amber-200 bg-amber-50 text-amber-700">Abw. {absent.length}</Badge>
                       <Badge className="border-blue-200 bg-blue-50 text-blue-700">Feiertag {holiday.length}</Badge>
                       <Badge className="border-slate-200 bg-slate-50 text-slate-700">Frei {free.length}</Badge>
