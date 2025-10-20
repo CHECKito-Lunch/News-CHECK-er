@@ -97,6 +97,9 @@ const fmtMonthYearDE = (y: number, m1to12: number) => {
   return new Intl.DateTimeFormat('de-DE', { month: 'long', year: 'numeric' }).format(d);
 };
 
+// Ziel-Ø für Kanäle (anpassbar)
+const SCORE_TARGET = 4.7;
+
 /* --------------- Marks ------------------ */
 type MarkValue = -1 | 0 | 1 | 2;         // 👎 = -1, ⭐ = 1, 👍 = 2
 type MarkMap = Record<string, MarkValue>;
@@ -352,6 +355,22 @@ export default function TeamHubPage() {
     return { n, avg, neg, rekla, offen, geloest, negPct };
   }, [sortedItems]);
 
+  // ---- Ø je Kanal (auf Basis der aktuell sichtbaren Items) ----
+  const channelAvgs = useMemo(() => {
+    const acc = new Map<string, { sum: number; count: number }>();
+    for (const f of sortedItems) {
+      const ch = f.feedbacktyp || '—';
+      const s = avgScore(f);
+      if (s == null) continue; // nur gültige Scores
+      const cur = acc.get(ch) || { sum: 0, count: 0 };
+      cur.sum += s; cur.count += 1;
+      acc.set(ch, cur);
+    }
+    return [...acc.entries()]
+      .map(([channel, { sum, count }]) => ({ channel, avg: sum / count, count }))
+      .sort((a, b) => b.avg - a.avg || a.channel.localeCompare(b.channel));
+  }, [sortedItems]);
+
   // Hilfsfunktionen: Gruppen öffnen/schließen
   const setAllGroups = (open:boolean) => {
     const next: Record<string, boolean> = {};
@@ -439,6 +458,41 @@ export default function TeamHubPage() {
               <Kpi title="offen" value={String(kpis.offen)} />
               <Kpi title="geklärt" value={String(kpis.geloest)} />
             </div>
+          </div>
+
+          {/* Ø je Kanal – Mini-Kreisdiagramme */}
+          <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3 md:p-4">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-sm font-semibold">Ø je Kanal</div>
+              <div className="text-xs text-gray-500">Ziel: {SCORE_TARGET.toFixed(2)}</div>
+            </div>
+
+            {channelAvgs.length === 0 ? (
+              <div className="text-sm text-gray-500">Keine Scores im aktuellen Filter.</div>
+            ) : (
+              <ul className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+                {channelAvgs.map(({ channel, avg, count }) => {
+                  const delta = avg - SCORE_TARGET; // >0 = besser als Ziel
+                  const deltaTxt = `${delta >= 0 ? '+' : ''}${delta.toFixed(2)}`;
+                  return (
+                    <li key={channel} className="rounded-xl border border-gray-200 dark:border-gray-800 p-2 flex items-center gap-2">
+                      <MiniRadial
+                        value={avg}
+                        target={SCORE_TARGET}
+                        size={56}
+                        stroke={6}
+                        label={`Ø ${fmtAvg(avg)}`}
+                        sublabel={deltaTxt}
+                      />
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium truncate" title={channel}>{channel}</div>
+                        <div className="text-[11px] text-gray-500">({count})</div>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </div>
 
           {/* INBOX-LAYOUT */}
@@ -959,6 +1013,57 @@ function Kpi({ title, value, tone }:{ title:string; value:string; tone?:string }
     <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-3">
       <div className="text-[11px] text-gray-500">{title}</div>
       <div className={`text-lg font-semibold ${tone||''}`}>{value}</div>
+    </div>
+  );
+}
+
+/* -------- Mini Radial Progress (SVG) -------- */
+function MiniRadial({
+  value,           // aktueller Ø (1..5)
+  target,          // Ziel-Ø (1..5)
+  size = 56,       // Pixel
+  stroke = 6,      // Strichstärke
+  label,           // z.B. "Ø 4.56"
+  sublabel,        // z.B. "−0.14" (Delta zum Ziel) oder "97%"
+}: {
+  value: number;
+  target: number;
+  size?: number;
+  stroke?: number;
+  label?: string;
+  sublabel?: string;
+}) {
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const p = Math.max(0, Math.min(1, value / target));       // Fortschritt relativ zum Ziel
+  const dash = p * c;
+
+  return (
+    <div className="relative" style={{ width: size, height: size }}>
+      <svg width={size} height={size} className="block">
+        <circle
+          cx={size/2} cy={size/2} r={r}
+          stroke="currentColor"
+          className="text-gray-200 dark:text-gray-800"
+          strokeWidth={stroke}
+          fill="none"
+        />
+        <g transform={`rotate(-90 ${size/2} ${size/2})`}>
+          <circle
+            cx={size/2} cy={size/2} r={r}
+            stroke="currentColor"
+            className="text-emerald-500"
+            strokeWidth={stroke}
+            strokeLinecap="round"
+            fill="none"
+            strokeDasharray={`${dash} ${c}`}
+          />
+        </g>
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center leading-tight">
+        <div className={`text-[11px] font-semibold ${noteColor(value)}`}>{label}</div>
+        {sublabel && <div className="text-[10px] text-gray-500">{sublabel}</div>}
+      </div>
     </div>
   );
 }
