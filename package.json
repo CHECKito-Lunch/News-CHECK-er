@@ -54,7 +54,8 @@
     "recharts": "^3.2.1",
     "remark-gfm": "^4.0.1",
     "uuid": "^11.1.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
