@@ -635,9 +635,10 @@ export default function TeamHubPage() {
               </div>
             )}
 
-            {/* QA (unter den Feedbacks, gleiche Kartenoptik) */}
-<QAWidget ownerId={userId} from={from} to={to} />
+
           </section>
+          {/* QA (unter den Feedbacks, gleiche Kartenoptik) */}
+           <QAWidget ownerId={userId} from={from} to={to} />
         </div>
 
         {/* Rechte Spalte: Dienstplan → Threads → QA → Label-Manager */}
