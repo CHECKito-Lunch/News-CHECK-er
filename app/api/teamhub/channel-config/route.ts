@@ -120,24 +120,39 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'upserts[] empty after normalization' }, { status: 400 });
     }
 
-    // ---------- ROBUSTER UPSERT: array-/objekt-sicher ----------
-    const payload = JSON.stringify(prepared);
+    // zusätzliche Validierung: alle Elemente müssen Objekte mit allen Keys sein
+    for (const [i, r] of prepared.entries()) {
+      if (
+        !r ||
+        typeof r !== 'object' ||
+        !isUUID(r.user_id) ||
+        !isUUID(r.updated_by) ||
+        !notBlank(r.channel) ||
+        !notBlank(r.label) ||
+        typeof r.target !== 'number'
+      ) {
+        return NextResponse.json(
+          { ok: false, error: `invalid upserts[${i}]` },
+          { status: 400 }
+        );
+      }
+    }
+
+    // ---- MULTI-VALUES statt jsonb_to_recordset (robust) ----
+    // Hinweis: funktioniert mit postgres.js / neon / node-postgres-SQL-Template libs.
+    const rowsSql = prepared.map((r) =>
+      sql`(${r.user_id}::uuid, ${r.channel}, ${r.label}, ${r.target}::numeric, ${r.updated_by}::uuid)`
+    );
+
     await sql`
-      with data as (
-        select case
-          when jsonb_typeof(${payload}::jsonb) = 'array' then ${payload}::jsonb
-          else jsonb_build_array(${payload}::jsonb)
-        end as j
-      )
       insert into public.user_channel_config (user_id, channel, label, target, updated_by)
-      select * from jsonb_to_recordset((select j from data))
-        as x(user_id uuid, channel text, label text, target numeric, updated_by uuid)
+      values ${sql(rowsSql)}
       on conflict (user_id, channel) do update
       set label = excluded.label,
           target = excluded.target,
           updated_by = excluded.updated_by
     `;
-    // -----------------------------------------------------------
+    // --------------------------------------------------------
 
     return NextResponse.json({ ok: true });
   } catch (e: any) {
@@ -148,8 +163,12 @@ export async function POST(req: NextRequest) {
     if (code === '22P02') {
       return NextResponse.json({ ok: false, error: 'invalid input syntax' }, { status: 400 });
     }
-
-    console.error('[teamhub/channel-config POST]', e);
+    console.error('[teamhub/channel-config POST]', {
+      code: e?.code,
+      detail: e?.detail,
+      hint: e?.hint,
+      message: e?.message,
+    });
     return NextResponse.json({ ok: false, error: 'internal' }, { status: 500 });
   }
 }
