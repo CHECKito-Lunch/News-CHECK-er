@@ -110,7 +110,7 @@ export async function POST(req: NextRequest) {
         const channel = String(u.channel ?? '').trim().toLowerCase(); // Key normalisieren
         const label = String((u.label ?? u.channel ?? '').toString()).trim();
         const rawTarget = Number.isFinite(Number(u.target)) ? Number(u.target) : 4.5;
-        const target = toTwo(clamp(rawTarget, 1, 5));
+        const target = toTwo(clamp(rawTarget, 0, 5));
         return {
           user_id: body.owner_id!, // FK -> app_users.user_id
           channel,

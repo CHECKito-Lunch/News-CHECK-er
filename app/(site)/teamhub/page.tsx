@@ -791,6 +791,8 @@ export default function TeamHubPage() {
         </aside>
       </section>
 
+      
+
       {/* Modal: Kanal-Einstellungen */}
       {openChannelModal && (
         <ChannelSettingsModal
@@ -1087,6 +1089,26 @@ function LabelManager({ onClose }:{ onClose: ()=>void }) {
 }
 
 /* ---------------- Kanal-Settings (Modal) ---------------- */
+
+// "4,3" oder "4.30" -> number | null (kein Clamping hier!)
+function parseDeDecimal(s: string): number | null {
+  const t = String(s ?? '').trim().replace(',', '.');
+  if (t === '') return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}
+
+// auf 2 Nachkommastellen runden (Banker's ist nicht nötig)
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+// schöne Anzeige im DE-Format (komma)
+function formatDe(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n as any)) return '';
+  return (n as number).toLocaleString('de-DE', { maximumFractionDigits: 2 });
+}
+
+
+
 function ChannelSettingsModal({
   channels,
   cfg,
@@ -1099,16 +1121,45 @@ function ChannelSettingsModal({
   onSave: (next: Record<string, {label:string; target:number}>) => void;
 }) {
   const [local, setLocal] = useState<Record<string, {label:string; target:number}>>({});
+  // eigener Eingabestring je Kanal, damit „4,“ erlaubt ist
+  const [inputStr, setInputStr] = useState<Record<string, string>>({});
+  const [err, setErr] = useState<string|null>(null);
 
-  useEffect(()=>{ setLocal(cfg); }, [JSON.stringify(cfg)]);
+  useEffect(() => {
+    setLocal(cfg);
+    const s: Record<string,string> = {};
+    for (const k of Object.keys(cfg)) s[k] = formatDe(cfg[k]?.target ?? 4.5);
+    setInputStr(s);
+    setErr(null);
+  }, [JSON.stringify(cfg)]);
 
   const setLabel = (ch:string, label:string) =>
     setLocal(prev => ({ ...prev, [ch]: { ...(prev[ch]||{label:ch, target:4.5}), label } }));
 
-  const setTarget = (ch:string, targetStr:string) => {
-    const t = Number((targetStr||'').replace(',', '.'));
-    const safe = Number.isFinite(t) ? Math.max(1, Math.min(5, t)) : (local[ch]?.target ?? 4.5);
-    setLocal(prev => ({ ...prev, [ch]: { ...(prev[ch]||{label:ch, target:4.5}), target: safe } }));
+  const setTargetString = (ch:string, raw:string) => {
+    // Nur Zeichen erlauben, die Sinn machen (Ziffern, Komma, Punkt)
+    // und nicht brutal normalisieren -> Nutzer darf tippen
+    const cleaned = raw.replace(/[^\d,.\s]/g, '').replace(/\s+/g, '');
+    setInputStr(prev => ({ ...prev, [ch]: cleaned }));
+    setErr(null);
+  };
+
+  const doSave = () => {
+    const next: Record<string, {label:string; target:number}> = {};
+    for (const ch of channels) {
+      const row = local[ch] ?? { label: ch, target: 4.5 };
+      const s = inputStr[ch] ?? '';
+      const parsed = parseDeDecimal(s);
+      if (parsed == null) {
+        setErr(`Bitte gültigen Zielwert für „${row.label}“ eingeben (z. B. 4,30).`);
+        return;
+      }
+      // jetzt clampen & runden: **0..5** und 2 Nachkommastellen
+      const clamped = Math.max(0, Math.min(5, parsed));
+      const rounded = round2(clamped);
+      next[ch] = { label: (row.label||ch).trim() || ch, target: rounded };
+    }
+    onSave(next);
   };
 
   return (
@@ -1125,6 +1176,7 @@ function ChannelSettingsModal({
           <div className="space-y-2 max-h-[60vh] overflow-auto pr-1">
             {channels.map(ch => {
               const row = local[ch] ?? { label: ch, target: 4.5 };
+              const val = inputStr[ch] ?? formatDe(row.target);
               return (
                 <div key={ch} className="grid grid-cols-12 gap-2 items-center">
                   <div className="col-span-4">
@@ -1141,12 +1193,15 @@ function ChannelSettingsModal({
                     />
                   </label>
                   <label className="col-span-3 text-sm">
-                    <span className="block text-[11px] text-gray-500 mb-1">Ziel (1.00–5.00)</span>
+                    <span className="block text-[11px] text-gray-500 mb-1">Ziel (0,00–5,00)</span>
                     <input
-                      value={String(row.target)}
-                      onChange={e=>setTarget(ch, e.target.value)}
+                      value={val}
+                      onChange={e=>setTargetString(ch, e.target.value)}
                       className="w-full px-2 py-1.5 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10 text-sm"
                       inputMode="decimal"
+                      // optionales Pattern: 0–5 mit max 2 Nachkommastellen (Komma/Punkt)
+                      pattern="^([0-4]?(\,|\.)?\d{0,2}|5((\,|\.)0{0,2})?)$"
+                      placeholder="z. B. 4,30"
                     />
                   </label>
                 </div>
@@ -1155,10 +1210,12 @@ function ChannelSettingsModal({
           </div>
         )}
 
+        {err && <div className="mt-2 text-sm text-red-600">{err}</div>}
+
         <div className="mt-3 flex justify-end gap-2">
           <button onClick={onClose} className="px-3 py-2 rounded-lg border">Abbrechen</button>
           <button
-            onClick={()=>onSave(local)}
+            onClick={doSave}
             className="px-3 py-2 rounded-lg bg-blue-600 text-white"
           >
             Speichern
@@ -1168,6 +1225,7 @@ function ChannelSettingsModal({
     </div>
   );
 }
+
 
 /* ---------------- Kleine UI-Helfer ---------------- */
 function SortSwitcher({ sort, setSort }:{ sort:'newest'|'score_desc'; setSort:(v:'newest'|'score_desc')=>void; }) {
