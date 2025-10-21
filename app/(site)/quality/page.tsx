@@ -132,7 +132,7 @@ export default function QualityPage(){
     setLoading(true);
     try{
       const qs = new URLSearchParams(); if (from) qs.set('from', from); if (to) qs.set('to', to);
-      const r = await authedFetch(`/api/teamhub/qa/coach${qs.toString()?`?${qs.toString()}`:''}`, { cache: 'no-store' });
+      const r = await authedFetch(`/api/me/qa${qs.toString()?`?${qs.toString()}`:''}`, { cache: 'no-store' });
       const j = await r.json();
       setItems(Array.isArray(j?.items)? j.items : []);
     } finally { setLoading(false); }
@@ -199,7 +199,7 @@ export default function QualityPage(){
       if (from) body.from = from;
       if (to) body.to = to;
 
-      const r = await authedFetch('/api/teamhub/qa/coach', {
+      const r = await authedFetch('/api/me/qa/coach', {
         method: 'POST',
         headers: { 'Content-Type':'application/json' },
         body: JSON.stringify(body),
