@@ -97,34 +97,6 @@ const fmtMonthYearDE = (y: number, m1to12: number) => {
   return new Intl.DateTimeFormat('de-DE', { month: 'long', year: 'numeric' }).format(d);
 };
 
-/* ---------- Kanal-Konfiguration (Label + Ziel, persistent im Browser) ---------- */
-const CHANNEL_DEFAULTS: Record<string, { label: string; target: number }> = {
-  service_mail:        { label: 'E-Mail Service',       target: 4.50 },
-  service_mail_rekla:  { label: 'E-Mail Reklamation',   target: 4.00 },
-  service_phone:       { label: 'Service Telefon',      target: 4.70 },
-  sales_phone:         { label: 'Sales Telefon',        target: 4.85 },
-  sales_lead:          { label: 'Sales Lead',           target: 4.50 },
-};
-const LS_CHANNEL_CFG_KEY = 'teamhub_channel_config_v1';
-
-function loadChannelConfig(allChannels: string[]) {
-  let saved: Record<string, {label:string; target:number}> = {};
-  try { saved = JSON.parse(localStorage.getItem(LS_CHANNEL_CFG_KEY) || '{}') || {}; } catch {}
-  const cfg: Record<string, {label:string; target:number}> = {};
-  for (const ch of allChannels) {
-    const def = CHANNEL_DEFAULTS[ch] ?? { label: ch, target: 4.50 };
-    const cur = saved[ch];
-    cfg[ch] = {
-      label: (cur?.label ?? def.label) || ch,
-      target: Number.isFinite(cur?.target) ? cur!.target : def.target,
-    };
-  }
-  return cfg;
-}
-function saveChannelConfig(cfg: Record<string, {label:string; target:number}>) {
-  localStorage.setItem(LS_CHANNEL_CFG_KEY, JSON.stringify(cfg));
-}
-
 /* --------------- Marks ------------------ */
 type MarkValue = -1 | 0 | 1 | 2;         // 👎 = -1, ⭐ = 1, 👍 = 2
 type MarkMap = Record<string, MarkValue>;
@@ -187,9 +159,11 @@ export default function TeamHubPage() {
   // Gruppen: offen/zu
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({}); // key => open?
 
-  // 🔧 Kanal-Konfiguration (Label + Ziel)
+  // 🔧 Kanal-Konfiguration (Label + Ziel) – jetzt serverseitig pro Mitarbeiter
   const [channelConfig, setChannelConfig] = useState<Record<string, {label:string; target:number}>>({});
   const [openChannelModal, setOpenChannelModal] = useState(false);
+  // Kanalliste fürs Modal: Union aus sichtbaren Kanälen & Server-Keys
+  const [channelsForModal, setChannelsForModal] = useState<string[]>([]);
 
   // Marks laden
   useEffect(() => {
@@ -292,12 +266,38 @@ export default function TeamHubPage() {
     return [...s].sort();
   }, [items]);
 
-  // Kanal-Konfig laden/mergen wenn Kanäle sich ändern
+  // Kanal-Konfig laden und mit sichtbaren Kanälen + Serverkanälen verheiraten
   useEffect(() => {
-    if (allChannels.length === 0) return;
-    const cfg = loadChannelConfig(allChannels);
-    setChannelConfig(cfg);
-  }, [allChannels.join(',')]);
+    (async () => {
+      if (!userId) {
+        setChannelConfig({});
+        setChannelsForModal([]);
+        return;
+      }
+      const r = await authedFetch(
+        `/api/teamhub/channel-config?owner_id=${encodeURIComponent(userId)}`,
+        { cache: 'no-store' }
+      );
+      const j = await r.json().catch(() => null);
+      const fromApi: Record<string, {label:string; target:number}> = (j?.ok && j.config) ? j.config : {};
+
+      // Union der Kanäle (sichtbar + bereits konfiguriert)
+      const union = new Set<string>([...allChannels, ...Object.keys(fromApi)]);
+      const unionArr = [...union].sort();
+      setChannelsForModal(unionArr);
+
+      // Merged Map für Anzeige/KPI etc.: Fallbacks, wenn kein Server-Wert vorhanden
+      const merged: Record<string, {label:string; target:number}> = {};
+      for (const ch of unionArr) {
+        const cur = fromApi[ch];
+        merged[ch] = {
+          label: (cur?.label ?? ch),
+          target: Number.isFinite(cur?.target as number) ? (cur!.target as number) : 4.5,
+        };
+      }
+      setChannelConfig(merged);
+    })();
+  }, [userId, allChannels.join(',')]);
 
   // Labels für Filter-Dropdown aus globaler Liste (id -> name)
   const labelFilterOptions = useMemo<[number,string][]>(()=>{
@@ -419,15 +419,14 @@ export default function TeamHubPage() {
     setOpenGroups(prev => Object.keys(prev).length ? prev : initial);
   }, [groups.map(g=>g.key).join(',')]);
 
-//für den Header
-
-const field =
-  "h-9 px-3 rounded-lg border border-gray-200 dark:border-gray-700 " +
-  "bg-white dark:bg-white/10 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500";
-const btn =
-  "h-9 inline-flex items-center justify-center px-3 rounded-lg border text-sm font-medium " +
-  "bg-white hover:bg-gray-50 dark:bg-white/10 dark:hover:bg-white/20 " +
-  "border-gray-200 dark:border-gray-700 whitespace-nowrap";
+  //für den Header
+  const field =
+    "h-9 px-3 rounded-lg border border-gray-200 dark:border-gray-700 " +
+    "bg-white dark:bg-white/10 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500";
+  const btn =
+    "h-9 inline-flex items-center justify-center px-3 rounded-lg border text-sm font-medium " +
+    "bg-white hover:bg-gray-50 dark:bg-white/10 dark:hover:bg-white/20 " +
+    "border-gray-200 dark:border-gray-700 whitespace-nowrap";
 
   // Scroll zu Feedback (vom Thread-Hub aus)
   function scrollToFeedback(feedbackId:number|string){
@@ -448,63 +447,63 @@ const btn =
     });
   }
 
-return (
-  <div className="w-full max-w-[1920px] mx-auto px-4 py-6">
-    {/* Header (kompakt): Titel links, Controls rechts) */}
-    <header className="flex flex-wrap items-center justify-between gap-3 mb-3">
-      <div className="flex items-center gap-3">
-        <h1 className="text-2xl font-semibold">Teamhub</h1>
-        <Link href="/" className="text-sm text-blue-600 hover:underline">Zurück</Link>
-      </div>
-
-      {/* Mitarbeiter + Zeitraum + Kanal-Settings + Labels */}
-      <div className="flex flex-wrap items-center gap-2">
-        <select
-          value={userId}
-          onChange={e => setUserId(e.target.value)}
-          className={`${field} pr-8 appearance-none`}
-          aria-label="Mitarbeiter"
-        >
-          {members.map(m => (
-            <option key={m.user_id} value={m.user_id}>{m.name}</option>
-          ))}
-        </select>
-
-        <input
-          type="date"
-          value={from}
-          onChange={e => setFrom(e.target.value)}
-          className={`${field} appearance-none`}
-          aria-label="Zeitraum von"
-        />
-        <span className="text-gray-400 select-none">–</span>
-        <input
-          type="date"
-          value={to}
-          onChange={e => setTo(e.target.value)}
-          className={`${field} appearance-none`}
-          aria-label="Zeitraum bis"
-        />
-
-        <button
-          onClick={() => setOpenChannelModal(true)}
-          className={btn}
-          title="Kanäle & Ziele bearbeiten"
-          type="button"
-        >
-          Kanäle & Ziele
-        </button>
-
-        {/* Label-Text auf gleiche Höhe bringen */}
-        <span className="h-9 inline-flex items-center px-2 text-sm font-semibold">Labels</span>
-
-        {/* Falls dein LabelManagerButton KEIN className akzeptiert:
-            mit einem Wrapper gleich hoch/gleich paddings erzwingen */}
-        <div className="[&>button]:h-9 [&>button]:px-3 [&>button]:rounded-lg [&>button]:text-sm [&>button]:border [&>button]:border-gray-200 dark:[&>button]:border-gray-700">
-          <LabelManagerButton />
+  return (
+    <div className="w-full max-w-[1920px] mx-auto px-4 py-6">
+      {/* Header (kompakt): Titel links, Controls rechts) */}
+      <header className="flex flex-wrap items-center justify-between gap-3 mb-3">
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-semibold">Teamhub</h1>
+          <Link href="/" className="text-sm text-blue-600 hover:underline">Zurück</Link>
         </div>
-      </div>
-    </header>
+
+        {/* Mitarbeiter + Zeitraum + Kanal-Settings + Labels */}
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={userId}
+            onChange={e => setUserId(e.target.value)}
+            className={`${field} pr-8 appearance-none`}
+            aria-label="Mitarbeiter"
+          >
+            {members.map(m => (
+              <option key={m.user_id} value={m.user_id}>{m.name}</option>
+            ))}
+          </select>
+
+          <input
+            type="date"
+            value={from}
+            onChange={e => setFrom(e.target.value)}
+            className={`${field} appearance-none`}
+            aria-label="Zeitraum von"
+          />
+          <span className="text-gray-400 select-none">–</span>
+          <input
+            type="date"
+            value={to}
+            onChange={e => setTo(e.target.value)}
+            className={`${field} appearance-none`}
+            aria-label="Zeitraum bis"
+          />
+
+          <button
+            onClick={() => setOpenChannelModal(true)}
+            className={btn}
+            title="Kanäle & Ziele bearbeiten"
+            type="button"
+          >
+            Kanäle & Ziele
+          </button>
+
+          {/* Label-Text auf gleiche Höhe bringen */}
+          <span className="h-9 inline-flex items-center px-2 text-sm font-semibold">Labels</span>
+
+          {/* Falls dein LabelManagerButton KEIN className akzeptiert:
+              mit einem Wrapper gleich hoch/gleich paddings erzwingen */}
+          <div className="[&>button]:h-9 [&>button]:px-3 [&>button]:rounded-lg [&>button]:text-sm [&>button]:border [&>button]:border-gray-200 dark:[&>button]:border-gray-700">
+            <LabelManagerButton />
+          </div>
+        </div>
+      </header>
 
       {/* Hinweis oben, wenn neue Mitarbeiter-Kommentare */}
       {unreadOwnerCount > 0 && (
@@ -616,7 +615,7 @@ return (
                   aria-label="Kanal"
                 >
                   <option value="">Alle Kanäle</option>
-                  {allChannels.map(c => {
+                  {Object.keys(channelConfig).sort().map(c => {
                     const cfg = channelConfig[c] ?? { label: c, target: 4.5 };
                     return <option key={c} value={c}>{cfg.label}</option>;
                   })}
@@ -788,13 +787,24 @@ return (
       {/* Modal: Kanal-Einstellungen */}
       {openChannelModal && (
         <ChannelSettingsModal
-          channels={allChannels}
+          channels={channelsForModal}
           cfg={channelConfig}
           onClose={()=>setOpenChannelModal(false)}
-          onSave={(next)=>{
-            setChannelConfig(next);
-            saveChannelConfig(next);
-            setOpenChannelModal(false);
+          onSave={async (next) => {
+            const upserts = Object.entries(next).map(([channel, v]) => ({
+              channel, label: v.label, target: v.target
+            }));
+            const r = await authedFetch('/api/teamhub/channel-config', {
+              method:'POST', headers:{'Content-Type':'application/json'},
+              body: JSON.stringify({ owner_id: userId, upserts })
+            });
+            if (r.ok) {
+              setChannelConfig(next);
+              setOpenChannelModal(false);
+            } else {
+              const msg = await r.text();
+              alert('Speichern fehlgeschlagen: ' + msg);
+            }
           }}
         />
       )}
@@ -1089,7 +1099,7 @@ function ChannelSettingsModal({
     setLocal(prev => ({ ...prev, [ch]: { ...(prev[ch]||{label:ch, target:4.5}), label } }));
 
   const setTarget = (ch:string, targetStr:string) => {
-    const t = Number(targetStr.replace(',', '.'));
+    const t = Number((targetStr||'').replace(',', '.'));
     const safe = Number.isFinite(t) ? Math.max(1, Math.min(5, t)) : (local[ch]?.target ?? 4.5);
     setLocal(prev => ({ ...prev, [ch]: { ...(prev[ch]||{label:ch, target:4.5}), target: safe } }));
   };

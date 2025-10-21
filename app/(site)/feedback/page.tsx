@@ -33,7 +33,11 @@ type FeedbackItem = {
 };
 type FeedbackRes = { ok: boolean; items: FeedbackItem[] };
 
+type ChannelCfg = Record<string, { label: string; target: number }>;
 
+/* ===========================
+   PAGE
+=========================== */
 export default function FeedbackPage() {
   return (
     <div className="w-full max-w-[1920px] mx-auto px-4 py-6">
@@ -49,11 +53,9 @@ export default function FeedbackPage() {
   );
 }
 
-
 /* ===========================
-   🆕 Kunden-Feedback – Vollbreite, Monats-/Tages-Accordion, Streaks, XP
+   CHART: Monatsverlauf
 =========================== */
-
 function YearScoreTrend({
   data,
   targets,
@@ -67,7 +69,7 @@ function YearScoreTrend({
     service_mail_rekla: number|null;
     service_phone: number|null;
     sales_phone: number|null;
-    
+    sales_lead: number|null;
   }>;
   targets: Record<string, number>;
   labelMap: Record<string, string>;
@@ -76,6 +78,10 @@ function YearScoreTrend({
   if (!data || data.length === 0) {
     return <div className="text-sm text-gray-500">Noch keine Monatsdaten.</div>;
   }
+
+  const keys: Array<keyof typeof data[number]> = [
+    'service_mail_rekla','service_mail','sales_phone','service_phone','sales_lead'
+  ];
 
   return (
     <div className="h-56 w-full">
@@ -105,59 +111,45 @@ function YearScoreTrend({
             labelFormatter={(l) => `Monat ${l}`}
           />
 
-          {/* Ziel-Linien pro Kanal (gleiche Farbe, gestrichelt, Label rechts) */}
-          <ReferenceLine y={targets.service_mail}
-            stroke={colors.service_mail} strokeOpacity={0.55} strokeDasharray="6 6"
-            label={{ value: `Ziel ${targets.service_mail.toFixed(2)}`, position: 'right', fill: colors.service_mail, fontSize: 10 }}
-          />
-          <ReferenceLine y={targets.service_mail_rekla}
-            stroke={colors.service_mail_rekla} strokeOpacity={0.55} strokeDasharray="6 6"
-            label={{ value: `Ziel ${targets.service_mail_rekla.toFixed(2)}`, position: 'right', fill: colors.service_mail_rekla, fontSize: 10 }}
-          />
-          <ReferenceLine y={targets.service_phone}
-            stroke={colors.service_phone} strokeOpacity={0.55} strokeDasharray="6 6"
-            label={{ value: `Ziel ${targets.service_phone.toFixed(2)}`, position: 'right', fill: colors.service_phone, fontSize: 10 }}
-          />
-          <ReferenceLine y={targets.sales_phone}
-            stroke={colors.sales_phone} strokeOpacity={0.55} strokeDasharray="6 6"
-            label={{ value: `Ziel ${targets.sales_phone.toFixed(2)}`, position: 'right', fill: colors.sales_phone, fontSize: 10 }}
-          />
-          <ReferenceLine y={targets.sales_lead}
-            stroke={colors.sales_lead} strokeOpacity={0.55} strokeDasharray="6 6"
-            label={{ value: `Ziel ${targets.sales_lead.toFixed(2)}`, position: 'right', fill: colors.sales_lead, fontSize: 10 }}
-          />
+          {/* Ziel-Linien pro Kanal */}
+          {keys.map(k => targets[k as string] != null && (
+            <ReferenceLine
+              key={`ref-${k}`}
+              y={targets[k as string]}
+              stroke={colors[k as string] ?? '#64748b'}
+              strokeOpacity={0.55}
+              strokeDasharray="6 6"
+              label={{
+                value: `Ziel ${targets[k as string].toFixed(2)}`,
+                position: 'right',
+                fill: colors[k as string] ?? '#64748b',
+                fontSize: 10
+              }}
+            />
+          ))}
 
-          {/* Daten-Linien pro Kanal (gleiche Farbe) */}
-          <Line type="monotone" dataKey="service_mail"
-            name={labelMap.service_mail} dot={false} connectNulls strokeWidth={2.2}
-            stroke={colors.service_mail} activeDot={{ r: 3 }}
-          />
-          <Line type="monotone" dataKey="service_mail_rekla"
-            name={labelMap.service_mail_rekla} dot={false} connectNulls strokeWidth={2.2}
-            stroke={colors.service_mail_rekla} activeDot={{ r: 3 }}
-          />
-          <Line type="monotone" dataKey="service_phone"
-            name={labelMap.service_phone} dot={false} connectNulls strokeWidth={2.2}
-            stroke={colors.service_phone} activeDot={{ r: 3 }}
-          />
-          <Line type="monotone" dataKey="sales_phone"
-            name={labelMap.sales_phone} dot={false} connectNulls strokeWidth={2.2}
-            stroke={colors.sales_phone} activeDot={{ r: 3 }}
-/>
-            <Line type="monotone" dataKey="sales_lead"
-            name={labelMap.sales_lead} dot={false} connectNulls strokeWidth={2.2}
-            stroke={colors.sales_lead} activeDot={{ r: 3 }}
-          />
+          {/* Daten-Linien pro Kanal */}
+          {keys.map(k => (
+            <Line
+              key={`line-${k}`}
+              type="monotone"
+              dataKey={k as string}
+              name={labelMap[k as string] ?? (k as string)}
+              dot={false}
+              connectNulls
+              strokeWidth={2.2}
+              stroke={colors[k as string] ?? '#64748b'}
+              activeDot={{ r: 3 }}
+            />
+          ))}
         </LineChart>
       </ResponsiveContainer>
     </div>
   );
 }
 
-
-
 /* ===========================
-   Helpers (Timezone & Truthy) – NICHT exportieren!
+   Helpers (Timezone & Truthy)
 =========================== */
 const FE_TZ = 'Europe/Berlin';
 const BO_BASE = 'https://backoffice.reisen.check24.de/booking/search/';
@@ -166,21 +158,15 @@ function isTrueish(v: unknown) {
   const s = String(v ?? '').trim().toLowerCase();
   return s === 'ja' || s === 'true' || s === '1' || s === 'y' || s === 'yes';
 }
-
-// bevorzugt feedback_ts (volle Zeit), sonst ts
 function getTs(f: FeedbackItem): string | null {
   return (f as any).feedback_ts || (f as any).ts || null;
 }
-
-// "Zoned" Date -> YYYY-MM (Berlin)
 function ymKeyBerlin(d: Date) {
   const z = new Date(d.toLocaleString('en-US', { timeZone: FE_TZ }));
   const y = z.getFullYear();
   const m = String(z.getMonth() + 1).padStart(2, '0');
   return `${y}-${m}`;
 }
-
-// "Zoned" Date -> YYYY-MM-DD (Berlin)
 function ymdBerlin(d: Date) {
   const z = new Date(d.toLocaleString('en-US', { timeZone: FE_TZ }));
   const y = z.getFullYear();
@@ -188,8 +174,6 @@ function ymdBerlin(d: Date) {
   const dd = String(z.getDate()).padStart(2, '0');
   return `${y}-${m}-${dd}`;
 }
-
-// Formatter (Berlin)
 function fmtTimeBerlin(iso: string | null): string {
   if (!iso) return '—';
   const d = new Date(iso);
@@ -206,16 +190,12 @@ function fmtDateBerlin(iso: string | null): string {
     timeZone: FE_TZ, day:'2-digit', month:'2-digit', year:'numeric'
   }).format(d);
 }
-
-// YYYY-MM -> nächster Monat
 function incMonthKey(key: string) {
   const [y, m] = key.split('-').map(Number);
   const dt = new Date(Date.UTC(y, (m || 1) - 1, 1));
   dt.setUTCMonth(dt.getUTCMonth() + 1);
   return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}`;
 }
-
-// BO-Link: bevorzugt /api/bo/:hash → löst serverseitig auf
 function boLinkFor(f: FeedbackItem): string | null {
   const hash = (f as any).booking_number_hash as string | undefined;
   const raw  = (f as any).booking_number as string | undefined;
@@ -224,35 +204,38 @@ function boLinkFor(f: FeedbackItem): string | null {
   return null;
 }
 
+/* ===========================
+   User Feedback Section
+=========================== */
 function FeedbackSection() {
   const [from, setFrom] = useState<string>('');
   const [to, setTo] = useState<string>('');
   const [items, setItems] = useState<FeedbackItem[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const targets: Record<string, number> = {
-    service_mail: 4.5,
-    service_mail_rekla: 4.0,
-    service_phone: 4.7,
-    sales_phone: 4.85,
-    sales_lead: 4.5,
-    unknown: 4.5,
+  // 🆕 Serverseitige Kanal-Config pro User
+  const [channelCfg, setChannelCfg] = useState<ChannelCfg>({});
+  const [channelKeys, setChannelKeys] = useState<string[]>([]); // Union: Feedback + Server
+
+  // Fallback-Defaults (nur wenn Server nichts hat)
+  const DEFAULTS: ChannelCfg = {
+    service_mail:        { label: 'E-Mail Service',      target: 4.5  },
+    service_mail_rekla:  { label: 'E-Mail Rekla',        target: 4.0  },
+    service_phone:       { label: 'Service Phone',       target: 4.7  },
+    sales_phone:         { label: 'Sales Phone',         target: 4.85 },
+    sales_lead:          { label: 'Sales Lead',          target: 4.5  },
   };
-  const typeLabel: Record<string, string> = {
-    service_mail: 'E-Mail Service',
-    service_mail_rekla: 'E-Mail Rekla',
-    service_phone: 'Service Phone',
-    sales_phone: 'Sales Phone',
-    sales_lead: 'Sales Lead',
-  };
+
+  // Farben (fix für bekannte Kanäle, Fallback grau)
   const channelColors: Record<string, string> = {
-  service_mail:        '#2563EB', // Blau
-  service_mail_rekla:  '#E11D48', // Rot/Rose
-  service_phone:       '#16A34A', // Grün
-  sales_phone:         '#F59E0B', // Amber
-  sales_lead:          '#ffa1fd', 
-};
-  
+    service_mail:        '#2563EB', // Blau
+    service_mail_rekla:  '#E11D48', // Rose
+    service_phone:       '#16A34A', // Grün
+    sales_phone:         '#F59E0B', // Amber
+    sales_lead:          '#8B5CF6', // Violett
+  };
+
+  // Ø-Regel
   function avgScore(f: FeedbackItem) {
     const parts = [
       f.beraterfreundlichkeit,
@@ -273,7 +256,7 @@ function FeedbackSection() {
 
   /* ---- Gamification: Level ---- */
   function levelFor(avg: number, target: number) {
-    const d = avg - target;          // wie weit über Ziel?
+    const d = avg - target;
     if (d >= 0.35) return { name:'Diamant', class:'bg-cyan-300 text-cyan-900', icon:'💎' };
     if (d >= 0.20) return { name:'Platin',  class:'bg-indigo-300 text-indigo-900', icon:'🏅' };
     if (d >= 0.00) return { name:'Gold',    class:'bg-yellow-400 text-yellow-900', icon:'🏆' };
@@ -284,7 +267,8 @@ function FeedbackSection() {
   const barClass = (pct: number) =>
     pct >= 100 ? 'bg-emerald-500' : pct >= 95 ? 'bg-green-500' : pct >= 85 ? 'bg-amber-500' : 'bg-red-500';
 
-  async function load() {
+  /* ---- Laden: Feedback ---- */
+  async function loadFeedback() {
     setLoading(true);
     try {
       const qs = new URLSearchParams();
@@ -292,18 +276,73 @@ function FeedbackSection() {
       if (to) qs.set('to', to);
       const r = await authedFetch(`/api/me/feedback${qs.toString() ? `?${qs.toString()}` : ''}`);
       const j: FeedbackRes = await r.json().catch(() => ({ ok: false, items: [] }));
-      setItems(j?.ok && Array.isArray(j.items) ? j.items : []);
-    } catch { setItems([]); }
-    finally { setLoading(false); }
+      const rows = j?.ok && Array.isArray(j.items) ? j.items : [];
+      setItems(rows);
+    } catch {
+      setItems([]);
+    } finally {
+      setLoading(false);
+    }
   }
-  useEffect(() => { load(); }, []);
-  useEffect(() => { load(); }, [from, to]);
+  useEffect(() => { loadFeedback(); }, []);
+  useEffect(() => { loadFeedback(); }, [from, to]);
+
+  /* ---- Laden: Kanal-Config (Server) & Union bilden ---- */
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await authedFetch('/api/me/channel-config', { cache: 'no-store' });
+        const j = await r.json().catch(() => null);
+        const fromApi: ChannelCfg = (j?.ok && j.config) ? j.config : {};
+        // Kanäle aus Feedback
+        const seen = new Set<string>(items.map(it => it.feedbacktyp).filter(Boolean));
+        // Union + Default-Fallback
+        const all = new Set<string>([...Object.keys(fromApi || {}), ...seen, ...Object.keys(DEFAULTS)]);
+        const merged: ChannelCfg = {};
+        for (const ch of all) {
+          const cur = fromApi[ch] ?? DEFAULTS[ch] ?? { label: ch, target: 4.5 };
+          merged[ch] = {
+            label: (cur.label ?? ch) || ch,
+            target: Number.isFinite(cur.target) ? cur.target : 4.5,
+          };
+        }
+        setChannelCfg(merged);
+        setChannelKeys([...all].sort());
+      } catch {
+        // Fallback nur aus Feedback + Defaults
+        const seen = new Set<string>(items.map(it => it.feedbacktyp).filter(Boolean));
+        const all = new Set<string>([...seen, ...Object.keys(DEFAULTS)]);
+        const merged: ChannelCfg = {};
+        for (const ch of all) {
+          const cur = DEFAULTS[ch] ?? { label: ch, target: 4.5 };
+          merged[ch] = { label: cur.label ?? ch, target: cur.target ?? 4.5 };
+        }
+        setChannelCfg(merged);
+        setChannelKeys([...all].sort());
+      }
+    })();
+  }, [items.map(i => i.feedbacktyp).join('|')]);
+
+  // Ableitungen aus channelCfg
+  const targets: Record<string, number> = useMemo(() => {
+    const t: Record<string, number> = {};
+    for (const k of Object.keys(channelCfg)) t[k] = channelCfg[k].target;
+    // für Chart-Komponente sicherstellen:
+    t.unknown = t.unknown ?? 4.5;
+    return t;
+  }, [channelCfg]);
+
+  const typeLabel: Record<string, string> = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const k of Object.keys(channelCfg)) m[k] = channelCfg[k].label || k;
+    return m;
+  }, [channelCfg]);
 
   /* ------- Monats-Aggregation ------- */
   type DayGroup = { key: string; items: FeedbackItem[]; normAvg: number; pass: boolean };
   type MonthAgg = {
-    monthKey: string; // YYYY-MM
-    label: string;    // z.B. "03/2025"
+    monthKey: string;
+    label: string;
     items: FeedbackItem[];
     byType: Map<string, { count:number; sum:number; avg:number; pass:boolean }>;
     overallAvg: number;
@@ -312,19 +351,17 @@ function FeedbackSection() {
     days: DayGroup[];
     badges: string[];
     xp: number;
-    // 🆕 Interne-Notizen-Infos pro Monat
     openInternal: number;
     internalPreview: {
       id: string|number;
-      dayKey: string;       // YYYY-MM-DD (Berlin)
-      dateDisplay: string;  // dd.mm.yyyy (DE)
+      dayKey: string;
+      dateDisplay: string;
       label: string;
       excerpt: string;
     }[];
   };
 
   const months: MonthAgg[] = useMemo(() => {
-    // partition by YYYY-MM (Berlin)
     const map = new Map<string, FeedbackItem[]>();
     for (const f of items) {
       const iso = getTs(f);
@@ -335,10 +372,8 @@ function FeedbackSection() {
       arr.push(f); map.set(key, arr);
     }
 
-    // initial Aggregate aus vorhandenen Monaten bauen
     const base: MonthAgg[] = [];
     for (const [monthKey, arr] of map.entries()) {
-      // pro Type aggregieren
       const byType = new Map<string, { count:number; sum:number; avg:number; pass:boolean }>();
       const vals:number[] = [];
       const reklaVals:number[] = [];
@@ -356,28 +391,25 @@ function FeedbackSection() {
 
       byType.forEach((v, t) => {
         v.avg = v.count ? v.sum / v.count : 0;
-        const goal = targets[t] ?? targets.unknown;
+        const goal = targets[t] ?? targets.unknown ?? 4.5;
         v.pass = v.count > 0 && v.avg >= goal;
       });
 
       const overallAvg = vals.length ? vals.reduce((s,n)=>s+n,0)/vals.length : 0;
       const overallCount = vals.length;
-
       const overallPass = Array.from(byType.entries()).every(([t, v]) => {
-        const goal = targets[t] ?? targets.unknown;
+        const goal = targets[t] ?? targets.unknown ?? 4.5;
         return v.count === 0 ? true : v.avg >= goal;
       });
 
-      // Tage (Berlin)
+      // Tage
       const byDay = new Map<string, FeedbackItem[]>();
       arr.forEach(f => {
         const iso = getTs(f);
-        theDate: {
-          const d = iso ? new Date(iso) : null;
-          if (!d) break theDate;
-          const k = ymdBerlin(d);
-          const a = byDay.get(k) ?? []; a.push(f); byDay.set(k, a);
-        }
+        const d = iso ? new Date(iso) : null;
+        if (!d) return;
+        const k = ymdBerlin(d);
+        const a = byDay.get(k) ?? []; a.push(f); byDay.set(k, a);
       });
       const days: DayGroup[] = [];
       for (const [k, list] of byDay.entries()) {
@@ -385,7 +417,7 @@ function FeedbackSection() {
         list.forEach(f=>{
           const s = avgScore(f);
           if (!Number.isFinite(s as any)) return;
-          const t = targets[f.feedbacktyp] ?? targets.unknown;
+          const t = targets[f.feedbacktyp] ?? targets.unknown ?? 4.5;
           ratios.push(Number(s)/t);
         });
         const normAvg = ratios.length ? ratios.reduce((a,b)=>a+b,0)/ratios.length : 0;
@@ -402,11 +434,10 @@ function FeedbackSection() {
         if (avgRekla >= targetRekla) badges.push('🛡️ Hero of Rekla');
       }
 
-      // 🆕 Offene interne Notizen im Monat & kleine Vorschau
+      // Interne Notizen
       const openInternalItems = arr.filter(x =>
         (x.internal_note?.trim() ?? '').length > 0 && !isTrueish(x.internal_checked)
       );
-
       const openInternal = openInternalItems.length;
       const internalPreview = openInternalItems.slice(0, 3).map(i => {
         const iso = getTs(i);
@@ -432,7 +463,6 @@ function FeedbackSection() {
         days,
         badges,
         xp: 0,
-        // 🆕
         openInternal,
         internalPreview,
       });
@@ -440,8 +470,8 @@ function FeedbackSection() {
 
     if (base.length === 0) return base;
 
-    // fehlende Monate (zwischen min..max) auffüllen
-    const asc = [...base].sort((a,b)=> a.monthKey.localeCompare(b.monthKey)); // älteste -> neueste
+    // fehlende Monate füllen
+    const asc = [...base].sort((a,b)=> a.monthKey.localeCompare(b.monthKey));
     let cur = asc[0].monthKey;
     const end = asc[asc.length-1].monthKey;
     const have = new Set(base.map(m => m.monthKey));
@@ -462,20 +492,16 @@ function FeedbackSection() {
           days: [],
           badges: [],
           xp: 0,
-          // 🆕
           openInternal: 0,
           internalPreview: [],
         });
       }
     }
 
-    // neueste zuerst zurückgeben
     return filled.sort((a,b)=> a.monthKey < b.monthKey ? 1 : -1);
-  }, [items]);
+  }, [items, targets, typeLabel]);
 
-  /* ------- XP & Combo (Monate chronologisch berechnen) ------- */
-  // Punkte pro Eintrag: max(0, round((score - target) * 20))
-  // Combo: +10% pro aufeinander folgendem Erfolgs-Monat, cap 50%
+  /* ------- XP & Combo ------- */
   const withXp = useMemo(() => {
     const clone = months.map(m => ({ ...m, xp: 0 }));
     const chrono = [...clone].reverse(); // ältester → neuester
@@ -489,24 +515,22 @@ function FeedbackSection() {
       for (const f of m.items) {
         const s = avgScore(f);
         if (!Number.isFinite(s as any)) continue;
-        const t = targets[f.feedbacktyp] ?? targets.unknown;
+        const t = targets[f.feedbacktyp] ?? targets.unknown ?? 4.5;
         const base = Math.max(0, Math.round((Number(s) - t) * 20));
         monthXp += Math.round(base * multiplier);
       }
       m.xp = monthXp;
-      // Comeback-Badge (erfolgreich nach Misserfolg im Vormonat)
+      // Comeback
       const prev = chrono[i-1];
       if (m.overallPass && prev && !prev.overallPass) {
         if (!m.badges.includes('🔁 Comeback')) m.badges.push('🔁 Comeback');
       }
     }
     return clone;
-  }, [months]);
+  }, [months, targets]);
 
-  // Saison-XP & simple Leveling (Zeitraum, nicht persistent)
   const seasonXp = useMemo(() => withXp.reduce((s,m) => s + (m.xp||0), 0), [withXp]);
   function levelFromXp(xp:number) {
-    // Level 1: 0..249, Level 2: 250..399, danach +100 pro Level
     if (xp < 250) return { level: 1, cur: xp, next: 250 };
     let lvl = 2, need = 250;
     let rest = xp - 250;
@@ -516,7 +540,7 @@ function FeedbackSection() {
   }
   const lvl = levelFromXp(seasonXp);
 
-  /* ------- Streaks (Monate in Folge) ------- */
+  /* ------- Streaks ------- */
   const overallStreak = useMemo(()=>{
     let cur=0, best=0;
     for (const m of withXp) { if (m.overallPass) { cur++; best=Math.max(best,cur); } else cur=0; }
@@ -524,73 +548,73 @@ function FeedbackSection() {
   }, [withXp]);
 
   const perTypeStreaks = useMemo(()=>{
-    const types = new Set<string>(['service_mail','service_mail_rekla','service_phone','sales_phone','sales_lead']);
+    const types = new Set<string>(channelKeys);
     const res = new Map<string,{current:number;best:number}>();
     for (const t of types) {
       let cur=0, best=0;
       for (const m of withXp) {
         const v = m.byType.get(t);
         const pass = v ? v.pass : false;
-        if (pass) { cur++; best=Math.max(best,cur); } else cur=0; }
+        if (pass) { cur++; best=Math.max(best,cur); } else cur=0;
+      }
       res.set(t,{current:cur,best});
     }
     return res;
-  }, [withXp]);
+  }, [withXp, channelKeys]);
 
-  // Tages-Score-Verlauf (Berlin-Zeit, Ø pro Tag) + 5-Tage-Moving-Average
-const trendData = useMemo(() => {
-  const byDay = new Map<string, number[]>();
-  for (const f of items) {
-    const iso = getTs(f);
-    if (!iso) continue;
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) continue;
-    const k = ymdBerlin(d);
-    const s = avgScore(f);
-    if (!Number.isFinite(s as any)) continue;
-    const arr = byDay.get(k) ?? [];
-    arr.push(Number(s));
-    byDay.set(k, arr);
-  }
-  const keys = [...byDay.keys()].sort();               // aufsteigend
-  const base = keys.map(k => {
-    const arr = byDay.get(k) ?? [];
-    const avg = arr.reduce((a,b)=>a+b,0)/Math.max(1,arr.length);
-    // x für Tooltip/Sort, score gerundet
-    return { date: k, x: new Date(k + 'T00:00:00Z'), score: Number(avg.toFixed(2)) };
-  });
-  return base;
-}, [items]);
+  // Tages-Score-Verlauf (Berlin-Zeit, Ø pro Tag) + 5-Tage-MA
+  const trendData = useMemo(() => {
+    const byDay = new Map<string, number[]>();
+    for (const f of items) {
+      const iso = getTs(f);
+      if (!iso) continue;
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) continue;
+      const k = ymdBerlin(d);
+      const s = avgScore(f);
+      if (!Number.isFinite(s as any)) continue;
+      const arr = byDay.get(k) ?? [];
+      arr.push(Number(s));
+      byDay.set(k, arr);
+    }
+    const keys = [...byDay.keys()].sort();
+    return keys.map(k => {
+      const arr = byDay.get(k) ?? [];
+      const avg = arr.reduce((a,b)=>a+b,0)/Math.max(1,arr.length);
+      return { date: k, x: new Date(k + 'T00:00:00Z'), score: Number(avg.toFixed(2)) };
+    });
+  }, [items]);
 
-const trendWithMA = useMemo(() => {
-  const win = 5;
-  const arr = trendData;
-  return arr.map((p, i) => {
-    const s = Math.max(0, i - (win - 1));
-    const slice = arr.slice(s, i + 1);
-    const ma = slice.reduce((sum, c) => sum + c.score, 0) / slice.length;
-    return { ...p, ma: Number(ma.toFixed(2)) };
-  });
-}, [trendData]);
+  const trendWithMA = useMemo(() => {
+    const win = 5;
+    const arr = trendData;
+    return arr.map((p, i) => {
+      const s = Math.max(0, i - (win - 1));
+      const slice = arr.slice(s, i + 1);
+      const ma = slice.reduce((sum, c) => sum + c.score, 0) / slice.length;
+      return { ...p, ma: Number(ma.toFixed(2)) };
+    });
+  }, [trendData]);
 
-// Monats-Verlauf: Ø pro Kanal (service_mail, service_mail_rekla, service_phone, sales_phone)
-const monthlyTrend = useMemo(() => {
-  const asc = [...(months ?? [])].sort((a,b)=> a.monthKey.localeCompare(b.monthKey)); // älteste → neueste
-  return asc.map(m => ({
-    monthKey: m.monthKey,
-    label: m.label, // "MM/JJJJ"
-    service_mail: m.byType.get('service_mail')?.avg ?? null,
-    service_mail_rekla: m.byType.get('service_mail_rekla')?.avg ?? null,
-    service_phone: m.byType.get('service_phone')?.avg ?? null,
-    sales_phone: m.byType.get('sales_phone')?.avg ?? null,
-    // optional: count je Kanal, falls du es im Tooltip brauchst
-    c_service_mail: m.byType.get('service_mail')?.count ?? 0,
-    c_service_mail_rekla: m.byType.get('service_mail_rekla')?.count ?? 0,
-    c_service_phone: m.byType.get('service_phone')?.count ?? 0,
-    c_sales_phone: m.byType.get('sales_phone')?.count ?? 0,
-  }));
-}, [months]);
-
+  // Monats-Verlauf: Ø je Kanal (inkl. sales_lead)
+  const monthlyTrend = useMemo(() => {
+    const asc = [...(months ?? [])].sort((a,b)=> a.monthKey.localeCompare(b.monthKey)); // älteste → neueste
+    return asc.map(m => ({
+      monthKey: m.monthKey,
+      label: m.label,
+      service_mail: m.byType.get('service_mail')?.avg ?? null,
+      service_mail_rekla: m.byType.get('service_mail_rekla')?.avg ?? null,
+      service_phone: m.byType.get('service_phone')?.avg ?? null,
+      sales_phone: m.byType.get('sales_phone')?.avg ?? null,
+      sales_lead: m.byType.get('sales_lead')?.avg ?? null,
+      // optional Counts
+      c_service_mail: m.byType.get('service_mail')?.count ?? 0,
+      c_service_mail_rekla: m.byType.get('service_mail_rekla')?.count ?? 0,
+      c_service_phone: m.byType.get('service_phone')?.count ?? 0,
+      c_sales_phone: m.byType.get('sales_phone')?.count ?? 0,
+      c_sales_lead: m.byType.get('sales_lead')?.count ?? 0,
+    }));
+  }, [months]);
 
   // open states
   const [openMonths, setOpenMonths] = useState<Record<string, boolean>>({});
@@ -601,18 +625,18 @@ const monthlyTrend = useMemo(() => {
   return (
     <section className="p-5 rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
       <div className="flex items-center justify-between mb-3">
-  <h2 className="text-lg font-semibold">Kunden-Feedback</h2>
-  <div className="flex items-center gap-2">
-    <input type="date" value={from} onChange={(e)=>setFrom(e.target.value)} className="px-2 py-1.5 ..." />
-    <span className="text-gray-400">–</span>
-    <input type="date" value={to} onChange={(e)=>setTo(e.target.value)} className="px-2 py-1.5 ..." />
-  </div>
-</div>
+        <h2 className="text-lg font-semibold">Kunden-Feedback</h2>
+        <div className="flex items-center gap-2">
+          <input type="date" value={from} onChange={(e)=>setFrom(e.target.value)} className="px-2 py-1.5 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10 text-sm" />
+          <span className="text-gray-400">–</span>
+          <input type="date" value={to} onChange={(e)=>setTo(e.target.value)} className="px-2 py-1.5 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10 text-sm" />
+        </div>
+      </div>
 
-{/* KI-Panel */}
-<AiSummaryPanel items={items} from={from} to={to} />
+      {/* KI-Panel */}
+      <AiSummaryPanel items={items} from={from} to={to} />
 
-{loading && <div className="text-sm text-gray-500">Lade…</div>}
+      {loading && <div className="text-sm text-gray-500">Lade…</div>}
 
       {!loading && (
         <>
@@ -630,7 +654,7 @@ const monthlyTrend = useMemo(() => {
                     {overallStreak.current} <span className="text-sm text-gray-500">/ best {overallStreak.best}</span>
                   </div>
                 </div>
-                {/* 🆕 Offene interne Notizen im Zeitraum */}
+                {/* Offene interne Notizen */}
                 <div>
                   <div className="text-xs text-gray-500">Offene interne Notizen</div>
                   <div className="text-xl font-semibold text-amber-600">
@@ -661,35 +685,36 @@ const monthlyTrend = useMemo(() => {
             </div>
           </div>
 
-{/* Monats-Verlauf (Ø je Kanal) */}
-<div className="rounded-xl border border-gray-200 dark:border-gray-800 p-3 bg-white dark:bg-gray-900 mb-4">
-  <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
-    <div className="text-sm font-medium">Verlauf pro Monat (Ø je Kanal)</div>
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
-      {([
-        ['service_mail_rekla', typeLabel.service_mail_rekla],
-        ['service_mail',       typeLabel.service_mail],
-        ['sales_phone',        typeLabel.sales_phone],
-        ['service_phone',      typeLabel.service_phone],
-        ['sales_lead',      typeLabel.sales_lead],
-      ] as const).map(([k, label]) => (
-        <span key={k} className="inline-flex items-center gap-1">
-          <span className="inline-block w-4 h-1.5 rounded-full" style={{ background: channelColors[k] }} />
-          <span>{label}</span>
-          <span className="opacity-60">· Ziel {targets[k].toFixed(2)}</span>
-        </span>
-      ))}
-    </div>
-  </div>
+          {/* Monats-Verlauf (Ø je Kanal) */}
+          <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-3 bg-white dark:bg-gray-900 mb-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
+              <div className="text-sm font-medium">Verlauf pro Monat (Ø je Kanal)</div>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
+                {([
+                  ['service_mail_rekla', typeLabel.service_mail_rekla ?? 'E-Mail Rekla'],
+                  ['service_mail',       typeLabel.service_mail ?? 'E-Mail Service'],
+                  ['sales_phone',        typeLabel.sales_phone ?? 'Sales Phone'],
+                  ['service_phone',      typeLabel.service_phone ?? 'Service Phone'],
+                  ['sales_lead',         typeLabel.sales_lead ?? 'Sales Lead'],
+                ] as const).map(([k, label]) => (
+                  <span key={k} className="inline-flex items-center gap-1">
+                    <span className="inline-block w-4 h-1.5 rounded-full" style={{ background: channelColors[k] ?? '#64748b' }} />
+                    <span>{label}</span>
+                    {targets[k] != null && (
+                      <span className="opacity-60">· Ziel {targets[k].toFixed(2)}</span>
+                    )}
+                  </span>
+                ))}
+              </div>
+            </div>
 
-  <YearScoreTrend
-    data={monthlyTrend}
-    targets={targets}
-    labelMap={typeLabel}
-    colors={channelColors}
-  />
-</div>
-
+            <YearScoreTrend
+              data={monthlyTrend}
+              targets={targets}
+              labelMap={typeLabel}
+              colors={channelColors}
+            />
+          </div>
 
           {/* Monate */}
           {(withXp ?? []).length === 0 ? (
@@ -708,7 +733,6 @@ const monthlyTrend = useMemo(() => {
                           {m.overallPass ? 'alle Ziele erreicht' : 'unter Ziel'}
                         </span>
                         <span className="text-xs text-gray-500">{m.overallCount} Feedbacks</span>
-                        {/* 🆕 Badge für offene interne Notizen */}
                         {m.openInternal > 0 && (
                           <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
                             {m.openInternal} intern
@@ -718,12 +742,13 @@ const monthlyTrend = useMemo(() => {
                           <span className="text-xs text-amber-700 dark:text-amber-300">· {m.badges.join(' · ')}</span>
                         )}
                       </div>
+                      <span className="text-gray-400">{mOpen ? '▾' : '▸'}</span>
                     </button>
 
                     {/* Month body */}
                     {mOpen && (
                       <div className="px-3 pb-3">
-                        {/* 🆕 Interne Notizen Preview (klickbar: öffnet Tag & scrollt zum Feedback) */}
+                        {/* Interne Notizen Preview */}
                         {m.openInternal > 0 && (
                           <div className="mb-3 rounded-xl border border-amber-200 dark:border-amber-900/50 bg-amber-50/60 dark:bg-amber-900/10 p-3">
                             <div className="text-xs uppercase tracking-wide text-amber-700 dark:text-amber-300 mb-1 text-center">
@@ -759,14 +784,14 @@ const monthlyTrend = useMemo(() => {
                         <div className="grid gap-3 sm:grid-cols-2">
                           {Array.from(m.byType?.entries?.() ?? []).sort((a,b)=>a[0].localeCompare(b[0])).map(([type, v])=>{
                             const label = typeLabel[type] ?? type;
-                            const target = targets[type] ?? targets.unknown;
+                            const target = targets[type] ?? targets.unknown ?? 4.5;
                             const pct = Math.max(0, Math.min(100, (v.avg/target)*100));
-                            const lvl = levelFor(v.avg, target);
+                            const lvlMeta = levelFor(v.avg, target);
                             return (
                               <div key={type} className="rounded-xl border border-gray-200 dark:border-gray-800 p-3">
                                 <div className="flex items-center justify-between gap-2">
                                   <div className="font-medium">{label}</div>
-                                  <span className={`text-[11px] px-2 py-0.5 rounded-full ${lvl.class}`} title={`Level: ${lvl.name}`}>{lvl.icon} {lvl.name}</span>
+                                  <span className={`text-[11px] px-2 py-0.5 rounded-full ${lvlMeta.class}`} title={`Level: ${lvlMeta.name}`}>{lvlMeta.icon} {lvlMeta.name}</span>
                                 </div>
                                 <div className="mt-1 flex items-baseline gap-2">
                                   <span className={`text-xl font-semibold ${noteColor(v.avg)}`}>{v.avg.toFixed(2)}</span>
@@ -782,7 +807,7 @@ const monthlyTrend = useMemo(() => {
                           {(!m.byType || m.byType.size === 0) && <div className="text-sm text-gray-500">Keine Bewertungen in diesem Monat.</div>}
                         </div>
 
-                        {/* Days accordion (standard: zugeklappt) */}
+                        {/* Days accordion */}
                         <div className="mt-4">
                           <div className="text-sm font-medium mb-1">Tage</div>
                           <ul className="space-y-2">
@@ -817,15 +842,14 @@ const monthlyTrend = useMemo(() => {
                                     </div>
                                   </button>
 
-                                  {/* 🆕 Tages-Scores: alle Teilnoten + Ø (Zeitspalte entfernt) */}
+                                  {/* Tages-Tabelle */}
                                   {dOpen && (
                                     <div className="px-3 pb-3">
                                       <DayScoresTable items={d.items ?? []} />
                                     </div>
                                   )}
 
-
-                                  {/* Detailkarten – inkl. internem Kommentar */}
+                                  {/* Detailkarten */}
                                   {dOpen && (
                                     <ul className="divide-y divide-gray-200 dark:divide-gray-800">
                                       {(d.items ?? []).map((f)=> (
@@ -858,12 +882,11 @@ const monthlyTrend = useMemo(() => {
 }
 
 /* ===========================
-   Tages-Tabelle (Kanal + Einzelwerte + Ø) – Nullwerte visuell gestrichen, Ø ignoriert 0
+   Tages-Tabelle
 =========================== */
 function DayScoresTable({ items }: { items: FeedbackItem[] | undefined | null }) {
   const safe = Array.isArray(items) ? items : [];
 
-  // Spalten ausser Zeit
   const cols = [
     { key: 'bewertung',               label: 'Bewertung' },
     { key: 'beraterfreundlichkeit',   label: 'Beraterfreundlichkeit' },
@@ -873,7 +896,7 @@ function DayScoresTable({ items }: { items: FeedbackItem[] | undefined | null })
 
   const numOrNull = (v:any) => {
     const n = Number(v);
-    return Number.isFinite(n) && n >= 1 ? n : null; // 0 -> n.v.
+    return Number.isFinite(n) && n >= 1 ? n : null;
   };
 
   const avgOf = (arr:(number|null)[]) => {
@@ -884,7 +907,6 @@ function DayScoresTable({ items }: { items: FeedbackItem[] | undefined | null })
   const rowData = safe.map((f) => {
     const v = (k: (typeof cols)[number]['key']) => numOrNull((f as any)[k]);
     const rowVals = cols.map(c => v(c.key));
-    // Ø Regel: wenn >=2 Teilnoten vorhanden -> deren Ø, sonst Bewertung (>=1) sonst null
     const parts = [v('beraterfreundlichkeit'), v('beraterqualifikation'), v('angebotsattraktivitaet')]
       .filter((x): x is number => Number.isFinite(x as number));
     const rowAvg = parts.length >= 2 ? (parts.reduce((s,n)=>s+n,0)/parts.length) : v('bewertung');
@@ -948,7 +970,9 @@ function DayScoresTable({ items }: { items: FeedbackItem[] | undefined | null })
   );
 }
 
-
+/* ===========================
+   Kommentare
+=========================== */
 function FeedbackComments({ feedbackId }: { feedbackId: number|string }) {
   const [items, setItems] = useState<Array<{id:number; body:string; author:string; created_at:string; unread?:boolean}>>([]);
   const [draft, setDraft] = useState('');
@@ -1002,6 +1026,9 @@ function FeedbackComments({ feedbackId }: { feedbackId: number|string }) {
   );
 }
 
+/* ===========================
+   Labels
+=========================== */
 function LabelChips({ feedbackId, labels, onChange }:{
   feedbackId: number|string;
   labels: Array<{id:number; name:string; color?:string}>;
@@ -1066,7 +1093,7 @@ function LabelChips({ feedbackId, labels, onChange }:{
 }
 
 /* ===========================
-   Einzelzeile – Kommentar-Toggle, interne Notiz (zentriert), „erledigt“-Toggle + BO-Chip + Berlin-Zeit
+   Einzelzeile
 =========================== */
 function FeedbackItemRow({
   f,
@@ -1079,7 +1106,6 @@ function FeedbackItemRow({
   labelMap: Record<string,string>;
   noteColor: (v:number|null|undefined)=>string;
 }) {
-
   const [internalChecked, setInternalChecked] = useState(!!f.internal_checked);
 
   const lbl = labelMap[f.feedbacktyp] ?? f.feedbacktyp ?? '—';
@@ -1164,23 +1190,17 @@ function FeedbackItemRow({
           </div>
         </div>
 
+        {/* Kundenkommentar */}
+        {f.kommentar && (
+          <div className="mt-2">
+            <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+              {f.kommentar}
+            </p>
+          </div>
+        )}
 
-
-
-
-
-
-{/* Kundenkommentar: immer sichtbar */}
-{f.kommentar && (
-  <div className="mt-2">
-    <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
-      {f.kommentar}
-    </p>
-  </div>
-)}
-
-        {/* ===== Interner Kommentar – ZENTRIERT ===== */}
-        {hasInternal && (
+        {/* Interner Kommentar – zentriert */}
+        {(f.internal_note && f.internal_note.trim()) && (
           <div className="mt-3 flex justify-center">
             <div className="w-full max-w-2xl rounded-xl border border-amber-200 dark:border-amber-900/50 bg-amber-50/60 dark:bg-amber-900/10 p-4 text-center">
               <div className="text-xs uppercase tracking-wide text-amber-700 dark:text-amber-300 mb-2">
@@ -1212,12 +1232,11 @@ function FeedbackItemRow({
           </div>
         )}
 
-        {/* 🏷️ Labels */}
-<LabelChips feedbackId={Number(f.id)} labels={[]} />
+        {/* Labels */}
+        <LabelChips feedbackId={Number(f.id)} labels={[]} />
 
-{/* 💬 Kommentare */}
-<FeedbackComments feedbackId={Number(f.id)} />
-
+        {/* Kommentare */}
+        <FeedbackComments feedbackId={Number(f.id)} />
       </div>
 
       {/* rechte Spalte (Score) */}
