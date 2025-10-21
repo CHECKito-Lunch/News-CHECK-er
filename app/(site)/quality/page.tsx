@@ -81,6 +81,7 @@ export default function QualityPage(){
     }
   }, []);
 
+  // Daten laden
   const load = useCallback(async () => {
     setLoading(true);
     try{
@@ -93,6 +94,7 @@ export default function QualityPage(){
 
   useEffect(() => { load(); }, [load]);
 
+  // Chart
   const byMonth = useMemo(()=>{
     const m = new Map<string, number>();
     items.forEach(i=>{ const k = ymKey(i.ts); if (!k) return; m.set(k,(m.get(k)||0)+1); });
@@ -100,6 +102,7 @@ export default function QualityPage(){
     return arr.map(([k,v])=>({ month:k, count:v }));
   },[items]);
 
+  // Monatsgruppen
   const monthGroups = useMemo(()=>{
     const map = new Map<string, Item[]>();
     for (const it of items) {
@@ -117,7 +120,18 @@ export default function QualityPage(){
     return ordered.map(([key, list]) => ({ key, label: ymLabelDE(key), items: list }));
   },[items]);
 
-  // KI-Coaching: ruft /api/me/qa/coach (Server-seitig Nutzerkontext), ohne Fallback
+  // sichtbare Werte (leere Buckets ausblenden)
+  const visibleValues = useMemo(() => {
+    if (!aiCoach) return [];
+    return aiCoach.values.filter(v =>
+      (v.praise?.length ?? 0) > 0 ||
+      (v.neutral?.length ?? 0) > 0 ||
+      (v.improve?.length ?? 0) > 0 ||
+      (v.tips?.length ?? 0) > 0
+    );
+  }, [aiCoach]);
+
+  // KI-Coaching: /api/me/qa/coach (Server kennt User), kein Items-Post
   const runCoaching = useCallback(async () => {
     if (items.length === 0) return;
     setAiLoading(true); setAiError(null);
@@ -169,6 +183,7 @@ export default function QualityPage(){
 
         {/* KI-Panel */}
         {aiError && <div className="mb-3 text-sm text-red-600">{aiError}</div>}
+
         {aiCoach && (
           <div className="mb-4 rounded-xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50/60 dark:bg-emerald-900/20 p-3">
             <div className="flex items-center justify-between mb-2">
@@ -190,7 +205,7 @@ export default function QualityPage(){
             )}
 
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {aiCoach.values.map((v, idx)=>{
+              {visibleValues.map((v, idx)=>{
                 const c = VALUE_COLORS[v.value] || { bg:'bg-gray-50 dark:bg-gray-800/40', text:'text-gray-800 dark:text-gray-200', border:'border-gray-200 dark:border-gray-700' };
                 return (
                   <div key={idx} className={`rounded-lg border p-3 ${c.bg} ${c.border}`}>
