@@ -8,7 +8,7 @@ import { openai } from '@/lib/openai';
 
 export const dynamic = 'force-dynamic';
 
-/* ---------- Types ---------- */
+/* ---------- DB Types ---------- */
 type Item = {
   id: number | string;
   ts?: string | null;
@@ -18,29 +18,13 @@ type Item = {
   description?: string | null;
 };
 
-type AiSummary = {
-  praise: string[];
-  neutral: string[];
-  improve: string[];
-  confidence?: 'low' | 'medium' | 'high';
-  token_usage?: { input?: number; output?: number };
-};
-
-/* ---- Coach types (für API-Ausgabe) ---- */
-type CoachPoint = { text: string; example_item_ids?: Array<string|number> };
-type CoachTip = CoachPoint & { source?: 'extracted' | 'generated' };
-type CoachValue = {
-  value: string;
-  praise: CoachPoint[];
-  neutral: CoachPoint[];
-  improve: CoachPoint[];
-  tips: CoachTip[];
-};
-type CoachData = {
-  values: CoachValue[];
-  summary: { overall_tone?: string; quick_wins: string[]; risks: string[] };
-  incidents_mapped: Array<{ item_id: string|number; value: string; why?: string }>;
-};
+/* ---------- Request Body ---------- */
+const BodySchema = z.object({
+  owner_id: z.string().uuid(),
+  from: z.string().optional(),
+  to: z.string().optional(),
+  limit: z.number().int().min(1).max(1000).optional(),
+});
 
 /* ---------- Helpers ---------- */
 const isUUID = (s: unknown): s is string =>
@@ -53,20 +37,89 @@ const toISODate = (d?: string | null) => {
   return isNaN(dt.getTime()) ? null : dt.toISOString().slice(0, 10);
 };
 
-/* ---------- Request Body ---------- */
-const BodySchema = z.object({
-  owner_id: z.string().uuid(),
-  from: z.string().optional(),
-  to: z.string().optional(),
-  limit: z.number().int().min(1).max(1000).optional(),
+/* ---------- Firmenwerte ---------- */
+const VALUE_ENUM = [
+  'Zielgerichtete Kommunikation und Zusammenarbeit',
+  'Offenheit & Lernbereitschaft',
+  'Kundenorientierung',
+  'Fachkompetenz',
+  'Excellence in Execution',
+  'Ergebnisorientierung',
+  'Commitment',
+] as const;
+
+/* ---------- Optionale Zuordnungs-Hints ---------- */
+const VALUE_HINTS: Record<string, string[]> = {
+  kommunikation: ['Zielgerichtete Kommunikation und Zusammenarbeit'],
+  teamwork: ['Zielgerichtete Kommunikation und Zusammenarbeit'],
+  lernen: ['Offenheit & Lernbereitschaft'],
+  kunden: ['Kundenorientierung'],
+  fachlich: ['Fachkompetenz'],
+  prozess: ['Excellence in Execution'],
+  abschluss: ['Ergebnisorientierung'],
+  commitment: ['Commitment'],
+};
+
+/* ---------- CoachData Schema (Zod) ---------- */
+const Point = z.object({
+  text: z.string(),
+  example_item_ids: z.array(z.union([z.string(), z.number()])).optional(),
 });
+const TipPoint = z.object({
+  text: z.string(),
+  source: z.enum(['extracted', 'generated']).optional(),
+  example_item_ids: z.array(z.union([z.string(), z.number()])).optional(),
+});
+const ValueBlock = z.object({
+  value: z.enum(VALUE_ENUM),
+  praise: z.array(Point).default([]),
+  neutral: z.array(Point).default([]),
+  improve: z.array(Point).default([]),
+  tips: z.array(TipPoint).default([]),
+});
+const Summary = z.object({
+  overall_tone: z.string().optional(),
+  quick_wins: z.array(z.string()).default([]),
+  risks: z.array(z.string()).default([]),
+});
+const CoachResponseSchema = z.object({
+  values: z.array(ValueBlock),
+  incidents_mapped: z.array(
+    z.object({
+      item_id: z.union([z.string(), z.number()]),
+      value: ValueBlock.shape.value,
+      why: z.string().optional(),
+    })
+  ).default([]),
+  summary: Summary,
+});
+type CoachResponse = z.infer<typeof CoachResponseSchema>;
+
+/* ---------- Prompt ---------- */
+const SYSTEM_PROMPT =
+  'Du bist eine Assistenz für Teamleiter:innen und Mitarbeitende bei CHECK24. ' +
+  'Analysiere QA-Feedbackeinträge und gib kompaktes, wertschätzendes Coaching-Feedback auf Deutsch in der "Du"-Form. ' +
+  'Beziehe dich EXPLIZIT auf die CHECK24-Werte: ' + VALUE_ENUM.join('; ') + '. ' +
+  'Antworte NUR als JSON im Schema {values[], incidents_mapped[], summary}. ' +
+  'Jeder Stichpunkt: 1 präziser Satz, max. 18 Wörter, keine PII, keine Schuldzuweisungen, lösungsorientiert. ' +
+  'Verdichte Redundanzen und formuliere konkrete Micro-Nächste-Schritte in tips[].';
+
+const buildUserPrompt = (payload: { items: any[]; valueHints: Record<string, string[]> }) =>
+  [
+    'Erzeuge pro Firmenwert ein Objekt {value, praise[], neutral[], improve[], tips[]}.',
+    'Fülle nur dort Inhalte, wo die Items Substanz liefern; sonst arrays leer lassen.',
+    'Nutze incidents_mapped[] für {item_id, value, why} (why max. 12 Wörter).',
+    'Nutze valueHints nur, wenn sie semantisch passen.',
+    'Gib ausschließlich gültiges JSON nach Schema zurück.',
+    JSON.stringify(payload),
+  ].join('\n');
 
 /* ---------- CORS/Preflight ---------- */
 export async function OPTIONS() {
   return new NextResponse(null, {
     status: 204,
     headers: {
-      'Access-Control-Allow-Origin': '*', // ggf. auf Origin einschränken
+      'Access-Control-Allow-Origin': '*', // bei Bedarf einschränken
       'Access-Control-Allow-Methods': 'POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization',
       'Access-Control-Max-Age': '86400',
@@ -79,31 +132,6 @@ export async function GET() {
     status: 405,
     headers: { Allow: 'POST, OPTIONS' },
   });
-}
-
-/* ---------- Summary -> CoachData Mapping ---------- */
-function summaryToCoachData(s: AiSummary): CoachData {
-  const toPts = (arr?: string[]) =>
-    (Array.isArray(arr) ? arr : []).filter(Boolean).map((t) => ({ text: t }));
-
-  // Ein einfacher Default-Block (du kannst das später nach Werten aufsplitten)
-  const block: CoachValue = {
-    value: 'Excellence in Execution',
-    praise: toPts(s.praise),
-    neutral: toPts(s.neutral),
-    improve: toPts(s.improve),
-    tips: [], // Hier keine separaten Tipps generiert
-  };
-
-  return {
-    values: [block],
-    summary: {
-      overall_tone: undefined,
-      quick_wins: (s.improve || []).slice(0, 5),
-      risks: [],
-    },
-    incidents_mapped: [],
-  };
 }
 
 /* ---------- POST ---------- */
@@ -132,7 +160,7 @@ export async function POST(req: NextRequest) {
     const toISO = toISODate(to);
     const cap = limit ?? 500;
 
-    // QA-Items des ausgewählten Mitarbeiters laden (serverseitig)
+    // Items des ausgewählten Mitarbeiters serverseitig laden
     let q = sql/*sql*/`
       select id, ts, incident_type, category, severity, description
       from public.qa_incidents
@@ -147,7 +175,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'no_items' }, { status: 400 });
     }
 
-    // Kompakt für Prompt (sanitizen + kürzen)
+    // Für den Prompt kompakt & saniert
     const compact = rows.map((i) => ({
       id: i.id,
       ts: i.ts,
@@ -157,67 +185,41 @@ export async function POST(req: NextRequest) {
       text: (i.description || '').trim().slice(0, 2000),
     }));
 
-    /* ---------- Prompt ---------- */
-    const sys = [
-      'Du bist eine Assistenz, die Mitarbeiterfeedback entlang der CHECK24-Firmenwerte analysiert und in wertschätzende, klare und kurze Stichpunkte überführt.',
-      'Sprache: Deutsch. Zielgruppe: internes Serviceteam (Führungskraft + Mitarbeiter).',
-      'Strukturiere dein Feedback im JSON-Format {"praise":[],"neutral":[],"improve":[]}.',
-      'Jeder Stichpunkt bezieht sich implizit auf passende Werte (z. B. Zielgerichtete Kommunikation, Offenheit & Lernbereitschaft, Kundenorientierung, Fachkompetenz, Excellence in Execution, Ergebnisorientierung, Commitment).',
-      'Jeder Stichpunkt: 1 präziser Satz, max. 18 Wörter, ohne Schuldzuweisungen/PII, in der "Du"-Form.',
-      'Nutze neutrale, motivierende Formulierungen ("könntest", "zeigt", "achtet auf", "unterstützt").',
-      'Fasse Redundanzen zusammen, professioneller, lösungsorientierter Ton. Keine Floskeln.',
-    ].join(' ');
+    // OpenAI: direkt CoachData-ähnliche Struktur erzeugen
+    const messages = [
+      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'user', content: buildUserPrompt({ items: compact, valueHints: VALUE_HINTS }) },
+    ] as const;
 
-    const userMsg = [
-      'Erzeuge eine kurze Auswertung in drei Kategorien:',
-      '1) Was wird gelobt (praise)?',
-      '2) Was ist neutral (neutral)?',
-      '3) Was ist verbesserungswürdig (improve)?',
-      'Leite Punkte aus den folgenden Einträgen ab (QA-Incidents):',
-      JSON.stringify({ items: compact }).slice(0, 120_000),
-    ].join('\n');
-
-    const resp = await openai.chat.completions.create({
+    const completion = await openai.chat.completions.create({
       model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
       temperature: 0.2,
+      max_tokens: 1400,
       response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: sys },
-        { role: 'user', content: userMsg },
-      ],
+      messages: messages as any,
     });
 
-    const rawOut = resp.choices?.[0]?.message?.content || '{}';
-    let parsedOut: AiSummary = { praise: [], neutral: [], improve: [] };
+    const rawOut = completion.choices?.[0]?.message?.content ?? '{}';
+    let data: CoachResponse | null = null;
     try {
-      parsedOut = JSON.parse(rawOut);
-    } catch {
-      // Falls das LLM nicht korrekt antwortet, bleiben die Listen leer
+      const parsedOut = CoachResponseSchema.safeParse(JSON.parse(rawOut));
+      if (parsedOut.success) data = parsedOut.data;
+    } catch { /* noop */ }
+
+    if (!data) {
+      return NextResponse.json({ ok: false, error: 'bad_ai_response' }, { status: 502 });
     }
 
-    // Sanitize
-    const sanitize = (arr: any) =>
-      Array.isArray(arr) ? arr.filter((x) => typeof x === 'string' && x.trim()).slice(0, 12) : [];
-
-    const summary: AiSummary = {
-      praise: sanitize(parsedOut.praise),
-      neutral: sanitize(parsedOut.neutral),
-      improve: sanitize(parsedOut.improve),
-    };
-
-    // === Mapping auf CoachData + Quicklist (Frontend erwartet mode:'ai' + data) ===
-    const coachData: CoachData = summaryToCoachData(summary);
-    const quicklist = coachData.values
-      .flatMap((v) => [
-        ...v.improve.map((p) => ({ value: v.value, type: 'improve' as const, text: p.text })),
-        ...v.tips.map((t) => ({ value: v.value, type: 'tip' as const, text: t.text })),
-      ])
-      .slice(0, 50);
+    // Quicklist fürs UI (Tipps separat generieren können wir später optional ergänzen)
+    const quicklist = data.values.flatMap(v => [
+      ...v.improve.map(p => ({ value: v.value, type: 'improve' as const, text: p.text, example_item_ids: p.example_item_ids })),
+      ...v.tips.map(t => ({ value: v.value, type: 'tip' as const, text: t.text, example_item_ids: t.example_item_ids })),
+    ]).slice(0, 50);
 
     return NextResponse.json({
       ok: true,
       mode: 'ai',
-      data: coachData,
+      data,
       quicklist,
       meta: {
         owner_id,

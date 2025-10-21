@@ -218,22 +218,29 @@ export default function QAWidget({
     setOpenGroups(next);
   };
 
-  // === KI-Coaching (nur neue API, keine Items senden) ===
+  // Sichtbare Werte: Werte ohne Inhalte ausblenden (praise+neutral+improve+tips alle leer)
+  const visibleValues = useMemo(() => {
+    if (!aiCoach) return [];
+    return aiCoach.values.filter(v =>
+      (v.praise?.length ?? 0) > 0 ||
+      (v.neutral?.length ?? 0) > 0 ||
+      (v.improve?.length ?? 0) > 0 ||
+      (v.tips?.length ?? 0) > 0
+    );
+  }, [aiCoach]);
+
+  // === KI-Coaching (authentifiziert, keine Items mitsenden) ===
   const runAi = useCallback(async () => {
-    if (items.length === 0) return; // Button-Disable basiert jetzt auf items
+    if (items.length === 0) return;
     setAiLoading(true); setAiError(null);
     try {
-      const r = await fetch ('/api/teamhub/qa/coach', {
+      const r = await authedFetch('/api/teamhub/qa/coach', {
         method: 'POST',
         headers: { 'Content-Type':'application/json' },
         body: JSON.stringify({ owner_id: ownerId, from, to }),
       });
-      if (!r.ok) {
-        const err = await r.json().catch(()=>({ error:'bad_response' }));
-        throw new Error(err?.error || 'Analyse fehlgeschlagen');
-      }
-      const j = await r.json();
-      if (!j?.ok || j.mode !== 'ai' || !j.data) {
+      const j = await r.json().catch(()=>null);
+      if (!r.ok || !j?.ok || j.mode !== 'ai' || !j.data) {
         throw new Error(j?.error || 'Analyse fehlgeschlagen');
       }
       setAiCoach(j.data as CoachData);
@@ -303,7 +310,7 @@ export default function QAWidget({
           )}
 
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {aiCoach.values.map((v, idx)=> {
+            {visibleValues.map((v, idx)=> {
               const color = VALUE_COLORS[v.value] || { bg:'bg-gray-50 dark:bg-gray-800/40', text:'text-gray-800 dark:text-gray-200', border:'border-gray-200 dark:border-gray-700' };
               return (
                 <div key={idx} className={`rounded-lg border p-3 ${color.bg} ${color.border}`}>
