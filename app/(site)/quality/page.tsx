@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
@@ -13,8 +15,10 @@ type Item = {
   category?: string | null;
   severity?: string | null;
   description?: string | null;
+  booking_number_hash?: string | null; // für BO-Link
 };
 
+/* ---- Coach types ---- */
 type CoachPoint = { text: string; example_item_ids?: Array<string|number> };
 type CoachTip = CoachPoint & { source?: 'extracted' | 'generated' };
 type CoachValue = {
@@ -30,6 +34,32 @@ type CoachData = {
   incidents_mapped: Array<{ item_id: string|number; value: string; why?: string }>;
 };
 
+/* -------- Anzeige-Labels -------- */
+const TYPE_LABELS: Record<string, string> = {
+  mail_handling: 'Mail-Bearbeitung',
+  consulting: 'Beratung',
+  rekla: 'Reklamation',
+  booking_transfer: 'Umbuchung',
+  booking_changed: 'Buchung geändert',
+  cancellation: 'Stornierung',
+  reminder: 'Erinnerung',
+  post_booking: 'Nachbuchung',
+  additional_service: 'Zusatzleistung',
+  voucher: 'Gutschein',
+  payment_data: 'Zahlungsdaten',
+  va_contact: 'VA-Kontakt',
+  word_before_writing: 'Vor dem Schreiben',
+  privacy: 'Datenschutz',
+  special_reservation: 'Sonderreservierung',
+  sonstiges: 'Sonstiges',
+};
+const labelForType = (t?: string | null) => {
+  const k = (t || '').trim();
+  if (!k) return '—';
+  if (TYPE_LABELS[k]) return TYPE_LABELS[k];
+  return k.replace(/_/g, ' ').replace(/\b\w/g, m => m.toUpperCase());
+};
+
 /* -------- Value→Farb-Map -------- */
 const VALUE_COLORS: Record<string, {bg:string; text:string; border:string}> = {
   'Zielgerichtete Kommunikation und Zusammenarbeit': { bg: 'bg-indigo-50 dark:bg-indigo-900/20', text: 'text-indigo-800 dark:text-indigo-200', border: 'border-indigo-200 dark:border-indigo-800' },
@@ -43,10 +73,12 @@ const VALUE_COLORS: Record<string, {bg:string; text:string; border:string}> = {
 
 /* -------- Helpers -------- */
 const FE_TZ = 'Europe/Berlin';
-const ymKey = (iso?:string|null)=>{
-  if (!iso) return null; const d = new Date(iso); if (isNaN(d.getTime())) return null;
+const ymKey = (iso?: string | null) => {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return null;
   const z = new Date(d.toLocaleString('en-US', { timeZone: FE_TZ }));
-  return `${z.getFullYear()}-${String(z.getMonth()+1).padStart(2,'0')}`;
+  return `${z.getFullYear()}-${String(z.getMonth() + 1).padStart(2, '0')}`;
 };
 const ymLabelDE = (ym: string) => {
   const [y, m] = ym.split('-').map(Number);
@@ -58,27 +90,41 @@ const fmtDate = (input?: string | null) => {
   const d = new Date(input);
   return isNaN(d.getTime()) ? input : d.toLocaleString('de-DE');
 };
+const boUrl = (n?: string | null) =>
+  n && n.trim()
+    ? `https://backoffice.reisen.check24.de/booking/search/?booking_id=${encodeURIComponent(n.replace(/\D+/g, ''))}`
+    : null;
 
+/* -------- Page -------- */
 export default function QualityPage(){
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Gruppen-UI (eingeklappt/ausgeklappt)
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+
   // KI-Coaching State
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string|null>(null);
   const [aiCoach, setAiCoach] = useState<CoachData|null>(null);
-  const [aiQuicklist, setAiQuicklist] = useState<Array<{ value:string; type:'tip'|'improve'; text:string; example_item_ids?:Array<string|number> }>>([]);
+  const [aiQuicklist, setAiQuicklist] = useState<
+    Array<{ value:string; type:'tip'|'improve'; text:string; example_item_ids?:Array<string|number> }>
+  >([]);
   const [highlightId, setHighlightId] = useState<string|number|null>(null);
 
   const scrollToItem = useCallback((id: string | number) => {
-    const el = document.querySelector(`[data-item-id="${String(id)}"]`);
-    if (el && el instanceof HTMLElement) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      setHighlightId(id);
-      setTimeout(() => setHighlightId(null), 2400);
-    }
+    // alle Gruppen auf, damit Scroll-Ziel sichtbar ist
+    setAllGroups(true);
+    setTimeout(() => {
+      const el = document.querySelector(`[data-item-id="${String(id)}"]`);
+      if (el && el instanceof HTMLElement) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setHighlightId(id);
+        setTimeout(() => setHighlightId(null), 2400);
+      }
+    }, 50);
   }, []);
 
   // Daten laden
@@ -94,7 +140,7 @@ export default function QualityPage(){
 
   useEffect(() => { load(); }, [load]);
 
-  // Chart
+  // Chartdaten
   const byMonth = useMemo(()=>{
     const m = new Map<string, number>();
     items.forEach(i=>{ const k = ymKey(i.ts); if (!k) return; m.set(k,(m.get(k)||0)+1); });
@@ -102,7 +148,7 @@ export default function QualityPage(){
     return arr.map(([k,v])=>({ month:k, count:v }));
   },[items]);
 
-  // Monatsgruppen
+  // Gruppen nach Monat (neueste zuerst)
   const monthGroups = useMemo(()=>{
     const map = new Map<string, Item[]>();
     for (const it of items) {
@@ -120,6 +166,19 @@ export default function QualityPage(){
     return ordered.map(([key, list]) => ({ key, label: ymLabelDE(key), items: list }));
   },[items]);
 
+  // beim Neuaufbau standardmäßig zu
+  useEffect(() => {
+    const next: Record<string, boolean> = {};
+    for (const g of monthGroups) next[g.key] = false;
+    setOpenGroups(next);
+  }, [monthGroups.map(g => g.key).join(',')]);
+
+  const setAllGroups = (open: boolean) => {
+    const next: Record<string, boolean> = {};
+    for (const g of monthGroups) next[g.key] = open;
+    setOpenGroups(next);
+  };
+
   // sichtbare Werte (leere Buckets ausblenden)
   const visibleValues = useMemo(() => {
     if (!aiCoach) return [];
@@ -131,7 +190,7 @@ export default function QualityPage(){
     );
   }, [aiCoach]);
 
-  // KI-Coaching: /api/me/qa/coach (Server kennt User), kein Items-Post
+  // KI-Coaching (User-Route, kein Items-Post)
   const runCoaching = useCallback(async () => {
     if (items.length === 0) return;
     setAiLoading(true); setAiError(null);
@@ -162,19 +221,37 @@ export default function QualityPage(){
 
   return (
     <div className="w-full max-w-[1920px] mx-auto px-4 py-6">
-      <header className="flex items-center justify-between">
+      {/* Kopf */}
+      <div className="flex items-center justify-between gap-2 mb-4">
         <h1 className="text-2xl font-semibold">Meine QA-Vorfälle</h1>
-        <button
-          onClick={runCoaching}
-          disabled={aiLoading || items.length===0}
-          className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-sm"
-          title="KI-Coaching für den ausgewählten Zeitraum"
-        >
-          {aiLoading ? 'Analysiere…' : 'KI-Coaching'}
-        </button>
-      </header>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setAllGroups(true)}
+            className="px-2 py-1.5 rounded-lg border text-xs"
+            title="Alle Monate öffnen"
+          >
+            Alle öffnen
+          </button>
+          <button
+            onClick={() => setAllGroups(false)}
+            className="px-2 py-1.5 rounded-lg border text-xs"
+            title="Alle Monate schließen"
+          >
+            Alle schließen
+          </button>
+          <button
+            onClick={runCoaching}
+            disabled={aiLoading || items.length===0}
+            className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-sm"
+            title="KI-Coaching für den ausgewählten Zeitraum"
+          >
+            {aiLoading ? 'Analysiere…' : 'KI-Coaching'}
+          </button>
+        </div>
+      </div>
 
       <section className="p-5 rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
+        {/* Zeitraum */}
         <div className="flex items-center gap-2 mb-3">
           <input type="date" value={from} onChange={(e)=>setFrom(e.target.value)} className="px-2 py-1.5 border rounded" />
           <span className="text-gray-400">–</span>
@@ -222,6 +299,7 @@ export default function QualityPage(){
                                 <button
                                   className="ml-1 text-[11px] underline text-blue-700 hover:text-blue-900"
                                   onClick={()=> p.example_item_ids && scrollToItem(p.example_item_ids[0])}
+                                  title={`Zu Beispiel ${String(p.example_item_ids?.[0])} springen`}
                                 >
                                   (Beispiel)
                                 </button>
@@ -243,6 +321,7 @@ export default function QualityPage(){
                                 <button
                                   className="ml-1 text-[11px] underline text-blue-700 hover:text-blue-900"
                                   onClick={()=> p.example_item_ids && scrollToItem(p.example_item_ids[0])}
+                                  title={`Zu Beispiel ${String(p.example_item_ids?.[0])} springen`}
                                 >
                                   (Beispiel)
                                 </button>
@@ -264,6 +343,7 @@ export default function QualityPage(){
                                 <button
                                   className="ml-1 text-[11px] underline text-blue-700 hover:text-blue-900"
                                   onClick={()=> t.example_item_ids && scrollToItem(t.example_item_ids[0])}
+                                  title={`Zu Beispiel ${String(t.example_item_ids?.[0])} springen`}
                                 >
                                   (Beispiel)
                                 </button>
@@ -278,6 +358,7 @@ export default function QualityPage(){
               })}
             </div>
 
+            {/* Quicklist */}
             {aiQuicklist.length>0 && (
               <div className="mt-3">
                 <div className="text-xs text-gray-600 mb-1">Schnellliste (Top-Tipps & -Verbesserungen)</div>
@@ -298,8 +379,10 @@ export default function QualityPage(){
           </div>
         )}
 
+        {/* Ladezustand */}
         {loading && <div className="text-sm text-gray-500">Lade…</div>}
 
+        {/* Chart + monatlich gruppierte Liste */}
         {!loading && (
           <>
             {/* Monatsverlauf */}
@@ -318,44 +401,69 @@ export default function QualityPage(){
               </div>
             </div>
 
-            {/* Liste */}
+            {/* Gruppierte Liste (mit BO-Link) */}
             <div className="rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden">
               {monthGroups.length === 0 && (
                 <div className="p-3 text-sm text-gray-500">Keine Einträge im Zeitraum.</div>
               )}
-              {monthGroups.map(g=>(
-                <div key={g.key} className="border-b last:border-b-0 border-gray-200 dark:border-gray-800">
-                  <div className="w-full px-3 py-2 bg-gray-50/70 dark:bg-gray-800/60 backdrop-blur text-sm font-semibold
-                                  border-b border-gray-200 dark:border-gray-800 capitalize flex items-center justify-between">
-                    <span>{g.label}</span>
-                    <span className="text-xs text-gray-500">{g.items.length} Einträge</span>
-                  </div>
-                  <ul className="divide-y divide-gray-200 dark:divide-gray-800">
-                    {g.items.map(it=>{
-                      const isHighlighted = highlightId != null && String(highlightId) === String(it.id);
-                      return (
-                        <li
-                          key={String(it.id)}
-                          data-item-id={String(it.id)}
-                          className={`p-3 transition-colors ${isHighlighted ? 'bg-yellow-50 dark:bg-yellow-900/20' : ''}`}
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className="text-sm font-medium">
-                                {it.category || it.incident_type || '—'}
+              {monthGroups.map(g => {
+                const open = !!openGroups[g.key];
+                return (
+                  <div key={g.key} className="border-b last:border-b-0 border-gray-200 dark:border-gray-800">
+                    <button
+                      onClick={()=>setOpenGroups(prev=>({ ...prev, [g.key]: !prev[g.key] }))}
+                      className="w-full px-3 py-2 bg-gray-50/70 dark:bg-gray-800/60 backdrop-blur text-sm font-semibold
+                                 border-b border-gray-200 dark:border-gray-800 capitalize flex items-center justify-between"
+                    >
+                      <span>{g.label}</span>
+                      <div className="flex items-center gap-3 text-xs text-gray-500">
+                        <span>{g.items.length} Einträge</span>
+                        <span className="text-gray-400">{open ? '▾' : '▸'}</span>
+                      </div>
+                    </button>
+
+                    {open && (
+                      <ul className="divide-y divide-gray-200 dark:divide-gray-800">
+                        {g.items.map(it=> {
+                          const isHighlighted = highlightId != null && String(highlightId) === String(it.id);
+                          const bo = boUrl(it.booking_number_hash);
+                          return (
+                            <li
+                              key={String(it.id)}
+                              data-item-id={String(it.id)}
+                              className={`p-3 transition-colors ${isHighlighted ? 'bg-yellow-50 dark:bg-yellow-900/20' : ''}`}
+                            >
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="text-sm font-medium">
+                                    {it.category || labelForType(it.incident_type) || '—'}
+                                  </div>
+                                  <div className="text-xs text-gray-500 line-clamp-1">{it.description || '—'}</div>
+                                </div>
+                                <div className="shrink-0 text-right flex items-center gap-2">
+                                  {bo && (
+                                    <a
+                                      href={bo}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="inline-flex items-center px-2 py-0.5 rounded border text-xs
+                                                 bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
+                                      title="Im Backoffice öffnen"
+                                    >
+                                      BO
+                                    </a>
+                                  )}
+                                  <div className="text-xs text-gray-500">{fmtDate(it.ts)}</div>
+                                </div>
                               </div>
-                              <div className="text-xs text-gray-500 line-clamp-1">{it.description || '—'}</div>
-                            </div>
-                            <div className="shrink-0 text-right">
-                              <div className="text-xs text-gray-500">{fmtDate(it.ts)}</div>
-                            </div>
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              ))}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </>
         )}
