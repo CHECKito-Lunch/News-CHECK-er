@@ -1,7 +1,5 @@
-/* eslint-disable react/no-children-prop */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable react-hooks/exhaustive-deps */
-/* eslint-disable @typescript-eslint/no-unused-vars */
+ 
 'use client';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -72,7 +70,7 @@ export default function TeamRosterList({ teamId }: { teamId: number }) {
       m.set(it.day, arr);
     }
     // sortiere innerhalb eines Tages nach Name
-    for (const [k, arr] of m) arr.sort((a,b)=> (a.user_name||'').localeCompare(b.user_name||''));
+    for (const [, arr] of m) arr.sort((a,b)=> (a.user_name||'').localeCompare(b.user_name||''));
     // sortiere Tage aufsteigend
     return Array.from(m.entries()).sort((a,b)=> a[0]<b[0]? -1:1);
   }, [items]);
@@ -131,8 +129,9 @@ export default function TeamRosterList({ teamId }: { teamId: number }) {
   const Badge = ({ children, className='' }:{children:React.ReactNode; className?:string}) =>
     <span className={`inline-flex items-center text-[11px] px-2 py-0.5 rounded-full border ${className}`} >{children}</span>;
 
-  // Hilfsrenderer für eine Tagesgruppe
-  function DayBlock([day, arr]: [string, Item[]]) {
+  // Renderer für eine Tagesgruppe (kein React-Component, sondern Funktion → keine Tuple-Prop-Probleme)
+  const renderDayBlock = (entry: [string, Item[]]) => {
+    const [day, arr] = entry;
     const present = arr.filter(a=>isPresent(a));
     const absent  = arr.filter(a=>!isPresent(a));
     const open = !!openDays[day];
@@ -191,12 +190,13 @@ export default function TeamRosterList({ teamId }: { teamId: number }) {
         )}
       </div>
     );
-  }
+  };
 
-  // Zähler für Header: Anzahl Einträge aller sichtbaren Gruppen
-  const totalCount = (todayEntry ? todayEntry[1].length : 0)
-    + upcomingEntries.reduce((s, [,arr])=> s+arr.length, 0)
-    + archiveEntries.reduce((s, [,arr])=> s+arr.length, 0);
+  // Zähler für Header: Anzahl Einträge aller Gruppen
+  const totalCount =
+    (todayEntry ? todayEntry[1].length : 0) +
+    upcomingEntries.reduce((s, [,arr])=> s+arr.length, 0) +
+    archiveEntries.reduce((s, [,arr])=> s+arr.length, 0);
 
   return (
     <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
@@ -237,14 +237,11 @@ export default function TeamRosterList({ teamId }: { teamId: number }) {
         <div className="p-4 text-sm text-gray-500">Keine Einträge.</div>
       )}
 
+      {/* HEUTE + REST DER WOCHE */}
       {!loading && (todayEntry || upcomingEntries.length>0) && (
         <div className="divide-y divide-gray-100 dark:divide-gray-800">
-          {/* HEUTE (wenn vorhanden) */}
-          {todayEntry && <DayBlock {...({} as any)} {...{}} children={undefined as any} {...(todayEntry as any)} /> /* TS hack not ideal in JSX spread; use below instead */}
-          {todayEntry && DayBlock(todayEntry)}
-
-          {/* REST DER WOCHE */}
-          {upcomingEntries.map(entry => DayBlock(entry))}
+          {todayEntry && renderDayBlock(todayEntry)}
+          {upcomingEntries.map(entry => renderDayBlock(entry))}
         </div>
       )}
 
@@ -253,7 +250,7 @@ export default function TeamRosterList({ teamId }: { teamId: number }) {
         <div className="mt-3 border-t border-gray-200 dark:border-gray-800">
           <div className="px-3 pt-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Archiv</div>
           <div className="divide-y divide-gray-100 dark:divide-gray-800">
-            {archiveEntries.map(entry => DayBlock(entry))}
+            {archiveEntries.map(entry => renderDayBlock(entry))}
           </div>
         </div>
       )}
