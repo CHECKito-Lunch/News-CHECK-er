@@ -37,7 +37,7 @@ async function isAdmin(userId: string): Promise<boolean> {
   const rows = await sql<{ is_admin: boolean }[]>`
     select exists (
       select 1
-      from public.user_roles
+      from public.app_users
       where user_id = ${userId}::uuid
         and role in ('admin','teamleiter')
     ) as is_admin
