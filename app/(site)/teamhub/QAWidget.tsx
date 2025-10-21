@@ -223,7 +223,7 @@ export default function QAWidget({
     if (items.length === 0) return; // Button-Disable basiert jetzt auf items
     setAiLoading(true); setAiError(null);
     try {
-      const r = await authedFetch('/api/teamhub/coach', {
+      const r = await fetch ('/api/teamhub/qa/coach', {
         method: 'POST',
         headers: { 'Content-Type':'application/json' },
         body: JSON.stringify({ owner_id: ownerId, from, to }),
