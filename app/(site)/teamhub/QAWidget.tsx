@@ -136,7 +136,7 @@ export default function QAWidget({
     }, 50);
   }, []);
 
-  // Load items (Teamhub-API, scoped auf ownerId)
+  // Items laden (serverseitig gefiltert per ownerId/from/to)
   const load = useCallback(async () => {
     if (!ownerId) { setItems([]); setLoading(false); return; }
     setLoading(true);
@@ -155,7 +155,7 @@ export default function QAWidget({
 
   useEffect(() => { load(); }, [load]);
 
-  // Typen + deutsche Labels
+  // Typen + Labels
   const incidentTypes = useMemo(() => {
     const map = new Map<string, number>();
     for (const it of items) {
@@ -168,7 +168,7 @@ export default function QAWidget({
       .map(([key, count]) => ({ key, label: labelForType(key), count }));
   }, [items]);
 
-  // Anwenden der Typenfilter
+  // Filter anwenden
   const filteredItems = useMemo(() => {
     if (typeFilter.size === 0) return items;
     return items.filter(i => {
@@ -177,7 +177,7 @@ export default function QAWidget({
     });
   }, [items, JSON.stringify(Array.from(typeFilter).sort())]);
 
-  // Monatsverlauf (Berlin TZ) – für das Chart
+  // Monatschart
   const byMonth = useMemo(() => {
     const m = new Map<string, number>();
     filteredItems.forEach(i => { const k = ymKey(i.ts); if (!k) return; m.set(k, (m.get(k) || 0) + 1); });
@@ -185,7 +185,7 @@ export default function QAWidget({
     return arr.map(([k, v]) => ({ month: k, count: v }));
   }, [filteredItems]);
 
-  // Gruppierte Liste nach Monat (neueste Monate zuerst), standardmäßig eingeklappt
+  // Monatsgruppen (neueste zuerst)
   const monthGroups = useMemo(() => {
     const map = new Map<string, Item[]>();
     for (const it of filteredItems) {
@@ -206,7 +206,6 @@ export default function QAWidget({
     return ordered.map(([key, list]) => ({ key, label: ymLabelDE(key), items: list }));
   }, [filteredItems]);
 
-  // Gruppen beim (Neu-)Aufbau schließen
   useEffect(() => {
     const next: Record<string, boolean> = {};
     for (const g of monthGroups) next[g.key] = false;
@@ -219,24 +218,25 @@ export default function QAWidget({
     setOpenGroups(next);
   };
 
-  // KI-Coaching (nimmt die aktuell sichtbaren Items) – nur neue Coach-API, kein Fallback
+  // === KI-Coaching (nur neue API, keine Items senden) ===
   const runAi = useCallback(async () => {
-    if (filteredItems.length === 0) return;
+    if (items.length === 0) return; // Button-Disable basiert jetzt auf items
     setAiLoading(true); setAiError(null);
     try {
       const r = await authedFetch('/api/teamhub/coach', {
         method: 'POST',
         headers: { 'Content-Type':'application/json' },
-        // wir geben owner_id explizit mit; from/to optional; items = aktuell sichtbarer Kontext
-        body: JSON.stringify({ owner_id: ownerId, from, to, items: filteredItems }),
+        body: JSON.stringify({ owner_id: ownerId, from, to }),
       });
+      if (!r.ok) {
+        const err = await r.json().catch(()=>({ error:'bad_response' }));
+        throw new Error(err?.error || 'Analyse fehlgeschlagen');
+      }
       const j = await r.json();
       if (!j?.ok || j.mode !== 'ai' || !j.data) {
         throw new Error(j?.error || 'Analyse fehlgeschlagen');
       }
-
-      const d = j.data as CoachData;
-      setAiCoach(d);
+      setAiCoach(j.data as CoachData);
       setAiQuicklist(Array.isArray(j.quicklist) ? j.quicklist : []);
     } catch (e:any){
       setAiError(e?.message || 'Analyse fehlgeschlagen');
@@ -245,7 +245,7 @@ export default function QAWidget({
     } finally {
       setAiLoading(false);
     }
-  }, [filteredItems, ownerId, from, to]);
+  }, [items.length, ownerId, from, to]);
 
   return (
     <section className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3 md:p-4">
@@ -269,19 +269,19 @@ export default function QAWidget({
           </button>
           <button
             onClick={runAi}
-            disabled={aiLoading || filteredItems.length===0}
+            disabled={aiLoading || items.length===0}
             className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs"
-            title="KI-Coaching der aktuell sichtbaren Einträge"
+            title="KI-Coaching für den sichtbaren Zeitraum"
           >
             {aiLoading ? 'Analysiere…' : 'KI-Coaching'}
           </button>
         </div>
       </div>
 
-      {/* KI-Fehler */}
+      {/* Fehler */}
       {aiError && <div className="mb-3 text-sm text-red-600">{aiError}</div>}
 
-      {/* KI-Coaching Panel (einziger Modus) */}
+      {/* Coaching-Panel */}
       {aiCoach && (
         <div className="mb-3 rounded-xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50/60 dark:bg-emerald-900/20 p-3">
           <div className="flex items-center justify-between mb-2">
@@ -314,18 +314,7 @@ export default function QAWidget({
                       <div className="text-xs text-emerald-700 font-medium">Lob</div>
                       <ul className="text-xs list-disc pl-4">
                         {v.praise.slice(0,3).map((p,i)=>(
-                          <li key={i}>
-                            {p.text}
-                            {p.example_item_ids?.length ? (
-                              <button
-                                className="ml-1 text-[11px] underline text-blue-700 hover:text-blue-900"
-                                onClick={()=> scrollToItem(p.example_item_ids![0])}
-                                title={`Zu Beispiel ${String(p.example_item_ids[0])} springen`}
-                              >
-                                (Beispiel)
-                              </button>
-                            ) : null}
-                          </li>
+                          <li key={i}>{p.text}</li>
                         ))}
                       </ul>
                     </div>
@@ -336,18 +325,7 @@ export default function QAWidget({
                       <div className="text-xs text-amber-700 font-medium">Verbesserung</div>
                       <ul className="text-xs list-disc pl-4">
                         {v.improve.slice(0,3).map((p,i)=>(
-                          <li key={i}>
-                            {p.text}
-                            {p.example_item_ids?.length ? (
-                              <button
-                                className="ml-1 text-[11px] underline text-blue-700 hover:text-blue-900"
-                                onClick={()=> scrollToItem(p.example_item_ids![0])}
-                                title={`Zu Beispiel ${String(p.example_item_ids[0])} springen`}
-                              >
-                                (Beispiel)
-                              </button>
-                            ) : null}
-                          </li>
+                          <li key={i}>{p.text}</li>
                         ))}
                       </ul>
                     </div>
@@ -358,18 +336,7 @@ export default function QAWidget({
                       <div className="text-xs text-blue-700 font-medium">Tipps / Next Steps</div>
                       <ul className="text-xs list-disc pl-4">
                         {v.tips.slice(0,4).map((t,i)=>(
-                          <li key={i}>
-                            {t.text}
-                            {t.example_item_ids?.length ? (
-                              <button
-                                className="ml-1 text-[11px] underline text-blue-700 hover:text-blue-900"
-                                onClick={()=> scrollToItem(t.example_item_ids![0])}
-                                title={`Zu Beispiel ${String(t.example_item_ids[0])} springen`}
-                              >
-                                (Beispiel)
-                              </button>
-                            ) : null}
-                          </li>
+                          <li key={i}>{t.text}</li>
                         ))}
                       </ul>
                     </div>
@@ -385,17 +352,9 @@ export default function QAWidget({
               <div className="text-xs text-gray-600 mb-1">Schnellliste (Top-Tipps & -Verbesserungen)</div>
               <div className="flex flex-wrap gap-1.5">
                 {aiQuicklist.map((q, i)=>(
-                  <button
-                    key={i}
-                    className="text-xs px-2 py-0.5 rounded-full border bg-white hover:bg-gray-50"
-                    onClick={()=> {
-                      const id = q.example_item_ids?.[0];
-                      if (id!=null) scrollToItem(id);
-                    }}
-                    title={q.example_item_ids?.[0] ? `Zu Beispiel ${String(q.example_item_ids[0])}` : undefined}
-                  >
+                  <span key={i} className="text-xs px-2 py-0.5 rounded-full border bg-white">
                     {q.type === 'tip' ? '💡' : '🔧'} {q.text}
-                  </button>
+                  </span>
                 ))}
               </div>
             </div>
@@ -448,40 +407,37 @@ export default function QAWidget({
 
                   {open && (
                     <ul className="divide-y divide-gray-200 dark:divide-gray-800">
-                      {g.items.map(it=> {
-                        const isHighlighted = highlightId != null && String(highlightId) === String(it.id);
-                        return (
-                          <li
-                            key={String(it.id)}
-                            data-item-id={String(it.id)}
-                            className={`p-3 transition-colors ${isHighlighted ? 'bg-yellow-50 dark:bg-yellow-900/20' : ''}`}
-                          >
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="min-w-0">
-                                <div className="text-sm font-medium">
-                                  {it.category || labelForType(it.incident_type) || '—'}
-                                </div>
-                                <div className="text-xs text-gray-500 line-clamp-1">{it.description || '—'}</div>
+                      {g.items.map(it=> (
+                        <li
+                          key={String(it.id)}
+                          data-item-id={String(it.id)}
+                          className="p-3"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="text-sm font-medium">
+                                {it.category || labelForType(it.incident_type) || '—'}
                               </div>
-                              <div className="shrink-0 text-right flex items-center gap-2">
-                                {boUrl(it.booking_number_hash) && (
-                                  <a
-                                    href={boUrl(it.booking_number_hash)!}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="inline-flex items-center px-2 py-0.5 rounded border text-xs
-                                               bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
-                                    title="Im Backoffice öffnen"
-                                  >
-                                    BO
-                                  </a>
-                                )}
-                                <div className="text-xs text-gray-500">{fmtDate(it.ts)}</div>
-                              </div>
+                              <div className="text-xs text-gray-500 line-clamp-1">{it.description || '—'}</div>
                             </div>
-                          </li>
-                        );
-                      })}
+                            <div className="shrink-0 text-right flex items-center gap-2">
+                              {boUrl(it.booking_number_hash) && (
+                                <a
+                                  href={boUrl(it.booking_number_hash)!}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex items-center px-2 py-0.5 rounded border text-xs
+                                             bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
+                                  title="Im Backoffice öffnen"
+                                >
+                                  BO
+                                </a>
+                              )}
+                              <div className="text-xs text-gray-500">{fmtDate(it.ts)}</div>
+                            </div>
+                          </div>
+                        </li>
+                      ))}
                     </ul>
                   )}
                 </div>
