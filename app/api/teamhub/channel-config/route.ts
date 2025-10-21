@@ -32,7 +32,7 @@ async function getCurrentUserUUID(req: NextRequest): Promise<string | null> {
   return null;
 }
 
-/** Admin-Check: passe die Query auf dein Rollenschema an */
+/** Admin-Check: passt auf dein Schema (app_users.role) */
 async function isAdmin(userId: string): Promise<boolean> {
   const rows = await sql<{ is_admin: boolean }[]>`
     select exists (
@@ -120,15 +120,24 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'upserts[] empty after normalization' }, { status: 400 });
     }
 
+    // ---------- ROBUSTER UPSERT: array-/objekt-sicher ----------
+    const payload = JSON.stringify(prepared);
     await sql`
+      with data as (
+        select case
+          when jsonb_typeof(${payload}::jsonb) = 'array' then ${payload}::jsonb
+          else jsonb_build_array(${payload}::jsonb)
+        end as j
+      )
       insert into public.user_channel_config (user_id, channel, label, target, updated_by)
-      select * from jsonb_to_recordset(${JSON.stringify(prepared)}::jsonb)
+      select * from jsonb_to_recordset((select j from data))
         as x(user_id uuid, channel text, label text, target numeric, updated_by uuid)
       on conflict (user_id, channel) do update
       set label = excluded.label,
           target = excluded.target,
           updated_by = excluded.updated_by
     `;
+    // -----------------------------------------------------------
 
     return NextResponse.json({ ok: true });
   } catch (e: any) {

@@ -449,58 +449,67 @@ export default function TeamHubPage() {
 
   return (
     <div className="w-full max-w-[1920px] mx-auto px-4 py-6">
-      {/* Header (kompakt): Titel links, Controls rechts) */}
-      <header className="flex flex-wrap items-center justify-between gap-3 mb-3">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-semibold">Teamhub</h1>
-          <Link href="/" className="text-sm text-blue-600 hover:underline">Zurück</Link>
-        </div>
+      {/* Header-Layout:
+          Links: Überschrift → Mitarbeiter-Dropdown → Zeitraum
+          Rechts: Buttons „Kanäle & Ziele“ + „Labels verwalten“ */}
+      <header className="mb-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-start">
+          {/* Linke Seite */}
+          <div>
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl font-semibold">Teamhub</h1>
+              <Link href="/" className="text-sm text-blue-600 hover:underline">Zurück</Link>
+            </div>
 
-        {/* Mitarbeiter + Zeitraum + Kanal-Settings + Labels */}
-        <div className="flex flex-wrap items-center gap-2">
-          <select
-            value={userId}
-            onChange={e => setUserId(e.target.value)}
-            className={`${field} pr-8 appearance-none`}
-            aria-label="Mitarbeiter"
-          >
-            {members.map(m => (
-              <option key={m.user_id} value={m.user_id}>{m.name}</option>
-            ))}
-          </select>
+            {/* Mitarbeiter-Dropdown */}
+            <div className="mt-2">
+              <select
+                value={userId}
+                onChange={e => setUserId(e.target.value)}
+                className={`${field} pr-8 appearance-none`}
+                aria-label="Mitarbeiter"
+              >
+                {members.map(m => (
+                  <option key={m.user_id} value={m.user_id}>{m.name}</option>
+                ))}
+              </select>
+            </div>
 
-          <input
-            type="date"
-            value={from}
-            onChange={e => setFrom(e.target.value)}
-            className={`${field} appearance-none`}
-            aria-label="Zeitraum von"
-          />
-          <span className="text-gray-400 select-none">–</span>
-          <input
-            type="date"
-            value={to}
-            onChange={e => setTo(e.target.value)}
-            className={`${field} appearance-none`}
-            aria-label="Zeitraum bis"
-          />
+            {/* Zeitraum */}
+            <div className="mt-2 flex items-center gap-2">
+              <input
+                type="date"
+                value={from}
+                onChange={e => setFrom(e.target.value)}
+                className={`${field} appearance-none`}
+                aria-label="Zeitraum von"
+              />
+              <span className="text-gray-400 select-none">–</span>
+              <input
+                type="date"
+                value={to}
+                onChange={e => setTo(e.target.value)}
+                className={`${field} appearance-none`}
+                aria-label="Zeitraum bis"
+              />
+            </div>
+          </div>
 
-          <button
-            onClick={() => setOpenChannelModal(true)}
-            className={btn}
-            title="Kanäle & Ziele bearbeiten"
-            type="button"
-          >
-            Kanäle & Ziele
-          </button>
+          {/* Rechte Seite: nur die beiden Buttons */}
+          <div className="flex items-start md:justify-end gap-2">
+            <button
+              onClick={() => setOpenChannelModal(true)}
+              className={btn}
+              title="Kanäle & Ziele bearbeiten"
+              type="button"
+            >
+              Kanäle & Ziele
+            </button>
 
-          {/* Label-Text auf gleiche Höhe bringen */}
-          <span className="h-9 inline-flex items-center px-2 text-sm font-semibold">Labels</span>
-
-          {/* Falls dein LabelManagerButton KEIN className akzeptiert:
-              mit einem Wrapper gleich hoch/gleich paddings erzwingen */}
-          <div className="[&>button]:h-9 [&>button]:px-3 [&>button]:rounded-lg [&>button]:text-sm [&>button]:border [&>button]:border-gray-200 dark:[&>button]:border-gray-700">
-            <LabelManagerButton />
+            {/* Labels verwalten */}
+            <div className="[&>button]:h-9 [&>button]:px-3 [&>button]:rounded-lg [&>button]:text-sm [&>button]:border [&>button]:border-gray-200 dark:[&>button]:border-gray-700">
+              <LabelManagerButton />
+            </div>
           </div>
         </div>
       </header>
@@ -768,19 +777,17 @@ export default function TeamHubPage() {
                 })}
               </div>
             )}
-
-
           </section>
+
           {/* QA (unter den Feedbacks, gleiche Kartenoptik) */}
-           <QAWidget ownerId={userId} from={from} to={to} />
+          <QAWidget ownerId={userId} from={from} to={to} />
         </div>
 
-        {/* Rechte Spalte: Dienstplan → Threads → QA → Label-Manager */}
+        {/* Rechte Spalte: Dienstplan → Threads */}
         <aside className="space-y-4 sticky top-4">
           <FirstTeamRosterCard />   {/* ← Dienstplan-Widget */}
           <CommentThreadHub ownerId={userId} onJumpToFeedback={scrollToFeedback} />
-          <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3">
-          </div>
+          {/* Leere Card entfernt */}
         </aside>
       </section>
 
