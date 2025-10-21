@@ -222,7 +222,15 @@ export default function SiteHeader() {
 
         <Link href="/" aria-label="Startseite" className="shrink-0 inline-flex items-center gap-2">
           {/* Wechsel auf next/image für bessere Performance */}
-          <Image src="/header.svg" alt="NewsCHECKer" width={128} height={32} className="h-8 w-auto dark:opacity-90" priority />
+          <Image
+  src="/header.svg"
+  alt="NewsCHECKer"
+  width={256}
+  height={64}
+  className="h-10 md:h-12 w-auto dark:opacity-90"
+  priority
+  sizes="(max-width: 768px) 160px, (max-width: 1280px) 200px, 240px"
+/>
         </Link>
 
         <div className="w-10" />
