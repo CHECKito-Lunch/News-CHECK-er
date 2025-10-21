@@ -91,6 +91,35 @@ const CoachResponseSchema = z.object({
 });
 type CoachResponse = z.infer<typeof CoachResponseSchema>;
 
+/* ---------- Normalisierung ---------- */
+const CANON = VALUE_ENUM as readonly string[];
+const normalizeValueName = (raw: any): ValueName | null => {
+  if (typeof raw !== 'string') return null;
+  const s = raw.trim().toLowerCase();
+
+  // schnelle exakte/teilweise Matches
+  const direct = CANON.find(v => v.toLowerCase() === s);
+  if (direct) return direct as ValueName;
+
+  // heuristiken/alias
+  const aliases: Array<[RegExp, ValueName]> = [
+    [/kommunikation|zusammenarbeit|collab|team/, 'Zielgerichtete Kommunikation und Zusammenarbeit'],
+    [/lern|feedback|offenheit/, 'Offenheit & Lernbereitschaft'],
+    [/kunde|customer|service/, 'Kundenorientierung'],
+    [/fach|wissen|know|kompetenz/, 'Fachkompetenz'],
+    [/excellence|execution|prozess|qualität|qualitätssicherung|ablauf/, 'Excellence in Execution'],
+    [/ergebnis|zielerreich|ownership|abschluss|deal/, 'Ergebnisorientierung'],
+    [/commitment|zuverläss|verbindlich|initiative/, 'Commitment'],
+  ];
+  for (const [rx, name] of aliases) {
+    if (rx.test(s)) return name;
+  }
+
+  // fuzzy contains
+  const contains = CANON.find(v => s.includes(v.toLowerCase().split(' ')[0]));
+  return (contains as ValueName) || null;
+};
+
 /* ---------- Prompt ---------- */
 const SYSTEM_PROMPT =
   'Du bist eine Assistenz für Teamleiter:innen und Mitarbeitende bei CHECK24. ' +
@@ -101,78 +130,145 @@ const SYSTEM_PROMPT =
   'Verdichte Redundanzen und formuliere konkrete Micro-Nächste-Schritte in tips[]. ' +
   'Fülle nur dort Inhalte, wo Substanz vorhanden ist (sonst leere Arrays).';
 
+const EXAMPLE_JSON = {
+  values: [
+    {
+      value: 'Kundenorientierung',
+      praise: [{ text: 'Du reagierst zügig auf Rückfragen und klärst Anliegen verständlich.' }],
+      neutral: [],
+      improve: [{ text: 'Du kündigst Bearbeitungszeiten klarer an, um Erwartungen zu steuern.' }],
+      tips: [{ text: 'Formuliere SLA-Hinweise in der ersten Antwort.', source: 'generated' }],
+    },
+  ],
+  incidents_mapped: [{ item_id: '123', value: 'Kundenorientierung', why: 'klare Rückmeldung an Kundin' }],
+  summary: { overall_tone: 'ausgewogen', quick_wins: ['SLA-Hinweis früh einbauen'], risks: [] },
+};
+
 const buildUserPrompt = (payload: { items: any[]; valueHints: Record<string, string[]> }) =>
   [
     'Erzeuge pro Firmenwert ein Objekt {value, praise[], neutral[], improve[], tips[]}.',
+    'values DARF auch ein Objekt sein (Keys = Wertnamen). Beispiel-Ausgabe folgt.',
     'Nutze incidents_mapped[] für {item_id, value, why} (why max. 12 Wörter).',
     'Nutze valueHints nur, wenn semantisch passend.',
     'Gib ausschließlich gültiges JSON nach Schema zurück.',
+    'Beispiel:',
+    JSON.stringify(EXAMPLE_JSON),
+    'Daten:',
     JSON.stringify(payload),
   ].join('\n');
 
-/* ---------- Utility: Sanitizer & Fallbacks ---------- */
-function sanitizeTextArray(arr: any, max = 50): { text: string }[] {
+/* ---------- Utility: tolerant parsen ---------- */
+type P = { text: string; example_item_ids?: Array<string | number> };
+type T = P & { source?: 'extracted' | 'generated' };
+
+const toPoints = (arr: any, max = 50): P[] => {
   if (!Array.isArray(arr)) return [];
-  const seen = new Set<string>();
-  const out: { text: string }[] = [];
-  for (const t of arr) {
-    if (typeof t === 'string') {
-      const s = t.trim();
-      if (s && !seen.has(s)) {
-        seen.add(s);
-        out.push({ text: s });
-        if (out.length >= max) break;
-      }
-    } else if (t && typeof (t as any).text === 'string') {
-      const s = (t as any).text.trim();
-      if (s && !seen.has(s)) {
-        seen.add(s);
-        out.push({ text: s });
-        if (out.length >= max) break;
-      }
-    }
+  const seen = new Set<string>(); const out: P[] = [];
+  for (const it of arr) {
+    const text = typeof it === 'string' ? it : typeof it?.text === 'string' ? it.text : null;
+    if (!text) continue;
+    const t = text.trim(); if (!t || seen.has(t)) continue;
+    seen.add(t);
+    const ids = Array.isArray(it?.example_item_ids) ? it.example_item_ids : undefined;
+    out.push({ text: t, example_item_ids: ids });
+    if (out.length >= max) break;
   }
   return out;
-}
-function fillTipsFromImproveIfEmpty(v: { improve: { text: string }[]; tips?: any[] }) {
-  if (!Array.isArray(v.tips) || v.tips.length === 0) {
-    v.tips = v.improve.slice(0, 6).map(p => ({ text: p.text, source: 'generated' as const }));
-  }
-}
-function pruneEmptyValues(values: any[]) {
-  return values.filter(v =>
-    (Array.isArray(v.praise) && v.praise.length) ||
-    (Array.isArray(v.neutral) && v.neutral.length) ||
-    (Array.isArray(v.improve) && v.improve.length) ||
-    (Array.isArray(v.tips) && v.tips.length)
+};
+
+const ensureTips = (improve: P[], tips?: T[]): T[] => {
+  const clean = Array.isArray(tips) ? (toPoints(tips) as T[]) : [];
+  if (clean.length) return clean;
+  return improve.slice(0, 6).map(p => ({ text: p.text, example_item_ids: p.example_item_ids, source: 'generated' as const }));
+};
+
+const pruneEmptyValues = (values: any[]) =>
+  values.filter(v =>
+    (v.praise?.length ?? 0) > 0 ||
+    (v.neutral?.length ?? 0) > 0 ||
+    (v.improve?.length ?? 0) > 0 ||
+    (v.tips?.length ?? 0) > 0
   );
-}
-function coerceToCoachResponse(loose: any): CoachResponse {
-  const parsed = CoachResponseSchema.safeParse(loose);
-  if (parsed.success) {
-    const cleaned = {
-      ...parsed.data,
-      values: parsed.data.values.map(v => {
-        const vv: any = { ...v };
-        fillTipsFromImproveIfEmpty(vv);
-        return vv;
-      })
-    };
-    return { ...cleaned, values: pruneEmptyValues(cleaned.values) };
+
+/* ---- Loose→Strict Mapping (Array ODER Objekt akzeptieren, Names normalisieren) ---- */
+function parseValuesLoose(looseValues: any): Array<z.infer<typeof ValueBlock>> {
+  const buckets: Record<ValueName, { praise: P[]; neutral: P[]; improve: P[]; tips?: T[] }> = {
+    'Zielgerichtete Kommunikation und Zusammenarbeit': { praise:[], neutral:[], improve:[] },
+    'Offenheit & Lernbereitschaft': { praise:[], neutral:[], improve:[] },
+    'Kundenorientierung': { praise:[], neutral:[], improve:[] },
+    'Fachkompetenz': { praise:[], neutral:[], improve:[] },
+    'Excellence in Execution': { praise:[], neutral:[], improve:[] },
+    'Ergebnisorientierung': { praise:[], neutral:[], improve:[] },
+    'Commitment': { praise:[], neutral:[], improve:[] },
+  };
+
+  const addBlock = (raw: any, nameFromKey?: string) => {
+    const rawName = raw?.value ?? nameFromKey;
+    const n = normalizeValueName(rawName);
+    if (!n) return;
+    const b = buckets[n];
+    b.praise.push(...toPoints(raw?.praise));
+    b.neutral.push(...toPoints(raw?.neutral));
+    b.improve.push(...toPoints(raw?.improve));
+    b.tips = ensureTips(b.improve, raw?.tips);
+  };
+
+  if (Array.isArray(looseValues)) {
+    for (const v of looseValues) addBlock(v);
+  } else if (looseValues && typeof looseValues === 'object') {
+    for (const [k, v] of Object.entries(looseValues)) addBlock(v, k);
   }
-  // Fallback: Top-Level praise/neutral/improve in einen Default-Wert kippen
-  const praise = sanitizeTextArray(loose?.praise, 50);
-  const neutral = sanitizeTextArray(loose?.neutral, 50);
-  const improve = sanitizeTextArray(loose?.improve, 50);
+
+  return (Object.entries(buckets).map(([value, arrs]) => ({
+    value: value as ValueName,
+    praise: arrs.praise,
+    neutral: arrs.neutral,
+    improve: arrs.improve,
+    tips: ensureTips(arrs.improve, arrs.tips),
+  })) as Array<z.infer<typeof ValueBlock>>);
+}
+
+/* ---- Komplette Koerzierung inkl. Fallback ---- */
+function coerceToCoachResponse(loose: any): CoachResponse {
+  // 1) Direkter Versuch gegen Zod
+  const direct = CoachResponseSchema.safeParse(loose);
+  if (direct.success) {
+    const v = direct.data.values.map(vb => ({
+      ...vb,
+      tips: ensureTips(vb.improve, vb.tips),
+    }));
+    return { ...direct.data, values: pruneEmptyValues(v) };
+  }
+
+  // 2) Versuchen, values lose zu parsen (Array oder Objekt, Namen normalisieren)
+  if (Array.isArray(loose?.values) || (loose?.values && typeof loose?.values === 'object')) {
+    const values = parseValuesLoose(loose.values);
+    const summary = {
+      overall_tone: typeof loose?.summary?.overall_tone === 'string' ? loose.summary.overall_tone : undefined,
+      quick_wins: Array.isArray(loose?.summary?.quick_wins) ? loose.summary.quick_wins.filter((s: any)=>typeof s==='string').slice(0,10) : [],
+      risks: Array.isArray(loose?.summary?.risks) ? loose.summary.risks.filter((s: any)=>typeof s==='string').slice(0,10) : [],
+    };
+    return {
+      values: pruneEmptyValues(values),
+      incidents_mapped: Array.isArray(loose?.incidents_mapped) ? loose.incidents_mapped : [],
+      summary,
+    } as CoachResponse;
+  }
+
+  // 3) Minimaler Fallback aus top-level praise/neutral/improve
+  const toMini = (arr:any)=> toPoints(arr).slice(0,50);
+  const improve = toMini(loose?.improve);
   const block: any = {
     value: 'Excellence in Execution' as ValueName,
-    praise, neutral, improve, tips: []
+    praise: toMini(loose?.praise),
+    neutral: toMini(loose?.neutral),
+    improve,
+    tips: ensureTips(improve),
   };
-  fillTipsFromImproveIfEmpty(block);
   return {
     values: pruneEmptyValues([block]),
     incidents_mapped: [],
-    summary: { overall_tone: undefined, quick_wins: improve.slice(0, 5).map(p => p.text), risks: [] },
+    summary: { overall_tone: undefined, quick_wins: improve.slice(0,5).map(p=>p.text), risks: [] },
   };
 }
 
@@ -243,7 +339,7 @@ export async function POST(req: NextRequest) {
       text: (i.description || '').trim().slice(0, 2000),
     }));
 
-    // OpenAI-Aufruf: direkt CoachData-ähnliche Struktur erzeugen
+    // OpenAI-Aufruf
     const messages = [
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: buildUserPrompt({ items: compact, valueHints: VALUE_HINTS }) },
@@ -258,7 +354,6 @@ export async function POST(req: NextRequest) {
     });
 
     const rawOut = completion.choices?.[0]?.message?.content ?? '{}';
-    // Debug nur kurz (Server-Log)
     console.log('[me/qa/coach rawOut]', String(rawOut).slice(0, 400));
 
     // Robust in gültiges Schema überführen
@@ -275,13 +370,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       mode: 'ai',
-      data,
+      data: { ...data, values: pruneEmptyValues(data.values) },
       quicklist,
-      meta: {
-        from: fromISO,
-        to: toISO,
-        used_items: compact.length,
-      },
+      meta: { from: fromISO, to: toISO, used_items: compact.length },
     });
   } catch (e: any) {
     console.error('[me/qa/coach POST]', e);
