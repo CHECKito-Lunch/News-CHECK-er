@@ -107,13 +107,20 @@ const BodySchema = z.object({
   owner_id: z.string().uuid(),
   from: z.string().optional(),
   to: z.string().optional(),
-  limit: z.number().int().min(1).max(1000).optional(), // optionaler Hard-Cap
+  limit: z.number().int().min(1).max(1000).optional(), // Hard-Cap
 });
 
+/* ---------- Handlers ---------- */
 export async function POST(req: NextRequest) {
   try {
     const me = await getUserFromRequest(req);
     if (!me) return NextResponse.json({ ok:false, error:'unauthorized' }, { status:401 });
+
+    // Nur JSON akzeptieren (hilft gegen versehentliche GET/Form-Aufrufe)
+    const ct = req.headers.get('content-type') || '';
+    if (!ct.includes('application/json')) {
+      return NextResponse.json({ ok:false, error:'unsupported_media_type' }, { status:415 });
+    }
 
     const raw = await req.json().catch(() => null);
     const parsed = BodySchema.safeParse(raw);
@@ -130,7 +137,7 @@ export async function POST(req: NextRequest) {
     const toISO   = toISODate(to);
     const cap = limit ?? 500;
 
-    // Server-seitig Items des ausgewählten Mitarbeiters laden (nicht Client vertrauen)
+    // Items des ausgewählten Mitarbeiters (serverseitig, vertrauenswürdig)
     let q = sql/*sql*/`
       select id, ts, incident_type, category, severity, description
       from public.qa_incidents
@@ -145,7 +152,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok:false, error:'no_items' }, { status:400 });
     }
 
-    // Eingabe beschränken/säubern
+    // Sanitizing/Truncation
     const safeItems: Item[] = rows.slice(0, cap).map(i => ({
       ...i,
       description: (i.description ?? '').slice(0, 2000),
@@ -154,7 +161,7 @@ export async function POST(req: NextRequest) {
       severity: (i.severity ?? '').slice(0, 60),
     }));
 
-    // === OpenAI-Aufruf ===
+    // === OpenAI ===
     const messages = [
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: buildUserPrompt({ items: safeItems, valueHints: VALUE_HINTS }) },
@@ -190,15 +197,30 @@ export async function POST(req: NextRequest) {
       mode: 'ai',
       data,
       quicklist,
-      meta: {
-        owner_id,
-        from: fromISO,
-        to: toISO,
-        used_items: safeItems.length,
-      },
-    });
+      meta: { owner_id, from: fromISO, to: toISO, used_items: safeItems.length },
+    }, { status: 200, headers: { 'content-type':'application/json; charset=utf-8', 'Allow':'POST, OPTIONS' }});
   } catch (e:any) {
     console.error('[teamhub/coach POST]', e);
     return NextResponse.json({ ok:false, error:'internal' }, { status:500 });
   }
+}
+
+// Verbiete GET explizit (verhindert “harte” 405 im Browser, liefert klare JSON-Antwort)
+export async function GET() {
+  return new Response(JSON.stringify({ ok:false, error:'method_not_allowed', allow:['POST','OPTIONS'] }), {
+    status: 405,
+    headers: { 'content-type':'application/json; charset=utf-8', 'Allow':'POST, OPTIONS' },
+  });
+}
+
+// OPTIONS für Preflight-Anfragen (falls Header o. Wrapper das auslösen)
+export async function OPTIONS() {
+  return new Response(null, {
+    status: 204,
+    headers: {
+      'Allow':'POST, OPTIONS',
+      'Access-Control-Allow-Methods':'POST, OPTIONS',
+      'Access-Control-Allow-Headers':'content-type',
+    }
+  });
 }
