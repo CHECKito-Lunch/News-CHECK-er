@@ -4,7 +4,6 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { sql } from '@/lib/db';
 import { requireUser } from '@/lib/auth-server';
 
-
 export const dynamic = 'force-dynamic';
 
 const isUUID = (s: unknown): s is string =>
@@ -36,7 +35,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
     }
 
-    const rows = await sql<{ channel: string; label: string; target: number }[]>`
+    // Wichtig: numeric als string tippen
+    const rows = await sql<{ channel: string; label: string; target: string }[]>`
       select channel, label, target
       from public.user_channel_config
       where user_id = ${uuid}::uuid
