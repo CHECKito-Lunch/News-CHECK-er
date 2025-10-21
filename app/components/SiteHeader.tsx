@@ -1,10 +1,12 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable @next/next/no-img-element */
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 
 type Role = 'admin' | 'moderator' | 'user' | 'teamleiter';
 type Me = { user: { sub: string; role: Role; name?: string } | null };
@@ -12,16 +14,12 @@ type Me = { user: { sub: string; role: Role; name?: string } | null };
 type UnreadRes = {
   ok: boolean;
   unread: number;
-  breakdown?: {
-    invites?: number;   // -> Profil
-    groups?: number;    // -> Gruppen (group_posts)
-    news?: number;      // -> News (posts)
-    events?: number;    // -> Events (termine)
-  };
+  breakdown?: { invites?: number; groups?: number; news?: number; events?: number };
 };
 
 export default function SiteHeader() {
   const pathname = usePathname();
+  const prefersReducedMotion = useReducedMotion();
 
   const [me, setMe] = useState<Me['user']>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -30,11 +28,26 @@ export default function SiteHeader() {
   const [marking, setMarking] = useState(false);
   const [markedOk, setMarkedOk] = useState(false);
 
+  const firstLinkRef = useRef<HTMLAnchorElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  // Lock body scroll when menu open
+  useEffect(() => {
+    if (!menuOpen) return;
+    const { overflow } = document.body.style;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = overflow; };
+  }, [menuOpen]);
+
+  // Close on route change (safer than relying on onClick only)
+  useEffect(() => { setMenuOpen(false); }, [pathname]);
+
+  // load /api/me
   useEffect(() => {
     let mounted = true;
     const load = async () => {
       try {
-        const r = await fetch('/api/me', { cache: 'no-store' });
+        const r = await fetch('/api/me', { cache: 'no-store', credentials: 'include' });
         const j: Me = await r.json();
         if (mounted) setMe(j.user);
       } catch {
@@ -51,6 +64,7 @@ export default function SiteHeader() {
     };
   }, []);
 
+  // unread polling with visibility pause
   useEffect(() => {
     if (!me) { setCounts({ total: 0, invites: 0, groups: 0, news: 0, events: 0 }); return; }
 
@@ -76,36 +90,47 @@ export default function SiteHeader() {
           events: Math.max(0, Number(b.events || 0)),
         };
         if (!stop) setCounts(next);
-      } catch {}
+      } catch { /* noop */ }
     };
 
-    loadUnread();
-    // eslint-disable-next-line prefer-const
-    timer = window.setInterval(loadUnread, 60_000);
+    const start = () => {
+      loadUnread();
+      timer = window.setInterval(loadUnread, 60_000);
+    };
+    const stopTimer = () => { if (timer) clearInterval(timer); };
 
-    const onAuth = () => loadUnread();
-    const onUnread = () => loadUnread();
-    window.addEventListener('auth-changed', onAuth);
-    window.addEventListener('unread-changed', onUnread);
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        loadUnread();
+        start();
+      } else {
+        stopTimer();
+      }
+    };
+
+    start();
+    window.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('auth-changed', loadUnread as any);
+    window.addEventListener('unread-changed', loadUnread as any);
 
     return () => {
       stop = true;
       ctrl.abort();
-      if (timer) clearInterval(timer);
-      window.removeEventListener('auth-changed', onAuth);
-      window.removeEventListener('unread-changed', onUnread);
+      stopTimer();
+      window.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('auth-changed', loadUnread as any);
+      window.removeEventListener('unread-changed', loadUnread as any);
     };
   }, [me]);
 
-  async function markAllRead() {
+  const markAllRead = useCallback(async () => {
     if (!me || marking) return;
     setMarking(true);
     const prev = counts;
-
     setCounts({ total: 0, invites: 0, groups: 0, news: 0, events: 0 });
 
     try {
-      const r = await fetch('/api/unread/seen', { method: 'POST', credentials: 'include' });
+      const r = await fetch('/api/unread/seen', { method: 'POST', credentials: 'include', keepalive: true });
       if (!r.ok) throw new Error('failed');
       window.dispatchEvent(new Event('unread-changed'));
       setMarkedOk(true);
@@ -116,38 +141,47 @@ export default function SiteHeader() {
     } finally {
       setMarking(false);
     }
-  }
+  }, [counts, marking, me]);
+
+  const baseLinks = useMemo(() => ([
+    { href: '/', label: 'Start' },
+    { href: '/news', label: 'News' },
+    { href: '/groups', label: 'Gruppen' },
+    { href: '/events', label: 'Events' },
+    { href: '/checkiade', label: 'CHECKiade' },
+    { href: '/feedback', label: 'Kunden Feedbacks' },
+    { href: '/quality', label: 'Mitarbeiter Feedbacks' },
+  ]), []);
 
   const links = useMemo(() => {
-    const arr: { href: string; label: string }[] = [
-      { href: '/', label: 'Start' },
-      { href: '/news', label: 'News' },
-      { href: '/groups', label: 'Gruppen' },
-      { href: '/events', label: 'Events' },
-      { href: '/checkiade', label: 'CHECKiade' },
-      { href: '/feedback', label: 'Kunden Feedbacks' },
-      { href: '/quality', label: 'Mitarbeiter Feedbacks' },
-    ];
-
-    if (me && me.role === 'teamleiter') {
-      arr.push({ href: '/teamhub', label: 'Teamhub' });
-    }
+    const arr = [...baseLinks];
+    if (me?.role === 'teamleiter') arr.push({ href: '/teamhub', label: 'Teamhub' });
     if (me) arr.push({ href: '/profile', label: 'Profil' });
-    if (me && (me.role === 'admin' || me.role === 'moderator'|| me.role === 'teamleiter')) {
+    if (me && (me.role === 'admin' || me.role === 'moderator' || me.role === 'teamleiter')) {
       arr.push({ href: '/admin', label: 'Adminbereich' });
     }
-
     return arr;
-  }, [me]);
+  }, [baseLinks, me]);
+
+  const countsByHref: Record<string, number> = {
+    '/profile': counts.invites,
+    '/groups': counts.groups,
+    '/news': counts.news + counts.events,
+  };
 
   const Badge = ({ count }: { count: number }) => (
-    <span
-      aria-label={`${count} ungelesen`}
-      className="absolute -top-1 -right-1 inline-flex min-w-[1.1rem] h-5 px-1 items-center justify-center rounded-full text-[10px] font-semibold bg-red-600 text-white shadow"
-    >
-      {count > 99 ? '99+' : count}
-    </span>
+    <>
+      <span className="sr-only" aria-live="polite">{count} ungelesen</span>
+      <span aria-hidden className="absolute -top-1 -right-1 inline-flex min-w-[1.1rem] h-5 px-1 items-center justify-center rounded-full text-[10px] font-semibold bg-red-600 text-white shadow">
+        {count > 99 ? '99+' : count}
+      </span>
+    </>
   );
+
+  // ESC already handled outside; move focus to first link when open
+  useEffect(() => {
+    if (menuOpen) firstLinkRef.current?.focus();
+  }, [menuOpen]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false); };
@@ -155,14 +189,6 @@ export default function SiteHeader() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  function countForLink(href: string) {
-    if (href === '/profile') return counts.invites;
-    if (href === '/groups')  return counts.groups;
-    if (href === '/news')    return counts.news + counts.events;
-    return 0;
-  }
-
-  // ✔ Icon-Auswahl pro Link
   const iconFor = (href: string) => {
     if (href === '/') return <IconHome />;
     if (href.startsWith('/news')) return <IconNews />;
@@ -178,7 +204,7 @@ export default function SiteHeader() {
   };
 
   return (
-    <header className="sticky top-0 z-30 border-b border-gray-200 bg-white/70 dark:bg-gray-900/70 backdrop-blur">
+    <header className="sticky top-0 z-30 border-b border-gray-200 bg-white/70 dark:bg-gray-900/70 backdrop-blur supports-[backdrop-filter]:bg-white/60">
       <div className="w-full max-w-full 2xl:max-w-[1920px] mx-auto px-4 py-6 flex items-center justify-between">
         <div className="w-10 flex items-center">
           <button
@@ -187,6 +213,7 @@ export default function SiteHeader() {
             aria-expanded={menuOpen}
             aria-controls="global-menu"
             aria-label="Menü"
+            aria-haspopup="menu"
           >
             <IconMenu />
             {me && counts.total > 0 && <Badge count={counts.total} />}
@@ -194,7 +221,8 @@ export default function SiteHeader() {
         </div>
 
         <Link href="/" aria-label="Startseite" className="shrink-0 inline-flex items-center gap-2">
-          <img src="/header.svg" alt="NewsCHECKer" className="h-8 w-auto dark:opacity-90" />
+          {/* Wechsel auf next/image für bessere Performance */}
+          <Image src="/header.svg" alt="NewsCHECKer" width={128} height={32} className="h-8 w-auto dark:opacity-90" priority />
         </Link>
 
         <div className="w-10" />
@@ -205,22 +233,25 @@ export default function SiteHeader() {
           <motion.div
             id="global-menu"
             key="global-menu"
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
+            initial={prefersReducedMotion ? false : { height: 0, opacity: 0 }}
+            animate={prefersReducedMotion ? { opacity: 1 } : { height: 'auto', opacity: 1 }}
+            exit={prefersReducedMotion ? { opacity: 0 } : { height: 0, opacity: 0 }}
             className="overflow-hidden backdrop-blur bg-white/70 dark:bg-gray-900/70"
+            role="navigation"
+            aria-label="Globales Menü"
+            ref={menuRef}
           >
-            {/* ▼▼▼ Kachel-Layout ▼▼▼ */}
             <nav className="container max-w-5xl mx-auto px-4 py-4">
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                {links.map((n) => {
-                  const active = pathname === n.href || (n.href !== '/' && pathname?.startsWith(n.href));
-                  const c = countForLink(n.href);
+                {links.map((n, idx) => {
+                  const active = pathname === n.href || (n.href !== '/' && (pathname?.startsWith(n.href + '/') || pathname === n.href));
+                  const c = countsByHref[n.href] ?? 0;
 
                   return (
                     <Link
                       key={n.href}
                       href={n.href}
+                      prefetch={false}
                       onClick={() => setMenuOpen(false)}
                       aria-current={active ? 'page' : undefined}
                       className={[
@@ -229,13 +260,12 @@ export default function SiteHeader() {
                           ? 'bg-blue-600 text-white border-blue-600'
                           : 'bg-white/90 dark:bg-white/10 text-gray-800 dark:text-gray-100 border-gray-200 dark:border-white/10 hover:bg-gray-50 dark:hover:bg-white/20'
                       ].join(' ')}
+                      ref={idx === 0 ? firstLinkRef : undefined}
                     >
-                      {/* Badge oben rechts */}
                       <span className="absolute top-2 right-2 inline-block w-6 h-6">
                         {me && c > 0 && <Badge count={c} />}
                       </span>
 
-                      {/* ✔ passendes Icon */}
                       <span
                         aria-hidden
                         className={[
@@ -248,13 +278,11 @@ export default function SiteHeader() {
                         {iconFor(n.href)}
                       </span>
 
-                      {/* Label + kleiner Chevron */}
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-sm font-semibold leading-5">{n.label}</span>
                         <IconChevron className={active ? 'opacity-100' : 'opacity-60 group-hover:opacity-100'} />
                       </div>
 
-                      {/* dezenter Verlauf / Glow */}
                       <span
                         className={[
                           'pointer-events-none absolute inset-0 rounded-2xl ring-1 ring-inset',
@@ -266,14 +294,17 @@ export default function SiteHeader() {
                 })}
               </div>
 
-              {/* 🆕 Alles-als-gelesen */}
               {me && (
                 <motion.button
                   type="button"
                   onClick={markAllRead}
                   disabled={marking}
                   initial={false}
-                  animate={{ scale: markedOk ? 1.01 : 1, boxShadow: markedOk ? '0 8px 24px rgba(59,130,246,.25)' : '0 1px 3px rgba(0,0,0,.06)' }}
+                  animate={
+                    prefersReducedMotion
+                      ? {}
+                      : { scale: markedOk ? 1.01 : 1, boxShadow: markedOk ? '0 8px 24px rgba(59,130,246,.25)' : '0 1px 3px rgba(0,0,0,.06)' }
+                  }
                   className={`
                     relative mt-4 inline-flex w-full items-center justify-between gap-3 rounded-2xl px-4 py-3 text-sm font-medium
                     border bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-900
@@ -284,25 +315,14 @@ export default function SiteHeader() {
                   `}
                 >
                   <span className="inline-flex items-center gap-2">
-                    {marking ? (
-                      <IconSpinner />
-                    ) : markedOk ? (
-                      <IconCheck />
-                    ) : (
-                      <IconMenuThin />
-                    )}
-                    <span className="truncate">
-                      {markedOk ? 'Alles gelesen!' : 'Alles als gelesen markieren'}
-                    </span>
+                    {marking ? <IconSpinner /> : markedOk ? <IconCheck /> : <IconMenuThin />}
+                    <span className="truncate">{markedOk ? 'Alles gelesen!' : 'Alles als gelesen markieren'}</span>
                   </span>
 
                   <span className="flex items-center gap-3">
                     <span className="hidden sm:block text-[11px] opacity-70">News · Events · Gruppen</span>
                     {counts.total > 0 && !markedOk && (
-                      <span className="
-                        inline-flex min-w-[1.5rem] h-6 px-2 items-center justify-center rounded-full text-[11px] font-semibold
-                        bg-blue-600 text-white dark:bg-blue-500 shadow-sm
-                      ">
+                      <span className="inline-flex min-w-[1.5rem] h-6 px-2 items-center justify-center rounded-full text-[11px] font-semibold bg-blue-600 text-white dark:bg-blue-500 shadow-sm">
                         {counts.total > 99 ? '99+' : counts.total}
                       </span>
                     )}
@@ -311,7 +331,6 @@ export default function SiteHeader() {
                 </motion.button>
               )}
 
-              {/* Login / Logout */}
               <div className="mt-3">
                 {me ? (
                   <form action="/api/logout" method="post" onSubmit={() => setMenuOpen(false)}>
@@ -326,6 +345,7 @@ export default function SiteHeader() {
                 ) : (
                   <Link
                     href="https://www.karl-marx-checknitz.de/login"
+                    prefetch={false}
                     onClick={() => setMenuOpen(false)}
                     className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-white/10 hover:bg-gray-50 dark:hover:bg-white/20 px-3 py-2 text-sm text-blue-600 dark:text-blue-300 shadow-sm"
                   >
@@ -334,13 +354,15 @@ export default function SiteHeader() {
                 )}
               </div>
             </nav>
-            {/* ▲▲▲ Kachel-Layout ▲▲▲ */}
           </motion.div>
         )}
       </AnimatePresence>
     </header>
   );
 }
+
+/* Icons unverändert… */
+
 
 /* ===== Icons ===== */
 function IconMenu() {

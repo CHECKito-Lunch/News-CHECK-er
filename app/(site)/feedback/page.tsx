@@ -1079,7 +1079,7 @@ function FeedbackItemRow({
   labelMap: Record<string,string>;
   noteColor: (v:number|null|undefined)=>string;
 }) {
-  const [openC, setOpenC] = useState(false);
+
   const [internalChecked, setInternalChecked] = useState(!!f.internal_checked);
 
   const lbl = labelMap[f.feedbacktyp] ?? f.feedbacktyp ?? '—';
@@ -1170,25 +1170,14 @@ function FeedbackItemRow({
 
 
 
-        {/* Kundenkommentar: auf/zu */}
-        {f.kommentar && (
-          <div className="mt-2">
-            {!openC ? (
-              <button onClick={()=>setOpenC(true)} className="text-xs underline text-blue-700 dark:text-blue-400">
-                Kommentar anzeigen
-              </button>
-            ) : (
-              <>
-                <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap mt-1">
-                  {f.kommentar}
-                </p>
-                <button onClick={()=>setOpenC(false)} className="mt-1 text-xs underline text-blue-700 dark:text-blue-400">
-                  Kommentar verbergen
-                </button>
-              </>
-            )}
-          </div>
-        )}
+{/* Kundenkommentar: immer sichtbar */}
+{f.kommentar && (
+  <div className="mt-2">
+    <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+      {f.kommentar}
+    </p>
+  </div>
+)}
 
         {/* ===== Interner Kommentar – ZENTRIERT ===== */}
         {hasInternal && (

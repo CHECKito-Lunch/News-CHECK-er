@@ -97,8 +97,33 @@ const fmtMonthYearDE = (y: number, m1to12: number) => {
   return new Intl.DateTimeFormat('de-DE', { month: 'long', year: 'numeric' }).format(d);
 };
 
-// Ziel-Ø für Kanäle (anpassbar)
-const SCORE_TARGET = 4.7;
+/* ---------- Kanal-Konfiguration (Label + Ziel, persistent im Browser) ---------- */
+const CHANNEL_DEFAULTS: Record<string, { label: string; target: number }> = {
+  service_mail:        { label: 'E-Mail Service',       target: 4.50 },
+  service_mail_rekla:  { label: 'E-Mail Reklamation',   target: 4.00 },
+  service_phone:       { label: 'Service Telefon',      target: 4.70 },
+  sales_phone:         { label: 'Sales Telefon',        target: 4.85 },
+  sales_lead:          { label: 'Sales Lead',           target: 4.50 },
+};
+const LS_CHANNEL_CFG_KEY = 'teamhub_channel_config_v1';
+
+function loadChannelConfig(allChannels: string[]) {
+  let saved: Record<string, {label:string; target:number}> = {};
+  try { saved = JSON.parse(localStorage.getItem(LS_CHANNEL_CFG_KEY) || '{}') || {}; } catch {}
+  const cfg: Record<string, {label:string; target:number}> = {};
+  for (const ch of allChannels) {
+    const def = CHANNEL_DEFAULTS[ch] ?? { label: ch, target: 4.50 };
+    const cur = saved[ch];
+    cfg[ch] = {
+      label: (cur?.label ?? def.label) || ch,
+      target: Number.isFinite(cur?.target) ? cur!.target : def.target,
+    };
+  }
+  return cfg;
+}
+function saveChannelConfig(cfg: Record<string, {label:string; target:number}>) {
+  localStorage.setItem(LS_CHANNEL_CFG_KEY, JSON.stringify(cfg));
+}
 
 /* --------------- Marks ------------------ */
 type MarkValue = -1 | 0 | 1 | 2;         // 👎 = -1, ⭐ = 1, 👍 = 2
@@ -161,6 +186,10 @@ export default function TeamHubPage() {
 
   // Gruppen: offen/zu
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({}); // key => open?
+
+  // 🔧 Kanal-Konfiguration (Label + Ziel)
+  const [channelConfig, setChannelConfig] = useState<Record<string, {label:string; target:number}>>({});
+  const [openChannelModal, setOpenChannelModal] = useState(false);
 
   // Marks laden
   useEffect(() => {
@@ -262,6 +291,13 @@ export default function TeamHubPage() {
     for (const it of items) if (it.feedbacktyp) s.add(it.feedbacktyp);
     return [...s].sort();
   }, [items]);
+
+  // Kanal-Konfig laden/mergen wenn Kanäle sich ändern
+  useEffect(() => {
+    if (allChannels.length === 0) return;
+    const cfg = loadChannelConfig(allChannels);
+    setChannelConfig(cfg);
+  }, [allChannels.join(',')]);
 
   // Labels für Filter-Dropdown aus globaler Liste (id -> name)
   const labelFilterOptions = useMemo<[number,string][]>(()=>{
@@ -404,14 +440,14 @@ export default function TeamHubPage() {
 
   return (
     <div className="w-full max-w-[1920px] mx-auto px-4 py-6">
-      {/* Header (kompakt): Titel links, Controls rechts */}
+      {/* Header (kompakt): Titel links, Controls rechts) */}
       <header className="flex flex-wrap items-center justify-between gap-3 mb-3">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-semibold">Teamhub</h1>
           <Link href="/" className="text-sm text-blue-600 hover:underline">Zurück</Link>
         </div>
 
-        {/* Mitarbeiter + Zeitraum kompakt */}
+        {/* Mitarbeiter + Zeitraum kompakt + Kanal-Settings */}
         <div className="flex items-center gap-2">
           <select
             value={userId}
@@ -428,6 +464,15 @@ export default function TeamHubPage() {
           <span className="text-gray-400">–</span>
           <input type="date" value={to} onChange={e => setTo(e.target.value)}
                 className="px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-white/10 text-sm" />
+
+          {/* Kanal-/Ziel-Settings öffnen */}
+          <button
+            onClick={()=>setOpenChannelModal(true)}
+            className="px-2 py-1.5 rounded-lg border text-xs"
+            title="Kanäle & Ziele bearbeiten"
+          >
+            Kanäle & Ziele
+          </button>
         </div>
       </header>
 
@@ -460,11 +505,11 @@ export default function TeamHubPage() {
             </div>
           </div>
 
-          {/* Ø je Kanal – Mini-Kreisdiagramme */}
+          {/* Ø je Kanal – Mini-Kreisdiagramme (per-Kanal Name + Ziel) */}
           <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3 md:p-4">
             <div className="flex items-center justify-between mb-2">
               <div className="text-sm font-semibold">Ø je Kanal</div>
-              <div className="text-xs text-gray-500">Ziel: {SCORE_TARGET.toFixed(2)}</div>
+              <div className="text-xs text-gray-500">Ziele pro Kanal konfigurierbar</div>
             </div>
 
             {channelAvgs.length === 0 ? (
@@ -472,21 +517,22 @@ export default function TeamHubPage() {
             ) : (
               <ul className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
                 {channelAvgs.map(({ channel, avg, count }) => {
-                  const delta = avg - SCORE_TARGET; // >0 = besser als Ziel
+                  const cfg = channelConfig[channel] ?? { label: channel, target: 4.5 };
+                  const delta = avg - cfg.target; // >0 = besser als Ziel
                   const deltaTxt = `${delta >= 0 ? '+' : ''}${delta.toFixed(2)}`;
                   return (
                     <li key={channel} className="rounded-xl border border-gray-200 dark:border-gray-800 p-2 flex items-center gap-2">
                       <MiniRadial
                         value={avg}
-                        target={SCORE_TARGET}
+                        target={cfg.target}
                         size={56}
                         stroke={6}
                         label={`Ø ${fmtAvg(avg)}`}
                         sublabel={deltaTxt}
                       />
                       <div className="min-w-0">
-                        <div className="text-sm font-medium truncate" title={channel}>{channel}</div>
-                        <div className="text-[11px] text-gray-500">({count})</div>
+                        <div className="text-sm font-medium truncate" title={cfg.label}>{cfg.label}</div>
+                        <div className="text-[11px] text-gray-500">Ziel {cfg.target.toFixed(2)} · ({count})</div>
                       </div>
                     </li>
                   );
@@ -540,7 +586,10 @@ export default function TeamHubPage() {
                   aria-label="Kanal"
                 >
                   <option value="">Alle Kanäle</option>
-                  {allChannels.map(c => (<option key={c} value={c}>{c}</option>))}
+                  {allChannels.map(c => {
+                    const cfg = channelConfig[c] ?? { label: c, target: 4.5 };
+                    return <option key={c} value={c}>{cfg.label}</option>;
+                  })}
                 </select>
                 <select
                   value={fStatus}
@@ -622,6 +671,8 @@ export default function TeamHubPage() {
                             const um = unreadMap[String(f.id)];
                             const hasNewFromOwner = !!(um && um.last_by_owner && um.unread_total > 0);
                             const myMark = marks[String(f.id)] ?? 0;
+                            const chCfg = channelConfig[f.feedbacktyp] ?? { label: f.feedbacktyp, target: 4.5 };
+
                             return (
                               <li id={`feedback-${f.id}`} key={String(f.id)} className="p-3 md:p-4 hover:bg-gray-50/60 dark:hover:bg-white/5 transition-colors">
                                 <div className="flex items-start gap-3">
@@ -632,8 +683,8 @@ export default function TeamHubPage() {
                                   <div className="min-w-0 flex-1">
                                     <div className="flex items-center justify-between gap-2 flex-wrap">
                                       <div className="min-w-0 flex items-center gap-2 flex-wrap">
-                                        <span className="font-medium truncate max-w-[40ch]">{f.template_name ?? f.feedbacktyp}</span>
-                                        <Chip subtle>{f.feedbacktyp}</Chip>
+                                        <span className="font-medium truncate max-w-[40ch]">{f.template_name ?? chCfg.label}</span>
+                                        <Chip subtle>{chCfg.label}</Chip>
                                         {isTrueish(f.rekla) && (<Chip tone="amber">Rekla</Chip>)}
                                         <Chip tone={isTrueish(f.geklaert) ? 'emerald' : 'slate'}>
                                           {isTrueish(f.geklaert) ? 'geklärt' : 'offen'}
@@ -652,7 +703,7 @@ export default function TeamHubPage() {
                                             href={bo}
                                             target="_blank"
                                             rel="noreferrer"
-                                            className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"
+                                            className="inline-flex items-center gap-1 text:[11px] px-2 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"
                                             title="Im Backoffice suchen"
                                           >
                                             🔎 BO
@@ -675,7 +726,7 @@ export default function TeamHubPage() {
                                       <LabelChips feedbackId={f.id} labels={f.labels ?? []} allLabels={allLabelsGlobal} />
                                       <FeedbackComments feedbackId={f.id} />
                                     </div>
-                                 
+
                                   </div>
                                 </div>
                               </li>
@@ -705,6 +756,20 @@ export default function TeamHubPage() {
           </div>
         </aside>
       </section>
+
+      {/* Modal: Kanal-Einstellungen */}
+      {openChannelModal && (
+        <ChannelSettingsModal
+          channels={allChannels}
+          cfg={channelConfig}
+          onClose={()=>setOpenChannelModal(false)}
+          onSave={(next)=>{
+            setChannelConfig(next);
+            saveChannelConfig(next);
+            setOpenChannelModal(false);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -971,6 +1036,89 @@ function LabelManager({ onClose }:{ onClose: ()=>void }) {
         {!teamId && (
           <div className="text-xs text-red-600">Kein Team gefunden, für das du Teamleiter bist.</div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Kanal-Settings (Modal) ---------------- */
+function ChannelSettingsModal({
+  channels,
+  cfg,
+  onClose,
+  onSave,
+}: {
+  channels: string[];
+  cfg: Record<string, {label:string; target:number}>;
+  onClose: () => void;
+  onSave: (next: Record<string, {label:string; target:number}>) => void;
+}) {
+  const [local, setLocal] = useState<Record<string, {label:string; target:number}>>({});
+
+  useEffect(()=>{ setLocal(cfg); }, [JSON.stringify(cfg)]);
+
+  const setLabel = (ch:string, label:string) =>
+    setLocal(prev => ({ ...prev, [ch]: { ...(prev[ch]||{label:ch, target:4.5}), label } }));
+
+  const setTarget = (ch:string, targetStr:string) => {
+    const t = Number(targetStr.replace(',', '.'));
+    const safe = Number.isFinite(t) ? Math.max(1, Math.min(5, t)) : (local[ch]?.target ?? 4.5);
+    setLocal(prev => ({ ...prev, [ch]: { ...(prev[ch]||{label:ch, target:4.5}), target: safe } }));
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+      <div className="w-full max-w-2xl rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="font-semibold">Kanäle & Ziele</div>
+          <button onClick={onClose} className="text-sm opacity-70 hover:opacity-100">Schließen</button>
+        </div>
+
+        {channels.length === 0 ? (
+          <div className="text-sm text-gray-500">Keine Kanäle gefunden.</div>
+        ) : (
+          <div className="space-y-2 max-h-[60vh] overflow-auto pr-1">
+            {channels.map(ch => {
+              const row = local[ch] ?? { label: ch, target: 4.5 };
+              return (
+                <div key={ch} className="grid grid-cols-12 gap-2 items-center">
+                  <div className="col-span-4">
+                    <div className="text-[11px] text-gray-500">Technischer Name</div>
+                    <div className="text-xs font-mono">{ch}</div>
+                  </div>
+                  <label className="col-span-5 text-sm">
+                    <span className="block text-[11px] text-gray-500 mb-1">Anzeigename (DE)</span>
+                    <input
+                      value={row.label}
+                      onChange={e=>setLabel(ch, e.target.value)}
+                      className="w-full px-2 py-1.5 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10 text-sm"
+                      placeholder="z.B. E-Mail Service"
+                    />
+                  </label>
+                  <label className="col-span-3 text-sm">
+                    <span className="block text-[11px] text-gray-500 mb-1">Ziel (1.00–5.00)</span>
+                    <input
+                      value={String(row.target)}
+                      onChange={e=>setTarget(ch, e.target.value)}
+                      className="w-full px-2 py-1.5 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10 text-sm"
+                      inputMode="decimal"
+                    />
+                  </label>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="mt-3 flex justify-end gap-2">
+          <button onClick={onClose} className="px-3 py-2 rounded-lg border">Abbrechen</button>
+          <button
+            onClick={()=>onSave(local)}
+            className="px-3 py-2 rounded-lg bg-blue-600 text-white"
+          >
+            Speichern
+          </button>
+        </div>
       </div>
     </div>
   );
