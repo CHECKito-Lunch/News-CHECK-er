@@ -16,14 +16,18 @@ type Item = {
 };
 
 function minToHHMM(n:number|null|undefined){
-  if (n==null || n<0) return '—';
+  if (n==null || !Number.isFinite(n) || n<0) return '—';
   const h = Math.floor(n/60);
-  const m = n%60;
+  const m = Math.floor(n%60);
   return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
 }
 
-/** Dienstzeit vorhanden? -> anwesend */
-const isPresent = (it: Item) => it.start_min != null && it.end_min != null;
+/** Nur anwesend, wenn echte Zeiten vorhanden sind */
+const isPresent = (it: Item) => {
+  const s = it.start_min, e = it.end_min;
+  return Number.isFinite(s) && Number.isFinite(e) && (s as number) >= 0 && (e as number) > (s as number);
+};
+
 const presenceBadgeClass = (present: boolean) =>
   present
     ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
@@ -125,7 +129,6 @@ export default function TeamRosterList({ teamId }: { teamId: number }) {
     todayISO
   ]);
 
-  // kleine Badge
   const Badge = ({ children, className='' }:{children:React.ReactNode; className?:string}) =>
     <span className={`inline-flex items-center text-[11px] px-2 py-0.5 rounded-full border ${className}`} >{children}</span>;
 
@@ -173,7 +176,7 @@ export default function TeamRosterList({ teamId }: { teamId: number }) {
                       <div className="text-sm font-medium truncate">{it.user_name || '—'}</div>
                       <div className="text-[12px] text-gray-500">
                         {present
-                          ? <span>{minToHHMM(it.start_min)} – {minToHHMM(it.end_min)}{it.minutes_worked!=null ? ` (${Math.round(it.minutes_worked/60*10)/10}h)` : ''}</span>
+                          ? <span>{minToHHMM(it.start_min)} – {minToHHMM(it.end_min)}{it.minutes_worked!=null ? ` (${Math.round((it.minutes_worked/60)*10)/10}h)` : ''}</span>
                           : <span>{it.note || '—'}</span>
                         }
                       </div>
