@@ -1,5 +1,4 @@
 /* eslint-disable react-hooks/exhaustive-deps */
- 
 'use client';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -31,23 +30,30 @@ const presenceBadgeClass = (present: boolean) =>
     : 'border-amber-200 bg-amber-50 text-amber-700';
 const presenceLabel = (present: boolean) => (present ? 'Anwesend' : 'Abwesend');
 
+/** YYYY-MM-DD für eine gegebene TZ (hier: Europe/Berlin) */
+const ymdInTz = (d: Date, tz = 'Europe/Berlin') =>
+  new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+
+/** Sichere Anzeige eines YYYY-MM-DD mit Berlin-TZ (mittags-UTC, um DST-Ränder zu vermeiden) */
+const fmtDay = (iso: string) => {
+  const safe = new Date(iso + 'T12:00:00Z');
+  return new Intl.DateTimeFormat('de-DE', { timeZone: 'Europe/Berlin', weekday: 'long', day: '2-digit', month: '2-digit' }).format(safe);
+};
+
 export default function TeamRosterList({ teamId }: { teamId: number }) {
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
   const [openDays, setOpenDays] = useState<Record<string, boolean>>({}); // day ISO -> open?
 
-  // "Heute" und Zeitfenster (heute .. +7 Tage)
-  const today = useMemo(()=> new Date(), []);
-  const todayISO = useMemo(() => {
-    const d = new Date(today); d.setHours(0,0,0,0);
-    return d.toISOString().slice(0,10);
-  }, [today]);
+  // "Heute" & Zeitraum (in Europe/Berlin, nicht UTC!)
+  const now = useMemo(()=> new Date(), []);
+  const todayISO = useMemo(() => ymdInTz(now, 'Europe/Berlin'), [now]);
   const from = todayISO;
   const to = useMemo(()=>{
-    const d = new Date(today); d.setDate(d.getDate()+7);
-    d.setHours(0,0,0,0);
-    return d.toISOString().slice(0,10);
-  },[today]);
+    const d = new Date(now);
+    d.setDate(d.getDate()+7);
+    return ymdInTz(d, 'Europe/Berlin');
+  },[now]);
 
   useEffect(()=>{
     const run = async ()=>{
@@ -93,13 +99,12 @@ export default function TeamRosterList({ teamId }: { teamId: number }) {
         res.archiveEntries.push(entry);
       }
     }
-    // Sicherheitshalber sortieren
     res.upcomingEntries.sort((a,b)=> a[0] < b[0] ? -1 : 1);
     res.archiveEntries.sort((a,b)=> a[0] < b[0] ? -1 : 1);
     return res;
   }, [byDay, todayISO, to]);
 
-  // init: Heute offen, Rest zu (nur einmalig beim ersten Erhalt)
+  // init: Heute offen, Rest zu (nur einmalig)
   useEffect(()=>{
     const allDays = [
       ...(todayEntry ? [todayEntry[0]] : []),
@@ -120,16 +125,11 @@ export default function TeamRosterList({ teamId }: { teamId: number }) {
     todayISO
   ]);
 
-  const fmtDay = (iso:string) => {
-    const d = new Date(iso+'T00:00:00Z');
-    return d.toLocaleDateString('de-DE', { weekday:'long', day:'2-digit', month:'2-digit' });
-  };
-
   // kleine Badge
   const Badge = ({ children, className='' }:{children:React.ReactNode; className?:string}) =>
     <span className={`inline-flex items-center text-[11px] px-2 py-0.5 rounded-full border ${className}`} >{children}</span>;
 
-  // Renderer für eine Tagesgruppe (kein React-Component, sondern Funktion → keine Tuple-Prop-Probleme)
+  // Renderer für eine Tagesgruppe
   const renderDayBlock = (entry: [string, Item[]]) => {
     const [day, arr] = entry;
     const present = arr.filter(a=>isPresent(a));
@@ -172,7 +172,6 @@ export default function TeamRosterList({ teamId }: { teamId: number }) {
                     <div className="min-w-0">
                       <div className="text-sm font-medium truncate">{it.user_name || '—'}</div>
                       <div className="text-[12px] text-gray-500">
-                        {/* Anwesend -> Zeiten anzeigen; sonst optional Notiz */}
                         {present
                           ? <span>{minToHHMM(it.start_min)} – {minToHHMM(it.end_min)}{it.minutes_worked!=null ? ` (${Math.round(it.minutes_worked/60*10)/10}h)` : ''}</span>
                           : <span>{it.note || '—'}</span>
@@ -192,7 +191,7 @@ export default function TeamRosterList({ teamId }: { teamId: number }) {
     );
   };
 
-  // Zähler für Header: Anzahl Einträge aller Gruppen
+  // Zähler für Header
   const totalCount =
     (todayEntry ? todayEntry[1].length : 0) +
     upcomingEntries.reduce((s, [,arr])=> s+arr.length, 0) +
