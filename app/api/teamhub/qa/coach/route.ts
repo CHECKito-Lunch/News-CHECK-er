@@ -1,7 +1,6 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable prefer-const */
-// app/api/teamhub/qa/coach/route.ts
 /* eslint-disable @typescript-eslint/no-explicit-any */
+// app/api/teamhub/qa/coach/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { sql } from '@/lib/db';
@@ -51,17 +50,38 @@ const VALUE_ENUM = [
 ] as const;
 type ValueName = typeof VALUE_ENUM[number];
 
-/* ---------- Optionale Zuordnungs-Hints ---------- */
-const VALUE_HINTS: Record<string, string[]> = {
-  kommunikation: ['Zielgerichtete Kommunikation und Zusammenarbeit'],
-  teamwork: ['Zielgerichtete Kommunikation und Zusammenarbeit'],
-  lernen: ['Offenheit & Lernbereitschaft'],
-  kunden: ['Kundenorientierung'],
-  fachlich: ['Fachkompetenz'],
-  prozess: ['Excellence in Execution'],
-  abschluss: ['Ergebnisorientierung'],
-  commitment: ['Commitment'],
-};
+/* ---------- Zuordnungs-Hints/Synonyme ---------- */
+const VALUE_SYNONYMES: Array<{key: ValueName; hints: string[]}> = [
+  { key: 'Zielgerichtete Kommunikation und Zusammenarbeit', hints: ['kommunikation', 'team', 'zusammenarbeit', 'abstimmung', 'handover', 'übergabe', 'kolleg', 'abteilungsübergreifend'] },
+  { key: 'Offenheit & Lernbereitschaft', hints: ['lernen', 'lern', 'feedbackfähig', 'reflexion', 'offenheit', 'neugierig', 'verbesserung', 'coaching'] },
+  { key: 'Kundenorientierung', hints: ['kunde', 'kundin', 'service', 'freundlich', 'empath', 'zufriedenheit'] },
+  { key: 'Fachkompetenz', hints: ['fachlich', 'wissen', 'kompetenz', 'kenntnis', 'regelkenntnis', 'produktwissen'] },
+  { key: 'Excellence in Execution', hints: ['prozess', 'prozessqualität', 'sorgfalt', 'präzision', 'qualität', 'dokumentation', 'bearbeitung', 'durchführung'] },
+  { key: 'Ergebnisorientierung', hints: ['abschluss', 'zielerreichung', 'conversions', 'output', 'termintreue', 'effizienz'] },
+  { key: 'Commitment', hints: ['engagement', 'verantwortung', 'zuverlässig', 'eigentümer', 'ownership', 'initiative', 'einsatz'] },
+];
+
+function normalizeValueName(raw: any): ValueName {
+  const s = String(raw ?? '').trim();
+  if (!s) return 'Excellence in Execution'; // unstrittiger Default
+  // 1) exakte Übereinstimmung
+  if ((VALUE_ENUM as readonly string[]).includes(s)) return s as ValueName;
+  const low = s.toLowerCase();
+
+  // 2) startsWith/Includes auf offizielle Namen
+  for (const v of VALUE_ENUM) {
+    const vl = v.toLowerCase();
+    if (low.startsWith(vl) || low.includes(vl)) return v;
+  }
+
+  // 3) Synonym-Heuristik
+  for (const { key, hints } of VALUE_SYNONYMES) {
+    if (hints.some(h => low.includes(h))) return key;
+  }
+
+  // 4) Letzter Fallback
+  return 'Excellence in Execution';
+}
 
 /* ---------- CoachData Schema (Zod) ---------- */
 const Point = z.object({
@@ -98,15 +118,29 @@ const CoachResponseSchema = z.object({
 });
 type CoachResponse = z.infer<typeof CoachResponseSchema>;
 
-/* ---------- Prompt ---------- */
+/* ---------- Prompt (mit Beispiel) ---------- */
 const SYSTEM_PROMPT =
   'Du bist eine Assistenz für Teamleiter:innen und Mitarbeitende bei CHECK24. ' +
   'Analysiere QA-Feedbackeinträge und gib kompaktes, wertschätzendes Coaching-Feedback auf Deutsch in der "Du"-Form. ' +
   'Beziehe dich EXPLIZIT auf die CHECK24-Werte: ' + VALUE_ENUM.join('; ') + '. ' +
-  'Antworte NUR als JSON im Schema {values[], incidents_mapped[], summary}. ' +
-  'Jeder Stichpunkt: 1 präziser Satz, max. 18 Wörter, keine PII, keine Schuldzuweisungen, lösungsorientiert. ' +
+  'Antworte NUR als JSON gemäß Schema: {"values":[{"value":<einer der obigen Werte>,"praise":[],"neutral":[],"improve":[],"tips":[]}],"incidents_mapped":[{"item_id":<id>,"value":<Wert>,"why":<max 12 Wörter>}],"summary":{"overall_tone":string?,"quick_wins":[], "risks":[]}}. ' +
+  'Jeder Stichpunkt: 1 präziser Satz, ≤18 Wörter, keine PII/Schuldzuweisungen, lösungsorientiert. ' +
   'Verdichte Redundanzen und formuliere konkrete Micro-Nächste-Schritte in tips[]. ' +
   'Fülle nur dort Inhalte, wo Substanz vorhanden ist (sonst leere Arrays).';
+
+const ONE_SHOT_EXAMPLE = {
+  values: [
+    {
+      value: 'Kundenorientierung',
+      praise: [{ text: 'Du reagierst zügig und freundlich auf Nachfragen.' }],
+      neutral: [],
+      improve: [{ text: 'Du könntest proaktiv Alternativen nennen, wenn eine Option entfällt.' }],
+      tips: [{ text: 'Erstelle eine Mini-Liste mit 2–3 Standardalternativen.', source: 'generated' }],
+    },
+  ],
+  incidents_mapped: [{ item_id: 123, value: 'Kundenorientierung', why: 'freundlicher Ton, schnelle Antwort' }],
+  summary: { overall_tone: 'überwiegend positiv', quick_wins: ['Alternativen vorbereiten'], risks: [] },
+};
 
 const buildUserPrompt = (payload: { items: any[]; valueHints: Record<string, string[]> }) =>
   [
@@ -114,36 +148,22 @@ const buildUserPrompt = (payload: { items: any[]; valueHints: Record<string, str
     'Nutze incidents_mapped[] für {item_id, value, why} (why max. 12 Wörter).',
     'Nutze valueHints nur, wenn semantisch passend.',
     'Gib ausschließlich gültiges JSON nach Schema zurück.',
+    'Beispielstruktur (nur Struktur, Inhalte an Items anpassen):',
+    JSON.stringify(ONE_SHOT_EXAMPLE),
+    'Daten:',
     JSON.stringify(payload),
   ].join('\n');
 
-/* ---------- Utility: Sanitizer & Fallbacks ---------- */
-function isValueName(x: any): x is ValueName {
-  return typeof x === 'string' && (VALUE_ENUM as readonly string[]).includes(x);
-}
-
-function sanitizeTextArray(arr: any, max = 50): { text: string }[] {
+/* ---------- Parser/Coercer ---------- */
+function toPointArray(arr: any): Array<{ text: string; example_item_ids?: Array<string|number> }> {
   if (!Array.isArray(arr)) return [];
-  const seen = new Set<string>();
-  const out: { text: string }[] = [];
-  for (const t of arr) {
-    if (typeof t === 'string') {
-      const s = t.trim();
-      if (s && !seen.has(s)) {
-        seen.add(s);
-        out.push({ text: s });
-        if (out.length >= max) break;
-      }
-    } else if (t && typeof t.text === 'string') {
-      const s = t.text.trim();
-      if (s && !seen.has(s)) {
-        seen.add(s);
-        out.push({ text: s });
-        if (out.length >= max) break;
-      }
-    }
+  const out: Array<{ text: string; example_item_ids?: Array<string|number> }> = [];
+  for (const x of arr) {
+    if (typeof x === 'string' && x.trim()) out.push({ text: x.trim() });
+    else if (x && typeof x.text === 'string' && x.text.trim())
+      out.push({ text: x.text.trim(), example_item_ids: Array.isArray(x.example_item_ids) ? x.example_item_ids : undefined });
   }
-  return out;
+  return out.slice(0, 50);
 }
 
 function fillTipsFromImproveIfEmpty(v: { improve: { text: string }[]; tips?: any[] }) {
@@ -162,37 +182,86 @@ function pruneEmptyValues(values: any[]) {
 }
 
 function coerceToCoachResponse(loose: any): CoachResponse {
-  // Wenn Struktur schon passt, validieren & zurück
-  const parsed = CoachResponseSchema.safeParse(loose);
-  if (parsed.success) {
-    // Tips ggf. auffüllen, leere buckets prunen
+  // 1) falls bereits korrekt
+  const ok = CoachResponseSchema.safeParse(loose);
+  if (ok.success) {
     const cleaned = {
-      ...parsed.data,
-      values: parsed.data.values.map(v => {
+      ...ok.data,
+      values: ok.data.values.map(v => {
         const vv: any = { ...v };
         fillTipsFromImproveIfEmpty(vv);
         return vv;
-      })
+      }),
     };
-    const pruned = { ...cleaned, values: pruneEmptyValues(cleaned.values) };
-    return pruned;
+    cleaned.values = pruneEmptyValues(cleaned.values);
+    return cleaned;
   }
 
-  // Versuchen, einfache Felder (praise/neutral/improve) aus Top-Level zu lesen
-  const praise = sanitizeTextArray(loose?.praise, 50);
-  const neutral = sanitizeTextArray(loose?.neutral, 50);
-  const improve = sanitizeTextArray(loose?.improve, 50);
-  const blockValue: ValueName = 'Excellence in Execution';
+  // 2) values als Objekt? { "Kundenorientierung": { praise:[], ... }, ... }
+  let valuesRaw: any[] = [];
+  if (Array.isArray(loose?.values)) {
+    valuesRaw = loose.values;
+  } else if (loose && typeof loose.values === 'object') {
+    valuesRaw = Object.entries(loose.values).map(([key, val]: any) => ({ value: key, ...(val || {}) }));
+  }
 
-  const block: any = { value: blockValue, praise, neutral, improve, tips: [] };
-  fillTipsFromImproveIfEmpty(block);
+  // 3) in Value-Blöcke überführen
+  const mapped = valuesRaw.map((v) => {
+    const value: ValueName = normalizeValueName(v?.value);
+    const praise = toPointArray(v?.praise);
+    const neutral = toPointArray(v?.neutral);
+    const improve = toPointArray(v?.improve);
+    let tips = toPointArray(v?.tips).map(t => ({ ...t, source: 'extracted' as const }));
+    const block: any = { value, praise, neutral, improve, tips };
+    fillTipsFromImproveIfEmpty(block);
+    return block;
+  });
 
-  const fallback: CoachResponse = {
-    values: pruneEmptyValues([block]),
-    incidents_mapped: [],
-    summary: { overall_tone: undefined, quick_wins: improve.slice(0, 5).map(p => p.text), risks: [] },
+  // 4) wenn trotzdem leer, aus Top-Level versuchen (manche Modelle legen die Arrays oben ab)
+  if (mapped.length === 0) {
+    const fallbackValue: ValueName = 'Excellence in Execution';
+    const praise = toPointArray(loose?.praise);
+    const neutral = toPointArray(loose?.neutral);
+    const improve = toPointArray(loose?.improve);
+    let tips = toPointArray(loose?.tips).map(t => ({ ...t, source: 'extracted' as const }));
+    const block: any = { value: fallbackValue, praise, neutral, improve, tips };
+    fillTipsFromImproveIfEmpty(block);
+    valuesRaw = [block];
+  }
+
+  const values = pruneEmptyValues(mapped.length ? mapped : valuesRaw);
+
+  const summary = {
+    overall_tone: typeof loose?.summary?.overall_tone === 'string' ? loose.summary.overall_tone : undefined,
+    quick_wins: Array.isArray(loose?.summary?.quick_wins) ? loose.summary.quick_wins.filter((x: any) => typeof x === 'string' && x.trim()).slice(0, 12) : [],
+    risks: Array.isArray(loose?.summary?.risks) ? loose.summary.risks.filter((x: any) => typeof x === 'string' && x.trim()).slice(0, 12) : [],
   };
-  return fallback;
+
+  const incidents_mapped = Array.isArray(loose?.incidents_mapped)
+    ? loose.incidents_mapped
+        .map((m: any) => ({
+          item_id: m?.item_id,
+          value: normalizeValueName(m?.value),
+          why: typeof m?.why === 'string' ? m.why.slice(0, 120) : undefined,
+        }))
+        .filter((m: any) => m.item_id != null)
+    : [];
+
+  // final validieren
+  const finalCandidate = { values, incidents_mapped, summary };
+  const final = CoachResponseSchema.safeParse(finalCandidate);
+  if (final.success) return final.data;
+
+  // ultimatives Fallback: Minimalstruktur
+  return {
+    values: values.length ? (values as any) : [{
+      value: 'Excellence in Execution',
+      praise: [], neutral: [], improve: [{ text: 'Keine eindeutigen Schwerpunkte erkannt – prüfe Beispiele für konkrete Hinweise.' }],
+      tips: [{ text: 'Starte mit 1–2 Quick Wins aus den letzten Fällen.', source: 'generated' }],
+    }],
+    incidents_mapped: [],
+    summary: { overall_tone: undefined, quick_wins: [], risks: [] },
+  };
 }
 
 /* ---------- CORS/Preflight ---------- */
@@ -200,7 +269,7 @@ export async function OPTIONS() {
   return new NextResponse(null, {
     status: 204,
     headers: {
-      'Access-Control-Allow-Origin': '*', // bei Bedarf einschränken
+      'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization',
       'Access-Control-Max-Age': '86400',
@@ -241,9 +310,9 @@ export async function POST(req: NextRequest) {
     const toISO = toISODate(to);
     const cap = limit ?? 500;
 
-    // Items serverseitig laden
+    // Items laden
     let q = sql/*sql*/`
-      select id, ts, incident_type, category, severity, description
+      select id, ts, incident_type, category, severity, description, booking_number_hash
       from public.qa_incidents
       where user_id = ${owner_id}::uuid
     `;
@@ -256,7 +325,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'no_items' }, { status: 400 });
     }
 
-    // Für Prompt komprimieren/säubern
     const compact = rows.map((i) => ({
       id: i.id,
       ts: i.ts,
@@ -266,10 +334,9 @@ export async function POST(req: NextRequest) {
       text: (i.description || '').trim().slice(0, 2000),
     }));
 
-    // OpenAI: CoachData-ähnliche Struktur erzeugen
     const messages = [
       { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: buildUserPrompt({ items: compact, valueHints: VALUE_HINTS }) },
+      { role: 'user', content: buildUserPrompt({ items: compact, valueHints: Object.fromEntries(VALUE_SYNONYMES.map(v => [v.key, v.hints])) }) },
     ] as const;
 
     const completion = await openai.chat.completions.create({
@@ -281,15 +348,12 @@ export async function POST(req: NextRequest) {
     });
 
     const rawOut = completion.choices?.[0]?.message?.content ?? '{}';
-    // Debug-Log stark gekürzt (nur serverseitig)
+    // zum Debuggen kurz loggen:
     console.log('[qa/coach rawOut]', String(rawOut).slice(0, 400));
 
-    // Robust: egal was kommt, in gültige CoachResponse überführen
-    let data: CoachResponse = coerceToCoachResponse((() => {
-      try { return JSON.parse(String(rawOut)); } catch { return {}; }
-    })());
+    const parsedOut = (() => { try { return JSON.parse(String(rawOut)); } catch { return {}; } })();
+    const data: CoachResponse = coerceToCoachResponse(parsedOut);
 
-    // Quicklist (für dein bereits angepasstes Frontend)
     const quicklist = data.values.flatMap(v => [
       ...v.improve.map(p => ({ value: v.value, type: 'improve' as const, text: p.text, example_item_ids: (p as any).example_item_ids })),
       ...v.tips.map(t => ({ value: v.value, type: 'tip' as const, text: t.text, example_item_ids: (t as any).example_item_ids })),
