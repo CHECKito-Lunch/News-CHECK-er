@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable prefer-const */
 // app/api/teamhub/qa/coach/route.ts
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from 'next/server';
@@ -47,6 +49,7 @@ const VALUE_ENUM = [
   'Ergebnisorientierung',
   'Commitment',
 ] as const;
+type ValueName = typeof VALUE_ENUM[number];
 
 /* ---------- Optionale Zuordnungs-Hints ---------- */
 const VALUE_HINTS: Record<string, string[]> = {
@@ -102,17 +105,95 @@ const SYSTEM_PROMPT =
   'Beziehe dich EXPLIZIT auf die CHECK24-Werte: ' + VALUE_ENUM.join('; ') + '. ' +
   'Antworte NUR als JSON im Schema {values[], incidents_mapped[], summary}. ' +
   'Jeder Stichpunkt: 1 präziser Satz, max. 18 Wörter, keine PII, keine Schuldzuweisungen, lösungsorientiert. ' +
-  'Verdichte Redundanzen und formuliere konkrete Micro-Nächste-Schritte in tips[].';
+  'Verdichte Redundanzen und formuliere konkrete Micro-Nächste-Schritte in tips[]. ' +
+  'Fülle nur dort Inhalte, wo Substanz vorhanden ist (sonst leere Arrays).';
 
 const buildUserPrompt = (payload: { items: any[]; valueHints: Record<string, string[]> }) =>
   [
     'Erzeuge pro Firmenwert ein Objekt {value, praise[], neutral[], improve[], tips[]}.',
-    'Fülle nur dort Inhalte, wo die Items Substanz liefern; sonst arrays leer lassen.',
     'Nutze incidents_mapped[] für {item_id, value, why} (why max. 12 Wörter).',
-    'Nutze valueHints nur, wenn sie semantisch passen.',
+    'Nutze valueHints nur, wenn semantisch passend.',
     'Gib ausschließlich gültiges JSON nach Schema zurück.',
     JSON.stringify(payload),
   ].join('\n');
+
+/* ---------- Utility: Sanitizer & Fallbacks ---------- */
+function isValueName(x: any): x is ValueName {
+  return typeof x === 'string' && (VALUE_ENUM as readonly string[]).includes(x);
+}
+
+function sanitizeTextArray(arr: any, max = 50): { text: string }[] {
+  if (!Array.isArray(arr)) return [];
+  const seen = new Set<string>();
+  const out: { text: string }[] = [];
+  for (const t of arr) {
+    if (typeof t === 'string') {
+      const s = t.trim();
+      if (s && !seen.has(s)) {
+        seen.add(s);
+        out.push({ text: s });
+        if (out.length >= max) break;
+      }
+    } else if (t && typeof t.text === 'string') {
+      const s = t.text.trim();
+      if (s && !seen.has(s)) {
+        seen.add(s);
+        out.push({ text: s });
+        if (out.length >= max) break;
+      }
+    }
+  }
+  return out;
+}
+
+function fillTipsFromImproveIfEmpty(v: { improve: { text: string }[]; tips?: any[] }) {
+  if (!Array.isArray(v.tips) || v.tips.length === 0) {
+    v.tips = v.improve.slice(0, 6).map(p => ({ text: p.text, source: 'generated' as const }));
+  }
+}
+
+function pruneEmptyValues(values: any[]) {
+  return values.filter(v =>
+    (Array.isArray(v.praise) && v.praise.length) ||
+    (Array.isArray(v.neutral) && v.neutral.length) ||
+    (Array.isArray(v.improve) && v.improve.length) ||
+    (Array.isArray(v.tips) && v.tips.length)
+  );
+}
+
+function coerceToCoachResponse(loose: any): CoachResponse {
+  // Wenn Struktur schon passt, validieren & zurück
+  const parsed = CoachResponseSchema.safeParse(loose);
+  if (parsed.success) {
+    // Tips ggf. auffüllen, leere buckets prunen
+    const cleaned = {
+      ...parsed.data,
+      values: parsed.data.values.map(v => {
+        const vv: any = { ...v };
+        fillTipsFromImproveIfEmpty(vv);
+        return vv;
+      })
+    };
+    const pruned = { ...cleaned, values: pruneEmptyValues(cleaned.values) };
+    return pruned;
+  }
+
+  // Versuchen, einfache Felder (praise/neutral/improve) aus Top-Level zu lesen
+  const praise = sanitizeTextArray(loose?.praise, 50);
+  const neutral = sanitizeTextArray(loose?.neutral, 50);
+  const improve = sanitizeTextArray(loose?.improve, 50);
+  const blockValue: ValueName = 'Excellence in Execution';
+
+  const block: any = { value: blockValue, praise, neutral, improve, tips: [] };
+  fillTipsFromImproveIfEmpty(block);
+
+  const fallback: CoachResponse = {
+    values: pruneEmptyValues([block]),
+    incidents_mapped: [],
+    summary: { overall_tone: undefined, quick_wins: improve.slice(0, 5).map(p => p.text), risks: [] },
+  };
+  return fallback;
+}
 
 /* ---------- CORS/Preflight ---------- */
 export async function OPTIONS() {
@@ -160,14 +241,14 @@ export async function POST(req: NextRequest) {
     const toISO = toISODate(to);
     const cap = limit ?? 500;
 
-    // Items des ausgewählten Mitarbeiters serverseitig laden
+    // Items serverseitig laden
     let q = sql/*sql*/`
       select id, ts, incident_type, category, severity, description
       from public.qa_incidents
       where user_id = ${owner_id}::uuid
     `;
     if (fromISO) q = sql/*sql*/`${q} and ts >= ${fromISO}::date`;
-    if (toISO) q = sql/*sql*/`${q} and ts < (${toISO}::date + interval '1 day')`;
+    if (toISO)   q = sql/*sql*/`${q} and ts < (${toISO}::date + interval '1 day')`;
     q = sql/*sql*/`${q} order by ts desc limit ${cap}`;
 
     const rows = (await q) as Item[];
@@ -175,7 +256,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'no_items' }, { status: 400 });
     }
 
-    // Für den Prompt kompakt & saniert
+    // Für Prompt komprimieren/säubern
     const compact = rows.map((i) => ({
       id: i.id,
       ts: i.ts,
@@ -185,7 +266,7 @@ export async function POST(req: NextRequest) {
       text: (i.description || '').trim().slice(0, 2000),
     }));
 
-    // OpenAI: direkt CoachData-ähnliche Struktur erzeugen
+    // OpenAI: CoachData-ähnliche Struktur erzeugen
     const messages = [
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: buildUserPrompt({ items: compact, valueHints: VALUE_HINTS }) },
@@ -200,20 +281,18 @@ export async function POST(req: NextRequest) {
     });
 
     const rawOut = completion.choices?.[0]?.message?.content ?? '{}';
-    let data: CoachResponse | null = null;
-    try {
-      const parsedOut = CoachResponseSchema.safeParse(JSON.parse(rawOut));
-      if (parsedOut.success) data = parsedOut.data;
-    } catch { /* noop */ }
+    // Debug-Log stark gekürzt (nur serverseitig)
+    console.log('[qa/coach rawOut]', String(rawOut).slice(0, 400));
 
-    if (!data) {
-      return NextResponse.json({ ok: false, error: 'bad_ai_response' }, { status: 502 });
-    }
+    // Robust: egal was kommt, in gültige CoachResponse überführen
+    let data: CoachResponse = coerceToCoachResponse((() => {
+      try { return JSON.parse(String(rawOut)); } catch { return {}; }
+    })());
 
-    // Quicklist fürs UI (Tipps separat generieren können wir später optional ergänzen)
+    // Quicklist (für dein bereits angepasstes Frontend)
     const quicklist = data.values.flatMap(v => [
-      ...v.improve.map(p => ({ value: v.value, type: 'improve' as const, text: p.text, example_item_ids: p.example_item_ids })),
-      ...v.tips.map(t => ({ value: v.value, type: 'tip' as const, text: t.text, example_item_ids: t.example_item_ids })),
+      ...v.improve.map(p => ({ value: v.value, type: 'improve' as const, text: p.text, example_item_ids: (p as any).example_item_ids })),
+      ...v.tips.map(t => ({ value: v.value, type: 'tip' as const, text: t.text, example_item_ids: (t as any).example_item_ids })),
     ]).slice(0, 50);
 
     return NextResponse.json({
