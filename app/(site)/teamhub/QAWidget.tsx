@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
@@ -14,16 +15,7 @@ type Item = {
   category?: string | null;
   severity?: string | null;
   description?: string | null;
-  booking_number_hash?: string | null; // enthält nur Ziffern
-};
-
-type AiCategory = {
-  key: string;
-  label: string;
-  count: number;
-  reasons: string[];
-  example_ids: Array<string|number>;
-  confidence?: 'low'|'medium'|'high';
+  booking_number_hash?: string | null;
 };
 
 /* ---- Coach types ---- */
@@ -61,7 +53,6 @@ const TYPE_LABELS: Record<string, string> = {
   special_reservation: 'Sonderreservierung',
   sonstiges: 'Sonstiges',
 };
-
 const labelForType = (t?: string | null) => {
   const k = (t || '').trim();
   if (!k) return '—';
@@ -82,7 +73,6 @@ const VALUE_COLORS: Record<string, {bg:string; text:string; border:string}> = {
 
 /* -------- Helpers -------- */
 const FE_TZ = 'Europe/Berlin';
-
 const ymKey = (iso?: string | null) => {
   if (!iso) return null;
   const d = new Date(iso);
@@ -90,24 +80,19 @@ const ymKey = (iso?: string | null) => {
   const z = new Date(d.toLocaleString('en-US', { timeZone: FE_TZ }));
   return `${z.getFullYear()}-${String(z.getMonth() + 1).padStart(2, '0')}`;
 };
-
 const ymLabelDE = (ym: string) => {
   const [y, m] = ym.split('-').map(Number);
   const d = new Date(Date.UTC(y, (m || 1) - 1, 1));
   return new Intl.DateTimeFormat('de-DE', { month: 'long', year: 'numeric' }).format(d);
 };
-
 const fmtDate = (input?: string | null) => {
   if (!input) return '—';
   const d = new Date(input);
   return isNaN(d.getTime()) ? input : d.toLocaleString('de-DE');
 };
-
 const boUrl = (n?: string | null) =>
   n && n.trim()
-    ? `https://backoffice.reisen.check24.de/booking/search/?booking_id=${encodeURIComponent(
-        n.replace(/\D+/g, '')
-      )}`
+    ? `https://backoffice.reisen.check24.de/booking/search/?booking_id=${encodeURIComponent(n.replace(/\D+/g, ''))}`
     : null;
 
 /* -------- Widget -------- */
@@ -126,12 +111,13 @@ export default function QAWidget({
   // Filter (Typen-Chips)
   const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set());
 
-  // KI-State (Legacy + Coaching)
+  // KI-State (nur Coaching)
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
-  const [aiCategories, setAiCategories] = useState<AiCategory[] | null>(null); // fallback/legacy
   const [aiCoach, setAiCoach] = useState<CoachData | null>(null);
-  const [aiQuicklist, setAiQuicklist] = useState<Array<{value:string;type:'tip'|'improve';text:string;example_item_ids?:Array<string|number>}>>([]);
+  const [aiQuicklist, setAiQuicklist] = useState<
+    Array<{ value:string; type:'tip'|'improve'; text:string; example_item_ids?:Array<string|number> }>
+  >([]);
 
   // Gruppen-UI (eingeklappt/ausgeklappt)
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
@@ -154,15 +140,17 @@ export default function QAWidget({
   const load = useCallback(async () => {
     if (!ownerId) { setItems([]); setLoading(false); return; }
     setLoading(true);
-    try{
+    try {
       const qs = new URLSearchParams();
       qs.set('owner_id', ownerId);
       if (from) qs.set('from', from);
       if (to) qs.set('to', to);
-      const r = await authedFetch(`/api/teamhub/qa${qs.toString()?`?${qs.toString()}`:''}`, { cache: 'no-store' });
-      const j = await r.json().catch(()=>null);
-      setItems(Array.isArray(j?.items)? j.items : []);
-    } finally { setLoading(false); }
+      const r = await authedFetch(`/api/teamhub/qa${qs.toString() ? `?${qs.toString()}` : ''}`, { cache: 'no-store' });
+      const j = await r.json().catch(() => null);
+      setItems(Array.isArray(j?.items) ? j.items : []);
+    } finally {
+      setLoading(false);
+    }
   }, [ownerId, from, to]);
 
   useEffect(() => { load(); }, [load]);
@@ -176,7 +164,7 @@ export default function QAWidget({
       map.set(key, (map.get(key) || 0) + 1);
     }
     return Array.from(map.entries())
-      .sort((a,b) => b[1]-a[1])
+      .sort((a, b) => b[1] - a[1])
       .map(([key, count]) => ({ key, label: labelForType(key), count }));
   }, [items]);
 
@@ -190,12 +178,12 @@ export default function QAWidget({
   }, [items, JSON.stringify(Array.from(typeFilter).sort())]);
 
   // Monatsverlauf (Berlin TZ) – für das Chart
-  const byMonth = useMemo(()=>{
+  const byMonth = useMemo(() => {
     const m = new Map<string, number>();
-    filteredItems.forEach(i=>{ const k = ymKey(i.ts); if (!k) return; m.set(k,(m.get(k)||0)+1); });
-    const arr = [...m.entries()].sort((a,b)=> a[0]<b[0]? -1:1);
-    return arr.map(([k,v])=>({ month:k, count:v }));
-  },[filteredItems]);
+    filteredItems.forEach(i => { const k = ymKey(i.ts); if (!k) return; m.set(k, (m.get(k) || 0) + 1); });
+    const arr = [...m.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1));
+    return arr.map(([k, v]) => ({ month: k, count: v }));
+  }, [filteredItems]);
 
   // Gruppierte Liste nach Monat (neueste Monate zuerst), standardmäßig eingeklappt
   const monthGroups = useMemo(() => {
@@ -207,7 +195,6 @@ export default function QAWidget({
       list.push(it);
       map.set(k, list);
     }
-    // sortiere Einträge je Monat nach Zeit absteigend
     for (const [, list] of map) {
       list.sort((a, b) => {
         const ta = a.ts ? new Date(a.ts).getTime() : 0;
@@ -215,7 +202,6 @@ export default function QAWidget({
         return tb - ta;
       });
     }
-    // Monate neueste zuerst
     const ordered = [...map.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1));
     return ordered.map(([key, list]) => ({ key, label: ymLabelDE(key), items: list }));
   }, [filteredItems]);
@@ -223,62 +209,43 @@ export default function QAWidget({
   // Gruppen beim (Neu-)Aufbau schließen
   useEffect(() => {
     const next: Record<string, boolean> = {};
-    for (const g of monthGroups) next[g.key] = false; // zugeklappt
+    for (const g of monthGroups) next[g.key] = false;
     setOpenGroups(next);
   }, [monthGroups.map(g => g.key).join(',')]);
 
-  const setAllGroups = (open:boolean) => {
+  const setAllGroups = (open: boolean) => {
     const next: Record<string, boolean> = {};
     for (const g of monthGroups) next[g.key] = open;
     setOpenGroups(next);
   };
 
-  // KI-Coaching (nimmt die aktuell sichtbaren Items)
+  // KI-Coaching (nimmt die aktuell sichtbaren Items) – nur neue Coach-API, kein Fallback
   const runAi = useCallback(async () => {
     if (filteredItems.length === 0) return;
     setAiLoading(true); setAiError(null);
-    try{
-      const r = await authedFetch('/api/me/qa/coach', {
+    try {
+      const r = await authedFetch('/api/teamhub/coach', {
         method: 'POST',
         headers: { 'Content-Type':'application/json' },
-        body: JSON.stringify({ items: filteredItems }),
+        // wir geben owner_id explizit mit; from/to optional; items = aktuell sichtbarer Kontext
+        body: JSON.stringify({ owner_id: ownerId, from, to, items: filteredItems }),
       });
-      const j = await r.json().catch(()=>null);
-      if (!j?.ok) throw new Error(j?.error || 'Analyse fehlgeschlagen');
-
-      // Reset
-      setAiCoach(null);
-      setAiCategories(null);
-      setAiQuicklist([]);
-
-      if (j.mode === 'ai' && j.data) {
-        const d = j.data as CoachData;
-        setAiCoach(d);
-        setAiQuicklist(Array.isArray(j.quicklist) ? j.quicklist : []);
-        // optional Legacy-Kacheln zusätzlich
-        if (j.legacy?.categories) {
-          const cats: AiCategory[] = j.legacy.categories.map((c:any)=>({
-            ...c,
-            label: TYPE_LABELS[c.key] || c.label || c.key
-          }));
-          setAiCategories(cats);
-        }
-      } else {
-        // fallback/legacy
-        const cats: AiCategory[] = Array.isArray(j.categories)
-          ? j.categories.map((c:any)=> ({ ...c, label: TYPE_LABELS[c.key] || c.label || c.key }))
-          : [];
-        setAiCategories(cats);
+      const j = await r.json();
+      if (!j?.ok || j.mode !== 'ai' || !j.data) {
+        throw new Error(j?.error || 'Analyse fehlgeschlagen');
       }
+
+      const d = j.data as CoachData;
+      setAiCoach(d);
+      setAiQuicklist(Array.isArray(j.quicklist) ? j.quicklist : []);
     } catch (e:any){
       setAiError(e?.message || 'Analyse fehlgeschlagen');
       setAiCoach(null);
-      setAiCategories(null);
       setAiQuicklist([]);
     } finally {
       setAiLoading(false);
     }
-  }, [filteredItems, ownerId]);
+  }, [filteredItems, ownerId, from, to]);
 
   return (
     <section className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3 md:p-4">
@@ -287,14 +254,14 @@ export default function QAWidget({
         <div className="text-sm font-semibold">Mitarbeiterfeedbacks</div>
         <div className="flex items-center gap-2">
           <button
-            onClick={()=>setAllGroups(true)}
+            onClick={() => setAllGroups(true)}
             className="px-2 py-1.5 rounded-lg border text-xs"
             title="Alle Monate öffnen"
           >
             Alle öffnen
           </button>
           <button
-            onClick={()=>setAllGroups(false)}
+            onClick={() => setAllGroups(false)}
             className="px-2 py-1.5 rounded-lg border text-xs"
             title="Alle Monate schließen"
           >
@@ -311,51 +278,10 @@ export default function QAWidget({
         </div>
       </div>
 
-      {/* Typen-Chips */}
-      {incidentTypes.length > 0 && (
-        <div className="mb-3">
-          <div className="text-[11px] text-gray-500 mb-1">Filtern nach Typ</div>
-          <div className="flex flex-wrap gap-2">
-            {incidentTypes.map(({ key, label, count }) => {
-              const active = typeFilter.has(key);
-              return (
-                <button
-                  key={key}
-                  onClick={() => setTypeFilter(prev => {
-                    const next = new Set(prev);
-                    // eslint-disable-next-line @typescript-eslint/no-unused-expressions
-                    next.has(key) ? next.delete(key) : next.add(key);
-                    return next;
-                  })}
-                  className={[
-                    "px-2.5 py-1 rounded-full border text-xs",
-                    active
-                      ? "bg-blue-600 text-white border-blue-600"
-                      : "bg-white dark:bg-white/10 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-white/20"
-                  ].join(' ')}
-                  title={`${label} (${count})`}
-                >
-                  {label} <span className={active ? "opacity-90" : "text-gray-500"}>({count})</span>
-                </button>
-              );
-            })}
-            {typeFilter.size > 0 && (
-              <button
-                onClick={()=> setTypeFilter(new Set())}
-                className="px-2.5 py-1 rounded-full border text-xs bg-gray-100 dark:bg-white/10 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-white/20"
-                title="Filter zurücksetzen"
-              >
-                Zurücksetzen
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-
       {/* KI-Fehler */}
       {aiError && <div className="mb-3 text-sm text-red-600">{aiError}</div>}
 
-      {/* KI-Coaching Panel */}
+      {/* KI-Coaching Panel (einziger Modus) */}
       {aiCoach && (
         <div className="mb-3 rounded-xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50/60 dark:bg-emerald-900/20 p-3">
           <div className="flex items-center justify-between mb-2">
@@ -378,10 +304,10 @@ export default function QAWidget({
 
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-3">
             {aiCoach.values.map((v, idx)=> {
-              const c = VALUE_COLORS[v.value] || { bg:'bg-gray-50 dark:bg-gray-800/40', text:'text-gray-800 dark:text-gray-200', border:'border-gray-200 dark:border-gray-700' };
+              const color = VALUE_COLORS[v.value] || { bg:'bg-gray-50 dark:bg-gray-800/40', text:'text-gray-800 dark:text-gray-200', border:'border-gray-200 dark:border-gray-700' };
               return (
-                <div key={idx} className={`rounded-lg border p-3 ${c.bg} ${c.border}`}>
-                  <div className={`text-sm font-semibold mb-1 ${c.text}`}>{v.value}</div>
+                <div key={idx} className={`rounded-lg border p-3 ${color.bg} ${color.border}`}>
+                  <div className={`text-sm font-semibold mb-1 ${color.text}`}>{v.value}</div>
 
                   {v.praise.length>0 && (
                     <div className="mb-1">
@@ -477,58 +403,6 @@ export default function QAWidget({
         </div>
       )}
 
-      {/* Legacy/Fallback-Kategorisierung */}
-      {!aiCoach && aiCategories && aiCategories.length > 0 && (
-        <div className="mb-3 rounded-xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50/60 dark:bg-emerald-900/20 p-3">
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-sm font-medium">KI-Kategorisierung (sichtbarer Zeitraum)</div>
-            <div className="text-xs text-gray-500">{aiCategories.reduce((a,c)=>a+c.count,0)} Einträge</div>
-          </div>
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {aiCategories.map(cat => (
-              <div key={cat.key} className="rounded-lg border border-gray-200 dark:border-gray-800 p-3 bg-white dark:bg-gray-950">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="text-sm font-medium">{cat.label}</div>
-                  <div className="text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800">{cat.count}</div>
-                </div>
-                {cat.reasons.length>0 && (
-                  <div className="flex flex-wrap gap-1.5">
-                    {cat.reasons.map((r,idx)=> (
-                      <span key={idx} className="text-xs px-2 py-0.5 rounded-full border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300">
-                        {r}
-                      </span>
-                    ))}
-                  </div>
-                )}
-                <div className="mt-3 flex items-center gap-2">
-                  <button
-                    onClick={() => setTypeFilter(prev => {
-                      const next = new Set(prev);
-                      // eslint-disable-next-line @typescript-eslint/no-unused-expressions
-                      next.has(cat.key) ? next.delete(cat.key) : next.add(cat.key);
-                      return next;
-                    })}
-                    className="text-xs px-2 py-1 rounded border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100"
-                    title="Diese Kategorie filtern"
-                  >
-                    Nach {cat.label} filtern
-                  </button>
-                  {cat.example_ids.length>0 && (
-                    <button
-                      className="text-[11px] text-blue-700 underline"
-                      onClick={()=> scrollToItem(cat.example_ids[0])}
-                      title={`Zu Beispiel ${String(cat.example_ids[0])} springen`}
-                    >
-                      Beispiel öffnen
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Ladezustand */}
       {loading && <div className="text-sm text-gray-500">Lade…</div>}
 
@@ -556,7 +430,6 @@ export default function QAWidget({
             {monthGroups.length === 0 && (
               <div className="p-3 text-sm text-gray-500">Keine Einträge im Zeitraum.</div>
             )}
-
             {monthGroups.map(g => {
               const open = !!openGroups[g.key];
               return (
@@ -590,7 +463,6 @@ export default function QAWidget({
                                 </div>
                                 <div className="text-xs text-gray-500 line-clamp-1">{it.description || '—'}</div>
                               </div>
-
                               <div className="shrink-0 text-right flex items-center gap-2">
                                 {boUrl(it.booking_number_hash) && (
                                   <a
