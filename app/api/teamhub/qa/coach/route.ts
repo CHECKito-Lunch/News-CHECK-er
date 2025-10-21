@@ -1,4 +1,4 @@
-// app/api/teamhub/qa/route.ts
+// app/api/teamhub/qa/coach/route.ts
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
@@ -26,6 +26,22 @@ type AiSummary = {
   token_usage?: { input?: number; output?: number };
 };
 
+/* ---- Coach types (für API-Ausgabe) ---- */
+type CoachPoint = { text: string; example_item_ids?: Array<string|number> };
+type CoachTip = CoachPoint & { source?: 'extracted' | 'generated' };
+type CoachValue = {
+  value: string;
+  praise: CoachPoint[];
+  neutral: CoachPoint[];
+  improve: CoachPoint[];
+  tips: CoachTip[];
+};
+type CoachData = {
+  values: CoachValue[];
+  summary: { overall_tone?: string; quick_wins: string[]; risks: string[] };
+  incidents_mapped: Array<{ item_id: string|number; value: string; why?: string }>;
+};
+
 /* ---------- Helpers ---------- */
 const isUUID = (s: unknown): s is string =>
   typeof s === 'string' &&
@@ -50,7 +66,7 @@ export async function OPTIONS() {
   return new NextResponse(null, {
     status: 204,
     headers: {
-      'Access-Control-Allow-Origin': '*', // ggf. auf eure Origin einschränken
+      'Access-Control-Allow-Origin': '*', // ggf. auf Origin einschränken
       'Access-Control-Allow-Methods': 'POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization',
       'Access-Control-Max-Age': '86400',
@@ -63,6 +79,31 @@ export async function GET() {
     status: 405,
     headers: { Allow: 'POST, OPTIONS' },
   });
+}
+
+/* ---------- Summary -> CoachData Mapping ---------- */
+function summaryToCoachData(s: AiSummary): CoachData {
+  const toPts = (arr?: string[]) =>
+    (Array.isArray(arr) ? arr : []).filter(Boolean).map((t) => ({ text: t }));
+
+  // Ein einfacher Default-Block (du kannst das später nach Werten aufsplitten)
+  const block: CoachValue = {
+    value: 'Excellence in Execution',
+    praise: toPts(s.praise),
+    neutral: toPts(s.neutral),
+    improve: toPts(s.improve),
+    tips: [], // Hier keine separaten Tipps generiert
+  };
+
+  return {
+    values: [block],
+    summary: {
+      overall_tone: undefined,
+      quick_wins: (s.improve || []).slice(0, 5),
+      risks: [],
+    },
+    incidents_mapped: [],
+  };
 }
 
 /* ---------- POST ---------- */
@@ -151,13 +192,12 @@ export async function POST(req: NextRequest) {
     try {
       parsedOut = JSON.parse(rawOut);
     } catch {
-      // Im Fehlerfall leere Listen zurückgeben (kein Legacy-Fallback)
+      // Falls das LLM nicht korrekt antwortet, bleiben die Listen leer
     }
 
+    // Sanitize
     const sanitize = (arr: any) =>
-      Array.isArray(arr)
-        ? arr.filter((x) => typeof x === 'string' && x.trim()).slice(0, 12)
-        : [];
+      Array.isArray(arr) ? arr.filter((x) => typeof x === 'string' && x.trim()).slice(0, 12) : [];
 
     const summary: AiSummary = {
       praise: sanitize(parsedOut.praise),
@@ -165,9 +205,20 @@ export async function POST(req: NextRequest) {
       improve: sanitize(parsedOut.improve),
     };
 
+    // === Mapping auf CoachData + Quicklist (Frontend erwartet mode:'ai' + data) ===
+    const coachData: CoachData = summaryToCoachData(summary);
+    const quicklist = coachData.values
+      .flatMap((v) => [
+        ...v.improve.map((p) => ({ value: v.value, type: 'improve' as const, text: p.text })),
+        ...v.tips.map((t) => ({ value: v.value, type: 'tip' as const, text: t.text })),
+      ])
+      .slice(0, 50);
+
     return NextResponse.json({
       ok: true,
-      summary,
+      mode: 'ai',
+      data: coachData,
+      quicklist,
       meta: {
         owner_id,
         from: fromISO,
@@ -176,7 +227,7 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (e: any) {
-    console.error('[teamhub/qa POST]', e);
+    console.error('[teamhub/qa/coach POST]', e);
     return NextResponse.json(
       { ok: false, error: e?.message || 'Analyse fehlgeschlagen' },
       { status: 500 }
