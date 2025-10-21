@@ -419,6 +419,16 @@ export default function TeamHubPage() {
     setOpenGroups(prev => Object.keys(prev).length ? prev : initial);
   }, [groups.map(g=>g.key).join(',')]);
 
+//für den Header
+
+const field =
+  "h-9 px-3 rounded-lg border border-gray-200 dark:border-gray-700 " +
+  "bg-white dark:bg-white/10 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500";
+const btn =
+  "h-9 inline-flex items-center justify-center px-3 rounded-lg border text-sm font-medium " +
+  "bg-white hover:bg-gray-50 dark:bg-white/10 dark:hover:bg-white/20 " +
+  "border-gray-200 dark:border-gray-700 whitespace-nowrap";
+
   // Scroll zu Feedback (vom Thread-Hub aus)
   function scrollToFeedback(feedbackId:number|string){
     const item = items.find(i => String(i.id) === String(feedbackId));
@@ -438,43 +448,63 @@ export default function TeamHubPage() {
     });
   }
 
-  return (
-    <div className="w-full max-w-[1920px] mx-auto px-4 py-6">
-      {/* Header (kompakt): Titel links, Controls rechts) */}
-      <header className="flex flex-wrap items-center justify-between gap-3 mb-3">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-semibold">Teamhub</h1>
-          <Link href="/" className="text-sm text-blue-600 hover:underline">Zurück</Link>
-        </div>
+return (
+  <div className="w-full max-w-[1920px] mx-auto px-4 py-6">
+    {/* Header (kompakt): Titel links, Controls rechts) */}
+    <header className="flex flex-wrap items-center justify-between gap-3 mb-3">
+      <div className="flex items-center gap-3">
+        <h1 className="text-2xl font-semibold">Teamhub</h1>
+        <Link href="/" className="text-sm text-blue-600 hover:underline">Zurück</Link>
+      </div>
 
-        {/* Mitarbeiter + Zeitraum kompakt + Kanal-Settings */}
-        <div className="flex items-center gap-2">
-          <select
-            value={userId}
-            onChange={e => setUserId(e.target.value)}
-            className="px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-white/10 text-sm"
-            aria-label="Mitarbeiter"
-          >
-            {members.map(m => (
-              <option key={m.user_id} value={m.user_id}>{m.name}</option>
-            ))}
-          </select>
-          <input type="date" value={from} onChange={e => setFrom(e.target.value)}
-                className="px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-white/10 text-sm" />
-          <span className="text-gray-400">–</span>
-          <input type="date" value={to} onChange={e => setTo(e.target.value)}
-                className="px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-white/10 text-sm" />
+      {/* Mitarbeiter + Zeitraum + Kanal-Settings + Labels */}
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={userId}
+          onChange={e => setUserId(e.target.value)}
+          className={`${field} pr-8 appearance-none`}
+          aria-label="Mitarbeiter"
+        >
+          {members.map(m => (
+            <option key={m.user_id} value={m.user_id}>{m.name}</option>
+          ))}
+        </select>
 
-          {/* Kanal-/Ziel-Settings öffnen */}
-          <button
-            onClick={()=>setOpenChannelModal(true)}
-            className="px-2 py-1.5 rounded-lg border text-xs"
-            title="Kanäle & Ziele bearbeiten"
-          >
-            Kanäle & Ziele
-          </button>
+        <input
+          type="date"
+          value={from}
+          onChange={e => setFrom(e.target.value)}
+          className={`${field} appearance-none`}
+          aria-label="Zeitraum von"
+        />
+        <span className="text-gray-400 select-none">–</span>
+        <input
+          type="date"
+          value={to}
+          onChange={e => setTo(e.target.value)}
+          className={`${field} appearance-none`}
+          aria-label="Zeitraum bis"
+        />
+
+        <button
+          onClick={() => setOpenChannelModal(true)}
+          className={btn}
+          title="Kanäle & Ziele bearbeiten"
+          type="button"
+        >
+          Kanäle & Ziele
+        </button>
+
+        {/* Label-Text auf gleiche Höhe bringen */}
+        <span className="h-9 inline-flex items-center px-2 text-sm font-semibold">Labels</span>
+
+        {/* Falls dein LabelManagerButton KEIN className akzeptiert:
+            mit einem Wrapper gleich hoch/gleich paddings erzwingen */}
+        <div className="[&>button]:h-9 [&>button]:px-3 [&>button]:rounded-lg [&>button]:text-sm [&>button]:border [&>button]:border-gray-200 dark:[&>button]:border-gray-700">
+          <LabelManagerButton />
         </div>
-      </header>
+      </div>
+    </header>
 
       {/* Hinweis oben, wenn neue Mitarbeiter-Kommentare */}
       {unreadOwnerCount > 0 && (
@@ -751,8 +781,6 @@ export default function TeamHubPage() {
           <FirstTeamRosterCard />   {/* ← Dienstplan-Widget */}
           <CommentThreadHub ownerId={userId} onJumpToFeedback={scrollToFeedback} />
           <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3">
-            <div className="text-sm font-semibold mb-2">Labels</div>
-            <LabelManagerButton />
           </div>
         </aside>
       </section>
