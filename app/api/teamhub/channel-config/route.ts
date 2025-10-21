@@ -32,17 +32,22 @@ async function getCurrentUserUUID(req: NextRequest): Promise<string | null> {
   return null;
 }
 
-/** Admin-Check: passt auf dein Schema (app_users.role) */
+/** Admin-Check: passt auf dein Schema (app_users.role); „safe“ mit Fallback */
 async function isAdmin(userId: string): Promise<boolean> {
-  const rows = await sql<{ is_admin: boolean }[]>`
-    select exists (
-      select 1
-      from public.app_users
-      where user_id = ${userId}::uuid
-        and role in ('admin','teamleiter')
-    ) as is_admin
-  `;
-  return rows[0]?.is_admin === true;
+  try {
+    const rows = await sql<{ is_admin: boolean }[]>`
+      select exists (
+        select 1
+        from public.app_users
+        where user_id = ${userId}::uuid
+          and role in ('admin','teamleiter')
+      ) as is_admin
+    `;
+    return rows[0]?.is_admin === true;
+  } catch (e: any) {
+    console.warn('[isAdmin] fallback=false', { code: e?.code, msg: e?.message });
+    return false;
+  }
 }
 
 export async function GET(req: NextRequest) {
@@ -120,39 +125,37 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'upserts[] empty after normalization' }, { status: 400 });
     }
 
-    // zusätzliche Validierung: alle Elemente müssen Objekte mit allen Keys sein
-    for (const [i, r] of prepared.entries()) {
-      if (
-        !r ||
-        typeof r !== 'object' ||
-        !isUUID(r.user_id) ||
-        !isUUID(r.updated_by) ||
-        !notBlank(r.channel) ||
-        !notBlank(r.label) ||
-        typeof r.target !== 'number'
-      ) {
-        return NextResponse.json(
-          { ok: false, error: `invalid upserts[${i}]` },
-          { status: 400 }
-        );
-      }
+    // Arrays für UNNEST bauen
+    const user_ids   = prepared.map(r => r.user_id);
+    const channels   = prepared.map(r => r.channel);
+    const labels     = prepared.map(r => r.label);
+    const targets    = prepared.map(r => r.target);
+    const updatedbys = prepared.map(r => r.updated_by);
+
+    // Längenkonsistenz (defensiv)
+    const n = prepared.length;
+    if (![user_ids, channels, labels, targets, updatedbys].every(a => a.length === n)) {
+      return NextResponse.json({ ok: false, error: 'payload length mismatch' }, { status: 400 });
     }
 
-    // ---- MULTI-VALUES statt jsonb_to_recordset (robust) ----
-    // Hinweis: funktioniert mit postgres.js / neon / node-postgres-SQL-Template libs.
-    const rowsSql = prepared.map((r) =>
-      sql`(${r.user_id}::uuid, ${r.channel}, ${r.label}, ${r.target}::numeric, ${r.updated_by}::uuid)`
-    );
-
+    // UNNEST-Insert (robust, keine jsonb_to_recordset/VALUES-Interpolation)
     await sql`
+      with data as (
+        select
+          unnest(${user_ids}::uuid[])   as user_id,
+          unnest(${channels}::text[])   as channel,
+          unnest(${labels}::text[])     as label,
+          unnest(${targets}::numeric[]) as target,
+          unnest(${updatedbys}::uuid[]) as updated_by
+      )
       insert into public.user_channel_config (user_id, channel, label, target, updated_by)
-      values ${sql(rowsSql)}
+      select user_id, channel, label, target, updated_by
+      from data
       on conflict (user_id, channel) do update
       set label = excluded.label,
           target = excluded.target,
           updated_by = excluded.updated_by
     `;
-    // --------------------------------------------------------
 
     return NextResponse.json({ ok: true });
   } catch (e: any) {
