@@ -10,9 +10,7 @@ const isUUID = (s: unknown): s is string =>
   typeof s === 'string' &&
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s);
 
-const clamp = (n: number, min: number, max: number) =>
-  Math.max(min, Math.min(max, n));
-
+const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 const toTwo = (n: number) => Math.round(n * 100) / 100;
 const notBlank = (s: string) => s.trim().length > 0;
 
@@ -34,6 +32,19 @@ async function getCurrentUserUUID(req: NextRequest): Promise<string | null> {
   return null;
 }
 
+/** Admin-Check: passe die Query auf dein Rollenschema an */
+async function isAdmin(userId: string): Promise<boolean> {
+  const rows = await sql<{ is_admin: boolean }[]>`
+    select exists (
+      select 1
+      from public.user_roles
+      where user_id = ${userId}::uuid
+        and role in ('admin','teamleiter')
+    ) as is_admin
+  `;
+  return rows[0]?.is_admin === true;
+}
+
 export async function GET(req: NextRequest) {
   try {
     const meUUID = await getCurrentUserUUID(req);
@@ -41,16 +52,16 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = new URL(req.url);
     const ownerId = searchParams.get('owner_id');
-
     if (!isUUID(ownerId)) {
       return NextResponse.json({ ok: false, error: 'owner_id required (uuid)' }, { status: 400 });
     }
 
-    // Simple ACL: nur Owner darf lesen
-    if (ownerId !== meUUID) {
+    // ACL: Owner selbst ODER Admin
+    if (ownerId !== meUUID && !(await isAdmin(meUUID))) {
       return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 });
     }
 
+    // numeric als string tippen
     const rows = await sql<{ channel: string; label: string; target: string }[]>`
       select channel, label, target
       from public.user_channel_config
@@ -73,7 +84,7 @@ export async function POST(req: NextRequest) {
     const meUUID = await getCurrentUserUUID(req);
     if (!meUUID) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
 
-    const body = await req.json().catch(() => null) as {
+    const body = (await req.json().catch(() => null)) as {
       owner_id?: string;
       upserts?: Array<{ channel: string; label?: string; target?: number }>;
     };
@@ -82,37 +93,33 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'owner_id (uuid) and upserts[] required' }, { status: 400 });
     }
 
-    // Simple ACL: nur Owner darf schreiben
-    if (body.owner_id !== meUUID) {
+    // ACL: Owner selbst ODER Admin darf für andere schreiben
+    const admin = await isAdmin(meUUID);
+    if (body.owner_id !== meUUID && !admin) {
       return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 });
     }
 
     // Normalisieren + clampen + runden + strenger Filter
     const prepared = (body.upserts ?? [])
       .map((u) => {
-        const rawChannel = String(u.channel ?? '').trim();
-        const channel = rawChannel.toLowerCase(); // normalize key
-        const labelSource = (u.label ?? u.channel ?? '').toString();
-        const label = String(labelSource).trim();
-
+        const channel = String(u.channel ?? '').trim().toLowerCase(); // Key normalisieren
+        const label = String((u.label ?? u.channel ?? '').toString()).trim();
         const rawTarget = Number.isFinite(Number(u.target)) ? Number(u.target) : 4.5;
         const target = toTwo(clamp(rawTarget, 1, 5));
-
         return {
-          user_id: body.owner_id!,           // FK -> app_users.user_id
-          channel,                           // normalized, lowercased
-          label,                             // pretty label (nicht zwangsweise lower)
-          target,                            // max 2 Nachkommastellen
-          updated_by: meUUID,                // FK -> app_users.user_id
+          user_id: body.owner_id!, // FK -> app_users.user_id
+          channel,
+          label,
+          target,
+          updated_by: meUUID, // FK -> app_users.user_id
         };
       })
-      .filter(r => notBlank(r.channel) && notBlank(r.label));
+      .filter((r) => notBlank(r.channel) && notBlank(r.label));
 
     if (prepared.length === 0) {
       return NextResponse.json({ ok: false, error: 'upserts[] empty after normalization' }, { status: 400 });
     }
 
-    // Batch-Upsert
     await sql`
       insert into public.user_channel_config (user_id, channel, label, target, updated_by)
       select * from jsonb_to_recordset(${JSON.stringify(prepared)}::jsonb)
@@ -125,14 +132,11 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true });
   } catch (e: any) {
-    // gezieltes Fehler-Mapping
     const code = e?.code as string | undefined;
     if (code === '23503') {
-      // foreign_key_violation (owner_id/updated_by unbekannt)
       return NextResponse.json({ ok: false, error: 'foreign key violation (owner_id/updated_by not found)' }, { status: 400 });
     }
     if (code === '22P02') {
-      // invalid_text_representation (z. B. bad uuid)
       return NextResponse.json({ ok: false, error: 'invalid input syntax' }, { status: 400 });
     }
 
