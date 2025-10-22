@@ -9,15 +9,41 @@ import { useEffect, useMemo, useState } from 'react';
 const ymdInTz = (d: Date, tz = 'Europe/Berlin') =>
   new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
 
+type BucketKey = 'early' | 'middle' | 'late' | 'absent';
+type ToneKey = 'emerald' | 'sky' | 'violet' | 'amber';
+
+interface BucketData {
+  count: number;
+  names: string[];
+}
+
+interface RosterResponse {
+  day: string;
+  thresholds: { earlyStart: number; middleStart: number; lateStart: number };
+  buckets: Record<BucketKey, BucketData>;
+}
+
+interface TileProps {
+  bucketKey: BucketKey;
+  title: string;
+  count: number;
+  names: string[];
+  tone: ToneKey;
+  collapsed: Record<BucketKey, boolean>;
+  setCollapsed: React.Dispatch<React.SetStateAction<Record<BucketKey, boolean>>>;
+  showNames: boolean;
+  maxNames: number;
+  loading: boolean;
+}
+
 export function PresenceShiftTiles({
   dayISO,
   tz = 'Europe/Berlin',
   showNames = true,
   maxNames = 120,
-  // ✅ Schichtgrenzen nur per Startzeit
-  earlyStart = 5 * 60,         // 05:00
-  middleStart = 10 * 60,       // 10:00
-  lateStart = 12 * 60 + 30,    // 12:30
+  earlyStart = 5 * 60,
+  middleStart = 10 * 60,
+  lateStart = 12 * 60 + 30,
   teamId,
 }: {
   dayISO?: string;
@@ -31,19 +57,9 @@ export function PresenceShiftTiles({
 }) {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string>('');
-  const [data, setData] = useState<{
-    day: string;
-    thresholds: { earlyStart: number; middleStart: number; lateStart: number };
-    buckets: {
-      early: { count: number; names: string[] };
-      middle: { count: number; names: string[] };
-      late: { count: number; names: string[] };
-      absent: { count: number; names: string[] };
-    };
-  } | null>(null);
+  const [data, setData] = useState<RosterResponse | null>(null);
 
-  // Toggle-States pro Kachel (eingeklappt = true)
-  const [collapsed, setCollapsed] = useState<{ [k in 'early'|'middle'|'late'|'absent']: boolean }>({
+  const [collapsed, setCollapsed] = useState<Record<BucketKey, boolean>>({
     early: true, middle: true, late: true, absent: true,
   });
 
@@ -55,7 +71,6 @@ export function PresenceShiftTiles({
       try {
         const qs = new URLSearchParams({
           day,
-          // Grenzen immer mitschicken → Backend & Frontend im Sync
           earlyStart: String(Math.max(0, Math.floor(earlyStart))),
           middleStart: String(Math.max(0, Math.floor(middleStart))),
           lateStart: String(Math.max(0, Math.floor(lateStart))),
@@ -64,7 +79,8 @@ export function PresenceShiftTiles({
         const r = await fetch(`/api/roster-shifts?${qs.toString()}`, { cache: 'no-store' });
         const j = await r.json().catch(() => null);
         if (!r.ok) throw new Error(j?.error || `HTTP ${r.status}`);
-        const safe = (arr: any): string[] => (Array.isArray(arr) ? arr.filter(x => typeof x === 'string') : []);
+        const safe = (arr: unknown): string[] =>
+          Array.isArray(arr) ? arr.filter((x): x is string => typeof x === 'string') : [];
         setData({
           day: j?.day ?? day,
           thresholds: {
@@ -89,7 +105,7 @@ export function PresenceShiftTiles({
     run();
   }, [day, teamId, earlyStart, middleStart, lateStart]);
 
-  const toneMap: Record<string, string> = {
+  const toneMap: Record<ToneKey, string> = {
     emerald: 'border-emerald-200 bg-emerald-50/70 dark:border-emerald-900/50 dark:bg-emerald-900/20',
     sky:     'border-sky-200 bg-sky-50/70 dark:border-sky-900/50 dark:bg-sky-900/20',
     violet:  'border-violet-200 bg-violet-50/70 dark:border-violet-900/50 dark:bg-violet-900/20',
@@ -97,15 +113,9 @@ export function PresenceShiftTiles({
   };
 
   function Tile({
-    bucketKey, title, count, names, tone,
-  }: {
-    bucketKey: 'early'|'middle'|'late'|'absent';
-    title: string;
-    count: number;
-    names: string[];
-    tone: 'emerald'|'sky'|'violet'|'amber';
-  }) {
-    const isCollapsed = collapsed[bucketKey];
+    bucketKey, title, count, names, tone, collapsed, setCollapsed, showNames, maxNames, loading
+  }: TileProps) {
+    const isCollapsed: boolean = collapsed[bucketKey];
     return (
       <div className={`rounded-2xl border p-5 ${toneMap[tone]}`}>
         <div className="flex items-center gap-3">
@@ -124,14 +134,13 @@ export function PresenceShiftTiles({
             </button>
           )}
         </div>
-
         {showNames && !isCollapsed && (
           <div id={`names-${bucketKey}`} className="mt-2 text-sm text-gray-800 dark:text-gray-200">
             {loading ? (
               <div className="animate-pulse h-5 w-2/3 rounded bg-black/10 dark:bg-white/10" />
             ) : names.length ? (
               <div className="flex flex-wrap gap-1.5">
-                {names.slice(0, maxNames).map((n, i) => (
+                {names.slice(0, maxNames).map((n: string, i: number) => (
                   <span key={i} className="inline-flex items-center px-2 py-0.5 text-[11px] rounded-full border border-gray-300/70 dark:border-gray-600/60">
                     {n}
                   </span>
@@ -151,19 +160,21 @@ export function PresenceShiftTiles({
     );
   }
 
-  const b = data?.buckets;
-  const early  = b?.early  || { count: 0, names: [] as string[] };
-  const middle = b?.middle || { count: 0, names: [] as string[] };
-  const late   = b?.late   || { count: 0, names: [] as string[] };
-  const absent = b?.absent || { count: 0, names: [] as string[] };
+  const early  = data?.buckets?.early  || { count: 0, names: [] as string[] };
+  const middle = data?.buckets?.middle || { count: 0, names: [] as string[] };
+  const late   = data?.buckets?.late   || { count: 0, names: [] as string[] };
+  const absent = data?.buckets?.absent || { count: 0, names: [] as string[] };
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-      <Tile bucketKey="early"  title="Frühschicht"   count={early.count}  names={early.names}  tone="emerald" />
-      <Tile bucketKey="middle" title="Mittelschicht" count={middle.count} names={middle.names} tone="sky" />
-      <Tile bucketKey="late"   title="Spätschicht"   count={late.count}   names={late.names}   tone="violet" />
-      <Tile bucketKey="absent" title="Abwesend"      count={absent.count} names={absent.names} tone="amber" />
-
+      <Tile bucketKey="early"  title="Frühschicht"   count={early.count}  names={early.names}  tone="emerald"
+        collapsed={collapsed} setCollapsed={setCollapsed} showNames={showNames} maxNames={maxNames} loading={loading} />
+      <Tile bucketKey="middle" title="Mittelschicht" count={middle.count} names={middle.names} tone="sky"
+        collapsed={collapsed} setCollapsed={setCollapsed} showNames={showNames} maxNames={maxNames} loading={loading} />
+      <Tile bucketKey="late"   title="Spätschicht"   count={late.count}   names={late.names}   tone="violet"
+        collapsed={collapsed} setCollapsed={setCollapsed} showNames={showNames} maxNames={maxNames} loading={loading} />
+      <Tile bucketKey="absent" title="Abwesend"      count={absent.count} names={absent.names} tone="amber"
+        collapsed={collapsed} setCollapsed={setCollapsed} showNames={showNames} maxNames={maxNames} loading={loading} />
       {!loading && err && (
         <div className="sm:col-span-2 lg:col-span-4 text-xs text-red-600">{err}</div>
       )}
