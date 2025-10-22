@@ -1,9 +1,36 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import { NextResponse } from 'next/server';
 import { Pool } from 'pg';
+import fs from 'node:fs';
 
-// Minimal PG Pool (DATABASE_URL aus Env)
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+// Minimal PG Pool (DATABASE_URL aus Env) – mit SSL-Handling für self-signed CAs
+function buildPgSsl(): false | { rejectUnauthorized: boolean; ca?: string } | undefined {
+  // 1) Bevorzugt: echte CA über ENV
+  //    - PGSSLROOTCERT kann entweder der komplette PEM-String ODER ein Pfad zur Datei sein
+  const caEnv = process.env.PGSSLROOTCERT || process.env.PG_CA || '';
+  if (caEnv) {
+    const ca = caEnv.includes('-----BEGIN CERTIFICATE-----')
+      ? caEnv
+      : fs.existsSync(caEnv) ? fs.readFileSync(caEnv, 'utf8') : caEnv; // falls Pfad
+    return { rejectUnauthorized: true, ca };
+  }
+
+  // 2) Wenn sslmode=require|prefer|allow|no-verify gesetzt ist oder in der URL steckt,
+  //    aber keine CA vorhanden ist → auf no-verify gehen, um SELF_SIGNED_CERT_IN_CHAIN zu vermeiden
+  const sslmode = (process.env.PGSSLMODE || '').toLowerCase();
+  const url = process.env.DATABASE_URL || '';
+  const urlHasSsl = /sslmode=(require|prefer|allow|no-verify)/i.test(url);
+  if (urlHasSsl || ['require', 'prefer', 'allow', 'no-verify'].includes(sslmode)) {
+    return { rejectUnauthorized: false };
+  }
+
+  // 3) Standard: pg entscheidet (kein SSL erzwungen)
+  return undefined;
+}
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: buildPgSsl(),
+});
 
 // YYYY-MM-DD für eine gegebene TZ (Standard: Europe/Berlin)
 function ymdInTz(date = new Date(), tz = 'Europe/Berlin') {
@@ -119,7 +146,6 @@ export async function GET(req: Request) {
     } finally {
       client.release();
     }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (e: any) {
     console.error('roster-shifts error', e);
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });
