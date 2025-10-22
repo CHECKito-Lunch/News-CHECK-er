@@ -1,7 +1,4 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-/* Minimal replacement for your existing PresenceShiftTiles component
- * -> uses GET /api/roster-shifts
- */
 'use client';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -19,7 +16,6 @@ interface BucketData {
 
 interface RosterResponse {
   day: string;
-  thresholds: { earlyStart: number; middleStart: number; lateStart: number };
   buckets: Record<BucketKey, BucketData>;
 }
 
@@ -41,18 +37,12 @@ export function PresenceShiftTiles({
   tz = 'Europe/Berlin',
   showNames = true,
   maxNames = 120,
-  earlyStart = 5 * 60,
-  middleStart = 10 * 60,
-  lateStart = 12 * 60 + 30,
   teamId,
 }: {
   dayISO?: string;
   tz?: string;
   showNames?: boolean;
   maxNames?: number;
-  earlyStart?: number;
-  middleStart?: number;
-  lateStart?: number;
   teamId?: number;
 }) {
   const [loading, setLoading] = useState(true);
@@ -69,12 +59,7 @@ export function PresenceShiftTiles({
     const run = async () => {
       setLoading(true); setErr('');
       try {
-        const qs = new URLSearchParams({
-          day,
-          earlyStart: String(Math.max(0, Math.floor(earlyStart))),
-          middleStart: String(Math.max(0, Math.floor(middleStart))),
-          lateStart: String(Math.max(0, Math.floor(lateStart))),
-        });
+        const qs = new URLSearchParams({ day });
         if (typeof teamId === 'number') qs.set('team_id', String(teamId));
         const r = await fetch(`/api/roster-shifts?${qs.toString()}`, { cache: 'no-store' });
         const j = await r.json().catch(() => null);
@@ -83,11 +68,6 @@ export function PresenceShiftTiles({
           Array.isArray(arr) ? arr.filter((x): x is string => typeof x === 'string') : [];
         setData({
           day: j?.day ?? day,
-          thresholds: {
-            earlyStart: Number(j?.thresholds?.earlyStart) || earlyStart,
-            middleStart: Number(j?.thresholds?.middleStart) || middleStart,
-            lateStart: Number(j?.thresholds?.lateStart) || lateStart,
-          },
           buckets: {
             early:  { count: Number(j?.buckets?.early?.count)  || 0, names: safe(j?.buckets?.early?.names) },
             middle: { count: Number(j?.buckets?.middle?.count) || 0, names: safe(j?.buckets?.middle?.names) },
@@ -103,7 +83,7 @@ export function PresenceShiftTiles({
       }
     };
     run();
-  }, [day, teamId, earlyStart, middleStart, lateStart]);
+  }, [day, teamId]);
 
   const toneMap: Record<ToneKey, string> = {
     emerald: 'border-emerald-200 bg-emerald-50/70 dark:border-emerald-900/50 dark:bg-emerald-900/20',
@@ -181,9 +161,3 @@ export function PresenceShiftTiles({
     </div>
   );
 }
-
-// Usage Beispiele:
-// <PresenceShiftTiles />
-// <PresenceShiftTiles dayISO="2025-10-22" />
-// <PresenceShiftTiles earlyStart={300} middleStart={600} lateStart={750} />
-// <PresenceShiftTiles showNames={false} />
