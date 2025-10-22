@@ -13,7 +13,7 @@ export function PresenceShiftTiles({
   dayISO,
   tz = 'Europe/Berlin',
   showNames = true,
-  maxNames = 10,
+  maxNames = 120,
   // Shift thresholds: minutes after 00:00
   earlyStart = 5 * 60,   // 05:00 inclusive
   middleStart = 11 * 60, // 11:00 inclusive

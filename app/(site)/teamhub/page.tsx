@@ -1047,21 +1047,53 @@ function LabelManager({ onClose }:{ onClose: ()=>void }) {
 }
 
 /* ---------------- Kanal-Settings (Modal) ---------------- */
-// (unverändert gegenüber deiner Version – hier weggelassen, falls du es oben schon hast)
-
 function ChannelSettingsModal({
-  channels, cfg, onClose, onSave,
+  channels,
+  cfg,
+  onClose,
+  onSave,
 }: {
   channels: string[];
-  cfg: Record<string, {label:string; target:number}>;
+  cfg: Record<string, { label: string; target: number }>;
   onClose: () => void;
-  onSave: (next: Record<string, {label:string; target:number}>) => void;
+  onSave: (next: Record<string, { label: string; target: number }>) => void;
 }) {
-  // … (lass hier deine zuletzt genutzte, validierte Version stehen)
-  const [local, setLocal] = useState<Record<string, {label:string; target:number}>>({});
-  useEffect(()=>{ setLocal(cfg); }, [JSON.stringify(cfg)]);
-  const setLabel = (ch:string, label:string) =>
-    setLocal(prev => ({ ...prev, [ch]: { ...(prev[ch]||{label:ch, target:4.5}), label } }));
+  const [local, setLocal] = useState<Record<string, { label: string; target: number }>>({});
+  const [saving, setSaving] = useState(false);
+
+  // cfg → local kopieren, wenn sich cfg ändert
+  useEffect(() => {
+    setLocal(cfg || {});
+  }, [JSON.stringify(cfg)]); // bewusst JSON, damit deep-compare „gut genug“ ist
+
+  const setLabel = (ch: string, label: string) =>
+    setLocal((prev) => ({
+      ...prev,
+      [ch]: { ...(prev[ch] || { label: ch, target: 4.5 }), label },
+    }));
+
+  const setTarget = (ch: string, raw: string) => {
+    // Komma zulassen; clamp 1.00..5.00; leer => ignorieren
+    const v = Number(String(raw).replace(',', '.'));
+    if (!Number.isFinite(v)) return;
+    const safe = Math.max(1, Math.min(5, v));
+    setLocal((prev) => ({
+      ...prev,
+      [ch]: { ...(prev[ch] || { label: ch, target: 4.5 }), target: Number(safe.toFixed(2)) },
+    }));
+  };
+
+  const hasChanges = useMemo(() => JSON.stringify(local) !== JSON.stringify(cfg), [local, cfg]);
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await onSave(local);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
       <div className="w-full max-w-2xl rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 p-4">
@@ -1069,36 +1101,60 @@ function ChannelSettingsModal({
           <div className="font-semibold">Kanäle & Ziele</div>
           <button onClick={onClose} className="text-sm opacity-70 hover:opacity-100">Schließen</button>
         </div>
-        <div className="space-y-2 max-h-[60vh] overflow-auto pr-1">
-          {channels.map(ch => {
-            const row = local[ch] ?? { label: ch, target: 4.5 };
-            return (
-              <div key={ch} className="grid grid-cols-12 gap-2 items-center">
-                <div className="col-span-4">
-                  <div className="text-[11px] text-gray-500">Technischer Name</div>
-                  <div className="text-xs font-mono">{ch}</div>
+
+        {channels.length === 0 ? (
+          <div className="text-sm text-gray-500">Keine Kanäle gefunden.</div>
+        ) : (
+          <div className="space-y-2 max-h-[60vh] overflow-auto pr-1">
+            {channels.map((ch) => {
+              const row = local[ch] ?? { label: ch, target: 4.5 };
+              return (
+                <div key={ch} className="grid grid-cols-12 gap-2 items-center">
+                  <div className="col-span-4">
+                    <div className="text-[11px] text-gray-500">Technischer Name</div>
+                    <div className="text-xs font-mono">{ch}</div>
+                  </div>
+
+                  <label className="col-span-5 text-sm">
+                    <span className="block text-[11px] text-gray-500 mb-1">Anzeigename (DE)</span>
+                    <input
+                      value={row.label}
+                      onChange={(e) => setLabel(ch, e.target.value)}
+                      className="w-full px-2 py-1.5 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10 text-sm"
+                      placeholder="z.B. E-Mail Service"
+                    />
+                  </label>
+
+                  <label className="col-span-3 text-sm">
+                    <span className="block text-[11px] text-gray-500 mb-1">Ziel (1.00–5.00)</span>
+                    <input
+                      value={String(row.target)}
+                      onChange={(e) => setTarget(ch, e.target.value)}
+                      className="w-full px-2 py-1.5 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10 text-sm"
+                      inputMode="decimal"
+                    />
+                  </label>
                 </div>
-                <label className="col-span-5 text-sm">
-                  <span className="block text-[11px] text-gray-500 mb-1">Anzeigename (DE)</span>
-                  <input value={row.label} onChange={e=>setLabel(ch, e.target.value)}
-                         className="w-full px-2 py-1.5 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10 text-sm" />
-                </label>
-                <div className="col-span-3 text-sm">
-                  <span className="block text-[11px] text-gray-500 mb-1">Ziel</span>
-                  <input value={String(row.target)} readOnly
-                         className="w-full px-2 py-1.5 rounded-lg border dark:border-gray-700 bg-white/70 text-gray-500" />
-                </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
+
         <div className="mt-3 flex justify-end gap-2">
-          <button onClick={onClose} className="px-3 py-2 rounded-lg border">OK</button>
+          <button onClick={onClose} className="px-3 py-2 rounded-lg border">Abbrechen</button>
+          <button
+            onClick={handleSave}
+            disabled={!hasChanges || saving}
+            className="px-3 py-2 rounded-lg bg-blue-600 text-white disabled:opacity-60"
+          >
+            {saving ? 'Speichere…' : 'Speichern'}
+          </button>
         </div>
       </div>
     </div>
   );
 }
+
 
 /* ---------------- Kleine UI-Helfer ---------------- */
 function SortSwitcher({ sort, setSort }:{ sort:'newest'|'score_desc'; setSort:(v:'newest'|'score_desc')=>void; }) {
