@@ -4,10 +4,8 @@ import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { T } from '@/lib/tables';
 
-// Optional: falls du diese Route nicht im Edge laufen lassen willst
 export const runtime = 'nodejs';
 
-// Row-Typ für team_roster (minimal für diese API)
 type RosterRow = {
   employee_name: string | null;
   start_time: string | null; // "HH:MM:SS"
@@ -17,7 +15,6 @@ type RosterRow = {
   roster_date: string;       // "YYYY-MM-DD"
 };
 
-// Hilfsfunktion: "HH:MM" oder "HH:MM:SS" → Minuten seit 00:00
 function toMinutes(t?: string | null): number | null {
   if (!t) return null;
   const parts = t.split(':').map(Number);
@@ -43,7 +40,6 @@ export async function GET(req: Request) {
   const middleStart = Math.max(earlyStart, Math.floor(Number(searchParams.get('middleStart') ?? '600'))); // 10:00
   const lateStart = Math.max(middleStart, Math.floor(Number(searchParams.get('lateStart') ?? '750')));    // 12:30
 
-  // Query so bauen, dass immer ein ARRAY zurückkommt (kein maybeSingle!)
   let q = s
     .from(T.team_roster)
     .select('employee_name,start_time,end_time,user_id,team_id,roster_date') as any;
@@ -59,19 +55,17 @@ export async function GET(req: Request) {
   const rows: RosterRow[] = Array.isArray(data) ? data : [];
 
   // Aggregation pro Person (user_id bevorzugt, sonst Name), früheste Startzeit
-  const perPerson = new Map<string, { name: string; startMin: number | null; present: boolean }>();
+  const perPerson = new Map<string, { name: string; startMin: number | null }>();
   for (const it of rows) {
     const key = it.user_id || it.employee_name || '';
     if (!key) continue;
     const name = (it.employee_name || '—').trim();
     const start = toMinutes(it.start_time);
-
-    // Start wird immer als präsent gewertet, sobald gültige Startzeit
-    const present = Number.isFinite(start);
-
+    // Nur Zeilen mit gültiger Startzeit zählen (Schicht), alles andere ist "abwesend"
+    if (!Number.isFinite(start)) continue;
     const prev = perPerson.get(key);
     if (!prev) {
-      perPerson.set(key, { name, startMin: start, present });
+      perPerson.set(key, { name, startMin: start });
     } else {
       const bestStart =
         prev.startMin == null
@@ -79,7 +73,7 @@ export async function GET(req: Request) {
           : start == null
             ? prev.startMin
             : Math.min(prev.startMin, start);
-      perPerson.set(key, { name, startMin: bestStart, present: prev.present || present });
+      perPerson.set(key, { name, startMin: bestStart });
     }
   }
 
@@ -99,18 +93,28 @@ export async function GET(req: Request) {
     absent: [] as string[],
   };
 
-  for (const { name, startMin, present } of perPerson.values()) {
-    if (!present) {
-      buckets.absent.push(name);
-      continue;
-    }
+  const allKeys = new Set<string>();
+  for (const it of rows) {
+    const key = it.user_id || it.employee_name || '';
+    if (key) allKeys.add(key);
+  }
+  // Sortiere alle mit Schicht ein
+  for (const [key, { name, startMin }] of perPerson.entries()) {
     const b = classify(startMin);
     if (b === 'early') buckets.early.push(name);
     else if (b === 'middle') buckets.middle.push(name);
     else buckets.late.push(name);
   }
+  // Alle übrigen gelten als abwesend
+  for (const key of allKeys) {
+    if (!perPerson.has(key)) {
+      // Name aus Zeilen holen
+      const row = rows.find(it => (it.user_id || it.employee_name || '') === key);
+      const name = (row?.employee_name || '—').trim();
+      buckets.absent.push(name);
+    }
+  }
 
-  // Response passend zum Frontend
   const result = {
     day,
     thresholds: { earlyStart, middleStart, lateStart },
