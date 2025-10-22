@@ -12,6 +12,8 @@ import dayGridPlugin from '@fullcalendar/daygrid';
 import interactionPlugin from '@fullcalendar/interaction';
 import iCalendarPlugin from '@fullcalendar/icalendar';
 import listPlugin from '@fullcalendar/list';
+import { PresenceShiftTiles } from '../components/TeamRosterPresenceWidget';
+
 
 /* ➕ Recharts für Mini-Charts in KPI-Karten */
 import {
@@ -299,6 +301,12 @@ export default function HomePage() {
 
   return (
     <div className="w-full max-w-full 2xl:max-w-[1920px] mx-auto py-6 space-y-8">
+      <section className={card + ' p-4'}>
+  <div className={header}>
+    <h2 className="text-lg font-semibold">Heute im Dienst (Schichten)</h2>
+  </div>
+  <PresenceShiftTiles/>
+</section>
       {/* KPIs · Tools · Kalender */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* KPIs */}
