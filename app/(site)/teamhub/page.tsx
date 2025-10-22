@@ -1046,7 +1046,7 @@ function LabelManager({ onClose }:{ onClose: ()=>void }) {
   );
 }
 
-/* ---------------- Kanal-Settings (Modal) ---------------- */
+/* ---------------- Kanal-Settings (Modal) – bessere Eingabe UX ---------------- */
 function ChannelSettingsModal({
   channels,
   cfg,
@@ -1059,36 +1059,88 @@ function ChannelSettingsModal({
   onSave: (next: Record<string, { label: string; target: number }>) => void;
 }) {
   const [local, setLocal] = useState<Record<string, { label: string; target: number }>>({});
+  // uiTargets hält den **Rohtext** pro Kanal (damit "4," / "4,9" usw. erlaubt sind)
+  const [uiTargets, setUiTargets] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
 
-  // cfg → local kopieren, wenn sich cfg ändert
+  // Helpers
+  const fmtDE = (n: number) =>
+    Number.isFinite(n) ? n.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '';
+
+  const parseDE = (s: string): number | null => {
+    if (!s) return null;
+    // Punkte als Tausendertrennzeichen tolerieren, Komma -> Punkt
+    const norm = s.replace(/\s/g, '').replace(/\./g, '').replace(',', '.');
+    const n = Number(norm);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const clamp2 = (n: number) => Math.min(5, Math.max(0, Number(n.toFixed(2))));
+
+  // cfg -> local (numerisch) + uiTargets (Text) initialisieren
   useEffect(() => {
     setLocal(cfg || {});
-  }, [JSON.stringify(cfg)]); // bewusst JSON, damit deep-compare „gut genug“ ist
+    const initial: Record<string, string> = {};
+    for (const ch of channels) {
+      const row = (cfg && cfg[ch]) || { label: ch, target: 4.5 };
+      initial[ch] = fmtDE(row.target);
+    }
+    setUiTargets(initial);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(cfg), channels.join('|')]);
 
   const setLabel = (ch: string, label: string) =>
-    setLocal((prev) => ({
-      ...prev,
-      [ch]: { ...(prev[ch] || { label: ch, target: 4.5 }), label },
-    }));
+    setLocal(prev => ({ ...prev, [ch]: { ...(prev[ch] || { label: ch, target: 4.5 }), label } }));
 
-  const setTarget = (ch: string, raw: string) => {
-    // Komma zulassen; clamp 1.00..5.00; leer => ignorieren
-    const v = Number(String(raw).replace(',', '.'));
-    if (!Number.isFinite(v)) return;
-    const safe = Math.max(0, Math.min(5, v));
-    setLocal((prev) => ({
-      ...prev,
-      [ch]: { ...(prev[ch] || { label: ch, target: 4.5 }), target: Number(safe.toFixed(2)) },
-    }));
+  // OnChange: NUR Rohtext aktualisieren (kein sofortiges Parsen/Clamping!)
+  const onTargetChange = (ch: string, raw: string) => {
+    // erlaub: Ziffern, Leerzeichen, Punkt, Komma – Rest rausfiltern (optional)
+    const cleaned = raw.replace(/[^\d.,\s]/g, '');
+    setUiTargets(prev => ({ ...prev, [ch]: cleaned }));
+  };
+
+  // OnBlur: jetzt parsen + runden + clampen + numerischen State updaten + hübsch formatieren
+  const onTargetBlur = (ch: string) => {
+    const raw = uiTargets[ch] ?? '';
+    const parsed = parseDE(raw);
+    if (parsed == null) {
+      // Ungültig → auf bisherigen numerischen Wert zurückformatieren
+      const currentNum = (local[ch]?.target ?? 4.5);
+      setUiTargets(prev => ({ ...prev, [ch]: fmtDE(currentNum) }));
+      return;
+    }
+    const safe = clamp2(parsed);
+    setLocal(prev => ({ ...prev, [ch]: { ...(prev[ch] || { label: ch, target: 4.5 }), target: safe } }));
+    setUiTargets(prev => ({ ...prev, [ch]: fmtDE(safe) }));
+  };
+
+  // Enter im Feld -> blur
+  const onTargetKeyDown = (e: React.KeyboardEvent<HTMLInputElement>, ch: string) => {
+    if (e.key === 'Enter') {
+      (e.target as HTMLInputElement).blur();
+    }
   };
 
   const hasChanges = useMemo(() => JSON.stringify(local) !== JSON.stringify(cfg), [local, cfg]);
 
   async function handleSave() {
+    // Fallback: für alle Felder, die noch nicht geblurt wurden, einmal parsen/clampen
+    const finalized: Record<string, { label: string; target: number }> = {};
+    for (const ch of channels) {
+      const row = local[ch] || { label: ch, target: 4.5 };
+      const raw = uiTargets[ch];
+      if (typeof raw === 'string') {
+        const parsed = parseDE(raw);
+        if (parsed != null) {
+          row.target = clamp2(parsed);
+        }
+      }
+      finalized[ch] = row;
+    }
+
     setSaving(true);
     try {
-      await onSave(local);
+      await onSave(finalized);
     } finally {
       setSaving(false);
     }
@@ -1108,6 +1160,12 @@ function ChannelSettingsModal({
           <div className="space-y-2 max-h-[60vh] overflow-auto pr-1">
             {channels.map((ch) => {
               const row = local[ch] ?? { label: ch, target: 4.5 };
+              const uiVal = uiTargets[ch] ?? fmtDE(row.target);
+
+              // einfache Live-Validierung (rot, wenn außerhalb 0..5 oder unparsebar – aber nur wenn etwas drinsteht)
+              const parsed = uiVal.trim() ? parseDE(uiVal) : null;
+              const invalid = parsed != null ? (parsed < 0 || parsed > 5) : false;
+
               return (
                 <div key={ch} className="grid grid-cols-12 gap-2 items-center">
                   <div className="col-span-4">
@@ -1126,13 +1184,25 @@ function ChannelSettingsModal({
                   </label>
 
                   <label className="col-span-3 text-sm">
-                    <span className="block text-[11px] text-gray-500 mb-1">Ziel (1.00–5.00)</span>
+                    <span className="block text-[11px] text-gray-500 mb-1">Ziel (0,00–5,00)</span>
                     <input
-                      value={String(row.target)}
-                      onChange={(e) => setTarget(ch, e.target.value)}
-                      className="w-full px-2 py-1.5 rounded-lg border dark:border-gray-700 bg-white dark:bg-white/10 text-sm"
+                      // type="text" + inputMode="decimal" → Handy kriegt Ziffernfeld; Komma bleibt erlaubt
+                      type="text"
                       inputMode="decimal"
+                      value={uiVal}
+                      onChange={(e) => onTargetChange(ch, e.target.value)}
+                      onBlur={() => onTargetBlur(ch)}
+                      onKeyDown={(e) => onTargetKeyDown(e, ch)}
+                      placeholder="z.B. 4,85"
+                      className={[
+                        "w-full px-2 py-1.5 rounded-lg border text-sm",
+                        "dark:border-gray-700 bg-white dark:bg-white/10",
+                        invalid ? "border-red-400 focus-visible:ring-red-500" : ""
+                      ].join(" ")}
                     />
+                    <div className="mt-1 text-[11px] text-gray-500">
+                      Aktuell: {fmtDE(row.target)} (gespeichert)
+                    </div>
                   </label>
                 </div>
               );
