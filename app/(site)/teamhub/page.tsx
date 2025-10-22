@@ -1076,7 +1076,7 @@ function ChannelSettingsModal({
     // Komma zulassen; clamp 1.00..5.00; leer => ignorieren
     const v = Number(String(raw).replace(',', '.'));
     if (!Number.isFinite(v)) return;
-    const safe = Math.max(1, Math.min(5, v));
+    const safe = Math.max(0, Math.min(5, v));
     setLocal((prev) => ({
       ...prev,
       [ch]: { ...(prev[ch] || { label: ch, target: 4.5 }), target: Number(safe.toFixed(2)) },
