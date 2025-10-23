@@ -1,5 +1,6 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable react-hooks/exhaustive-deps */
+
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
@@ -8,7 +9,13 @@ import * as XLSX from 'xlsx';
 type Member = { user_id: string; name: string; email?: string; employee_no?: string };
 type Team = { team_id: string; name: string };
 type ParsedSheet = { name: string; headers: string[]; rows: string[][] };
-type UploadResponse = { ok?: boolean; error?: string; stats?: Record<string, number> } & Record<string, unknown>;
+type UploadResponse = {
+  ok?: boolean;
+  error?: string;
+  stats?: Record<string, number>;
+  inserted?: number;
+  unresolved?: Array<unknown>;
+} & Record<string, unknown>;
 
 const deLongDateRx = /^[A-Za-zÄÖÜäöüß]+,\s*\d{1,2}\.\s*[A-Za-zÄÖÜäöüß]+\s+\d{4}\s*$/;
 const compactSpaces = (s: string) => String(s ?? '').trim().replace(/\s+/g, ' ');
@@ -137,19 +144,27 @@ async function excelToSheets(file: File): Promise<ParsedSheet[]> {
     const aoa = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1, raw: true }) as string[][];
     const rows = (aoa || []).filter(r => Array.isArray(r) && r.length > 0);
     if (!rows.length) continue;
+
     const headers = (rows[0] || []).map(v => String(v ?? '').trim());
-    const body = rows.slice(1).map(r => headers.map((_, i) => String(r[i] ?? '')));
+
+    // ✅ keine ungenutzten Variablen mehr:
+    const body = rows.slice(1).map(r => {
+      const arr = new Array<string>(headers.length);
+      for (let idx = 0; idx < headers.length; idx++) {
+        arr[idx] = String(r[idx] ?? '');
+      }
+      return arr;
+    });
+
     out.push({ name, headers, rows: body });
   }
   return out;
 }
 
 export default function RosterUploadPage() {
-  const defaultTeamId = '1';
-
   // data
   const [members, setMembers] = useState<Member[]>([]);
-  const [teams, setTeams] = useState<Team[]>([]);
+  
 
   // file/sheet
   const [file, setFile] = useState<File | null>(null);
@@ -177,29 +192,25 @@ export default function RosterUploadPage() {
 
   // parallel laden
   useEffect(() => {
-    (async () => {
-      try {
-        const [tRes, mRes] = await Promise.all([
-          fetch('/api/teamhub/all-teams', { cache: 'no-store' }),
-          fetch('/api/admin/users?page=1&pageSize=500', { cache: 'no-store' }),
-        ]);
-        const [tJson, mJson] = await Promise.all([tRes.json().catch(() => null), mRes.json().catch(() => null)]);
-        setTeams(Array.isArray(tJson?.items) ? tJson.items : []);
-        setMembers(
-          Array.isArray(mJson?.data)
-            ? mJson.data.map((u: any) => ({
-                user_id: String(u.user_id),
-                name: u.name ?? '',
-                email: u.email ?? '',
-                employee_no: u.employee_no ?? '',
-              }))
-            : [],
-        );
-      } catch {
-        // UI bleibt bedienbar
-      }
-    })();
-  }, []);
+  (async () => {
+    try {
+      const mRes = await fetch('/api/admin/users?page=1&pageSize=500', { cache: 'no-store' });
+      const mJson = await mRes.json().catch(() => null);
+      setMembers(
+        Array.isArray(mJson?.data)
+          ? mJson.data.map((u: any) => ({
+              user_id: String(u.user_id),
+              name: u.name ?? '',
+              email: u.email ?? '',
+              employee_no: u.employee_no ?? '',
+            }))
+          : [],
+      );
+    } catch {
+      /* noop */
+    }
+  })();
+}, []);
 
   async function onFileChange(f: File | null) {
     setFile(f);
@@ -323,6 +334,9 @@ export default function RosterUploadPage() {
     api: UploadResponse | null,
     missingCount: number
   ) {
+    const inserted = typeof api?.inserted === 'number' ? ` · inserted: ${api!.inserted}` : '';
+    const unresolvedCnt = Array.isArray(api?.unresolved) ? api!.unresolved!.length : 0;
+    const unresolved = unresolvedCnt ? ` · unresolved: ${unresolvedCnt}` : '';
     const statsPairs =
       api?.stats &&
       Object.entries(api.stats)
@@ -330,8 +344,8 @@ export default function RosterUploadPage() {
         .join(', ');
     const tail = statsPairs ? ` (API: ${statsPairs})` : '';
     const audit = missingCount ? ` · Audit: ${missingCount} offen` : '';
-    // Beispiel: ✅ <Sheet> · 132 Zeilen · 18 Personen · 22 Tage · Audit: 3 offen (API: imported:120, skipped:12)
-    return `✅ ${sheetName} · ${sentRows} Zeilen · ${assignedUsers} Personen · ${dayCols} Tage${audit}${tail}`;
+    // Beispiel: ✅ <Sheet> · 132 Zeilen · 18 Personen · 22 Tage · inserted:120 · unresolved:3 · Audit:2 offen (API: skipped:12)
+    return `✅ ${sheetName} · ${sentRows} Zeilen · ${assignedUsers} Personen · ${dayCols} Tage${inserted}${unresolved}${audit}${tail}`;
   }
 
   async function submit(e: React.FormEvent) {
@@ -345,7 +359,6 @@ export default function RosterUploadPage() {
       if (!dateCols.length) throw new Error('Keine Datums-Spalten erkannt.');
       if (!firstNameCol && !lastNameCol) throw new Error('Bitte Namensspalten zuordnen (Vorname/Nachname).');
 
-      const teamId = defaultTeamId;
       const iFirst = headerIndex(firstNameCol);
       const iLast = headerIndex(lastNameCol);
       const di = dateCols.map(h => headerIndex(h));
@@ -354,18 +367,20 @@ export default function RosterUploadPage() {
       const filteredRows: string[][] = [];
       const seen = new Set<string>();
 
+      // De-Dupe pro Person + Datums-HEADER (nicht Zellinhalt)
       for (const row of cur.rows) {
         const first = iFirst >= 0 ? row[iFirst] : '';
         const last = iLast >= 0 ? row[iLast] : '';
         const basePerson = normNameFull(compactSpaces([first, last].filter(Boolean).join(' ')));
         if (!assignedMap.has(basePerson)) continue;
 
-        // prüfe mindestens eine nicht-leere Datumsspalte, de-dupe pro Person+Datum
         let take = false;
-        for (const dIdx of di) {
-          const dateVal = dIdx >= 0 ? row[dIdx] : '';
-          if (!dateVal) continue;
-          const key = `${teamId}|${basePerson}|${dateVal}`;
+        for (let k = 0; k < di.length; k++) {
+          const dIdx = di[k];
+          const dateHeader = dateCols[k];         // wichtig: Header als Tages-Ident
+          const cellVal = dIdx >= 0 ? row[dIdx] : '';
+          if (!cellVal) continue;
+          const key = `${basePerson}|${dateHeader}`;
           if (!seen.has(key)) {
             seen.add(key);
             take = true;
@@ -374,9 +389,17 @@ export default function RosterUploadPage() {
         if (take) filteredRows.push(row);
       }
 
-      // Audit: welche Personen fehlen (potenziell reason_no_user)
-      const excelPeople = assignments.map(a => a.sheetName);
-      const { missing } = auditMissingUsers(excelPeople, userIdx, overrides);
+      // Audit: nur relevante Personen (die mindestens eine belegte Tageszelle hatten)
+      const relevantPeople = Array.from(
+        new Set(
+          filteredRows.map(r => {
+            const f = iFirst >= 0 ? r[iFirst] : '';
+            const l = iLast >= 0 ? r[iLast] : '';
+            return compactSpaces([f, l].filter(Boolean).join(' '));
+          }),
+        ),
+      );
+      const { missing } = auditMissingUsers(relevantPeople, userIdx, overrides);
       const missingCount = missing.length;
 
       const res = await fetch('/api/teamhub/roster/upload', {

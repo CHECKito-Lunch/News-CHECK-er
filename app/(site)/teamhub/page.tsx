@@ -1086,7 +1086,7 @@ function ChannelSettingsModal({
       initial[ch] = fmtDE(row.target);
     }
     setUiTargets(initial);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [JSON.stringify(cfg), channels.join('|')]);
 
   const setLabel = (ch: string, label: string) =>
