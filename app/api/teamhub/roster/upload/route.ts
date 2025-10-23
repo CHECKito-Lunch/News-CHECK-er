@@ -107,25 +107,24 @@ export async function POST(req: NextRequest){
     if (!headers.length || !rows.length) return json({ ok:false, error:'no_rows' }, 400);
     if (!mapping?.dateCols?.length) return json({ ok:false, error:'no_date_columns' }, 400);
 
-    const nameToUser = new Map<string,string>();
-    for (const a of assigns) {
-      const k = compactSpaces(String(a.sheetName||'').toLowerCase());
-      if (a.user_id) nameToUser.set(k, a.user_id);
-    }
+  const nameToUser = new Map<string,string>();
+for (const a of assigns) {
+  const k = compactSpaces(String(a.sheetName||'').toLowerCase());
+  if (a.user_id) nameToUser.set(k, a.user_id);
+}
 
-    type Out = {
-      team_id: number;
-      roster_date: string;
-      start_time: string|null;
-      end_time: string|null;
-      employee_name: string;
-      role: string|null;
-      status: string|null;
-      raw_cell: string|null;
-      created_by: string;
-      cross_midnight: boolean;
-    };
-    const out: Omit<Out, 'user_id'>[] = [];
+type Out = {
+  roster_date: string;
+  start_time: string|null;
+  end_time: string|null;
+  employee_name: string;
+  role: string|null;
+  status: string|null;
+  raw_cell: string|null;
+  created_by: string;
+  cross_midnight: boolean;
+};
+    const out: Out[] = [];
 
     for (const row of rows) {
       const first = pick(headers, row, mapping.firstName);
@@ -182,10 +181,9 @@ export async function POST(req: NextRequest){
 
     if (!out.length) return json({ ok:false, error:'no_parsed_rows' }, 400);
 
-    const res = await sql/*sql*/`
+   const res = await sql/*sql*/`
 WITH src AS (
   SELECT * FROM jsonb_to_recordset(${sqlJson(out)}) AS r(
-    team_id bigint,
     roster_date text,
     start_time text,
     end_time text,
@@ -196,36 +194,61 @@ WITH src AS (
     created_by uuid,
     cross_midnight boolean
   )
+),
+assign_map AS (
+  SELECT
+    LOWER(compact_spaces ->> 'sheetName') AS sheet_name_lc,
+    (compact_spaces ->> 'user_id')::uuid   AS user_id
+  FROM (
+    SELECT jsonb_array_elements(${sqlJson(assigns)}) AS compact_spaces
+  ) t
+  WHERE (compact_spaces ->> 'user_id') IS NOT NULL
+),
+resolved_user AS (
+  SELECT
+    s.*,
+    COALESCE(am.user_id, au.user_id) AS user_id
+  FROM src s
+  LEFT JOIN assign_map am
+    ON am.sheet_name_lc = LOWER(s.employee_name)
+  LEFT JOIN public.app_users au
+    ON au.active = true
+   AND LOWER(au.name) = LOWER(s.employee_name)
+),
+resolved_team AS (
+  SELECT
+    ru.*,
+    mem.team_id
+  FROM resolved_user ru
+  LEFT JOIN public.team_memberships mem
+    ON mem.user_id = ru.user_id
+   AND mem.active = true
 )
 INSERT INTO public.team_roster (
   team_id, roster_date, start_time, end_time,
   employee_name, user_id, role, status, raw_cell, created_by
 )
 SELECT
-  src.team_id,
-  src.roster_date::date,
-  CASE WHEN src.start_time IS NOT NULL THEN src.start_time::time END,
-  CASE WHEN src.end_time   IS NOT NULL THEN src.end_time::time END,
-  src.employee_name,
-  mem.user_id, -- user_id aus Team Membership
-  src.role,
-  src.status,
-  src.raw_cell,
-  src.created_by
-FROM src
-LEFT JOIN public.team_memberships mem
-  ON mem.team_id = src.team_id
-LEFT JOIN public.app_users au
-  ON au.user_id = mem.user_id
-  AND LOWER(au.name) = LOWER(src.employee_name)  -- Matching über Namen, Case-Insensitive
-WHERE NOT EXISTS (
-  SELECT 1 FROM public.team_roster tr
-  WHERE tr.team_id = src.team_id
-    AND tr.roster_date = src.roster_date::date
-    AND tr.employee_name = src.employee_name
-)
-RETURNING id;
-    `;
+  rt.team_id,
+  rt.roster_date::date,
+  CASE WHEN rt.start_time IS NOT NULL THEN rt.start_time::time END,
+  CASE WHEN rt.end_time   IS NOT NULL THEN rt.end_time::time END,
+  rt.employee_name,
+  rt.user_id,
+  rt.role,
+  rt.status,
+  rt.raw_cell,
+  rt.created_by
+FROM resolved_team rt
+WHERE rt.team_id IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM public.team_roster tr
+    WHERE tr.team_id = rt.team_id
+      AND tr.roster_date = rt.roster_date::date
+      AND tr.employee_name = rt.employee_name
+  )
+RETURNING id
+`;
 
     return json({ ok:true, inserted: Array.isArray(res) ? res.length : 0 });
   } catch (e: any) {

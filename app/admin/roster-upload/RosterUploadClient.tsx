@@ -238,7 +238,6 @@ export default function RosterUploadPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          team_id: Number(teamId),
           sheet_name: cur.name,
           headers: cur.headers,
           rows: filteredRows,
