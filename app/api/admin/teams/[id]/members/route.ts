@@ -1,5 +1,4 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-// app/api/teams/[id]/members/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -15,60 +14,88 @@ const isUUID = (s: unknown): s is string =>
 function getTeamId(url: string): number | null {
   try {
     const parts = new URL(url).pathname.split('/').filter(Boolean);
-    // .../teams/[id]/members
+    // .../teams/[id]/members -> [id] ist vorletztes Element
     const id = Number(parts[parts.length - 2]);
     return Number.isFinite(id) ? id : null;
-  } catch { return null; }
+  } catch { 
+    return null; 
+  }
+}
+
+/** Prüft ob User Admin, Moderator oder Teamleiter ist */
+function hasAdminRights(role: string): boolean {
+  return role === 'admin' || role === 'moderator' || role === 'teamleiter';
 }
 
 export async function GET(req: NextRequest) {
   const me = await getAdminFromCookies(req);
-  if (!me) return NextResponse.json({ ok:false, error:'unauthorized' }, { status:401 });
-
-  const teamId = getTeamId(req.url);
-  if (!teamId) return NextResponse.json({ ok:false, error:'bad_id' }, { status:400 });
-
-  // Zugriff: admin/mod immer; teamleiter nur für Teams, in denen er Mitglied ist
-  if (!me || (me.role !== 'admin' && me.role !== 'moderator' && me.role !== 'teamleiter')) {
-    const r = await sql/*sql*/`
-      select 1 from public.team_memberships
-      where team_id = ${teamId} and user_id = ${me.sub}::uuid
-      limit 1
-    `;
-    if (!r?.length) return NextResponse.json({ ok:false, error:'forbidden' }, { status:403 });
+  if (!me) {
+    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
   }
 
-  const rows = await sql/*sql*/`
-    select
-      tm.user_id::text,
-      tm.is_teamleiter,
-      tm.active,
-      tm.assigned_at,
-      u.email,
-      u.name
-    from public.team_memberships tm
-    left join public.app_users u on u.user_id = tm.user_id
-    where tm.team_id = ${teamId}
-    order by u.name nulls last, u.email asc
-  `;
+  // Teamleiter haben Admin-Rechte - alle dürfen alle Teams sehen
+  if (!hasAdminRights(me.role)) {
+    return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 });
+  }
 
-  return NextResponse.json({ ok:true, members: rows });
+  const teamId = getTeamId(req.url);
+  if (!teamId) {
+    return NextResponse.json({ ok: false, error: 'bad_id' }, { status: 400 });
+  }
+
+  try {
+    const rows = await sql/*sql*/`
+      select
+        tm.user_id::text,
+        tm.is_teamleiter,
+        tm.active,
+        tm.assigned_at,
+        u.email,
+        u.name
+      from public.team_memberships tm
+      left join public.app_users u on u.user_id = tm.user_id
+      where tm.team_id = ${teamId}
+      order by u.name nulls last, u.email asc
+    `;
+
+    return NextResponse.json({ ok: true, members: rows });
+  } catch (e: any) {
+    console.error('[GET /api/admin/teams/:id/members] query failed:', e);
+    return NextResponse.json({ 
+      ok: false, 
+      error: 'db_error',
+      details: e?.message 
+    }, { status: 500 });
+  }
 }
 
-/** POST = BULK-REPLACE Mitglieder dieses Teams
+/** 
+ * POST = BULK-REPLACE Mitglieder dieses Teams
  * Body: { members: [{ user_id: uuid, is_teamleiter?: boolean }] }
- * Garantiert "max 1 aktives Team pro User" (deaktiviert vorherige akt. Mitgliedschaft).
+ * Garantiert "max 1 aktives Team pro User" (deaktiviert vorherige aktive Mitgliedschaft in anderen Teams).
  */
 export async function POST(req: NextRequest) {
   const me = await getAdminFromCookies(req);
-  if (!me || (me.role !== 'admin' && me.role !== 'moderator' && me.role !== 'teamleiter')) {
-    return NextResponse.json({ ok:false, error:'forbidden' }, { status:403 });
+  if (!me) {
+    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
   }
+
+  // Teamleiter haben Admin-Rechte
+  if (!hasAdminRights(me.role)) {
+    return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 });
+  }
+
   const teamId = getTeamId(req.url);
-  if (!teamId) return NextResponse.json({ ok:false, error:'bad_id' }, { status:400 });
+  if (!teamId) {
+    return NextResponse.json({ ok: false, error: 'bad_id' }, { status: 400 });
+  }
 
   let body: any = {};
-  try { body = await req.json(); } catch {}
+  try { 
+    body = await req.json(); 
+  } catch {
+    return NextResponse.json({ ok: false, error: 'invalid_body' }, { status: 400 });
+  }
 
   const members: Array<{ user_id: string; is_teamleiter?: boolean }> =
     Array.isArray(body?.members) ? body.members : [];
@@ -79,28 +106,39 @@ export async function POST(req: NextRequest) {
 
   try {
     await sql.begin(async (tx: any) => {
-      // 1) Vorhandene Mitgliedschaften des Teams löschen (wir ersetzen komplett)
+      // 1) Lösche alle bisherigen Mitglieder dieses Teams
       await tx/*sql*/`delete from public.team_memberships where team_id = ${teamId}`;
 
-      // 2) Insert jedes Mitglied; vorher andere aktive Teams des Users deaktivieren
+      // 2) Für jeden neuen Member: deaktiviere andere aktive Teams und füge ein
       for (const m of cleaned) {
+        // Deaktiviere andere aktive Teams für diesen User (außer dem aktuellen)
         await tx/*sql*/`
           update public.team_memberships
           set active = false
-          where user_id = ${m.user_id}::uuid and active = true
+          where user_id = ${m.user_id}::uuid 
+            and team_id != ${teamId}
+            and active = true
         `;
 
+        // Füge Member zum aktuellen Team hinzu
         await tx/*sql*/`
           insert into public.team_memberships (team_id, user_id, is_teamleiter, active)
           values (${teamId}, ${m.user_id}::uuid, ${m.is_teamleiter}, true)
           on conflict (team_id, user_id)
-          do update set is_teamleiter = excluded.is_teamleiter, active = true
+          do update set 
+            is_teamleiter = excluded.is_teamleiter, 
+            active = true
         `;
       }
     });
-    return NextResponse.json({ ok:true, count: cleaned.length });
-  } catch (e) {
-    console.error('bulk replace members failed', e);
-    return NextResponse.json({ ok:false, error:'db_error' }, { status:500 });
+
+    return NextResponse.json({ ok: true, count: cleaned.length });
+  } catch (e: any) {
+    console.error('[POST /api/admin/teams/:id/members] bulk replace failed:', e);
+    return NextResponse.json({ 
+      ok: false, 
+      error: 'db_error',
+      details: e?.message 
+    }, { status: 500 });
   }
 }
