@@ -90,6 +90,8 @@ export async function POST(req: NextRequest){
   try {
     const me = await getUserFromCookies().catch(()=>null);
     if (!me) return json({ ok:false, error:'unauthorized' }, 401);
+
+    // Erlaube Upload für teamleiter und admin ohne Membership-Prüfung:
     if (me.role !== 'teamleiter' && me.role !== 'admin') {
       return json({ ok:false, error:'forbidden' }, 403);
     }
@@ -180,52 +182,53 @@ export async function POST(req: NextRequest){
 
     if (!out.length) return json({ ok:false, error:'no_parsed_rows' }, 400);
 
-    // INSERT mit automatischer user_id Zuweisung über LEFT JOIN auf team_memberships
     const res = await sql/*sql*/`
-      with src as (
-        select * from jsonb_to_recordset(${sqlJson(out)}) as r(
-          team_id bigint,
-          roster_date text,
-          start_time text,
-          end_time text,
-          employee_name text,
-          role text,
-          status text,
-          raw_cell text,
-          created_by uuid,
-          cross_midnight boolean
-        )
-      )
-      insert into public.team_roster (
-        team_id, roster_date, start_time, end_time,
-        employee_name, user_id, role, status, raw_cell, created_by
-      )
-      select
-        src.team_id,
-        src.roster_date::date,
-        case when src.start_time is not null then src.start_time::time end,
-        case when src.end_time   is not null then src.end_time::time end,
-        src.employee_name,
-        mem.user_id,
-        src.role,
-        src.status,
-        src.raw_cell,
-        src.created_by
-      from src
-      left join public.team_memberships mem
-        on mem.team_id = src.team_id
-        and lower(mem.user_id::text) = lower(src.employee_name)  -- ggf. anpassen
-      where not exists (
-        select 1 from public.team_roster tr
-        where tr.team_id = src.team_id
-          and tr.roster_date = src.roster_date::date
-          and tr.employee_name = src.employee_name
-      )
-      returning id
+WITH src AS (
+  SELECT * FROM jsonb_to_recordset(${sqlJson(out)}) AS r(
+    team_id bigint,
+    roster_date text,
+    start_time text,
+    end_time text,
+    employee_name text,
+    role text,
+    status text,
+    raw_cell text,
+    created_by uuid,
+    cross_midnight boolean
+  )
+)
+INSERT INTO public.team_roster (
+  team_id, roster_date, start_time, end_time,
+  employee_name, user_id, role, status, raw_cell, created_by
+)
+SELECT
+  src.team_id,
+  src.roster_date::date,
+  CASE WHEN src.start_time IS NOT NULL THEN src.start_time::time END,
+  CASE WHEN src.end_time   IS NOT NULL THEN src.end_time::time END,
+  src.employee_name,
+  mem.user_id, -- user_id aus Team Membership
+  src.role,
+  src.status,
+  src.raw_cell,
+  src.created_by
+FROM src
+LEFT JOIN public.team_memberships mem
+  ON mem.team_id = src.team_id
+LEFT JOIN public.app_users au
+  ON au.user_id = mem.user_id
+  AND LOWER(au.name) = LOWER(src.employee_name)  -- Matching über Namen, Case-Insensitive
+WHERE NOT EXISTS (
+  SELECT 1 FROM public.team_roster tr
+  WHERE tr.team_id = src.team_id
+    AND tr.roster_date = src.roster_date::date
+    AND tr.employee_name = src.employee_name
+)
+RETURNING id;
     `;
 
     return json({ ok:true, inserted: Array.isArray(res) ? res.length : 0 });
-  } catch (e:any) {
+  } catch (e: any) {
     console.error('[roster/upload]', e);
     return json({ ok:false, error: e?.message ?? 'server_error' }, 500);
   }
