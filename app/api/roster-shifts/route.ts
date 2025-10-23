@@ -26,6 +26,14 @@ export async function GET(req: Request) {
   const teamIdParam = searchParams.get('team_id');
   const teamId = teamIdParam != null ? Number(teamIdParam) : null;
 
+  // 🔥 NEUE LOGIK: Auto-Link unverknüpfte Namen
+  try {
+    await autoLinkRosterUsers(s);
+  } catch (e) {
+    console.error('[roster-shifts] Auto-link failed:', e);
+    // Nicht blockieren, nur loggen
+  }
+
   // Daten abfragen
   let q = s.from(T.team_roster)
     .select('employee_name,raw_cell,user_id,team_id,roster_date') as any;
@@ -70,4 +78,45 @@ export async function GET(req: Request) {
     }
   };
   return NextResponse.json(result, { headers: { 'Cache-Control': 'no-store' } });
+}
+
+/**
+ * 🔥 Automatisches Linking von team_roster <-> app_users
+ * Verknüpft alle Einträge mit user_id=NULL, wenn ein passender Name in app_users existiert
+ */
+async function autoLinkRosterUsers(s: any) {
+  // 1. Hole alle unverknüpften employee_names
+  const { data: unlinked } = await s
+    .from('team_roster')
+    .select('employee_name')
+    .is('user_id', null)
+    .limit(100); // Max 100 pro Request (Performance)
+
+  if (!unlinked || unlinked.length === 0) return;
+
+  // 2. Hole alle app_users mit passenden Namen
+  const uniqueNames = [...new Set(unlinked.map((r: any) => r.employee_name))];
+  const { data: users } = await s
+    .from('app_users')
+    .select('user_id, name')
+    .in('name', uniqueNames);
+
+  if (!users || users.length === 0) return;
+
+  // 3. Erstelle Mapping: name -> user_id
+  const nameToUserId = new Map<string, string>();
+  for (const u of users) {
+    if (u.name) nameToUserId.set(u.name, u.user_id);
+  }
+
+  // 4. Update team_roster für alle gematchten Namen
+  for (const [name, userId] of nameToUserId.entries()) {
+    await s
+      .from('team_roster')
+      .update({ user_id: userId })
+      .eq('employee_name', name)
+      .is('user_id', null);
+  }
+
+  console.log(`[roster-shifts] Auto-linked ${nameToUserId.size} users`);
 }
