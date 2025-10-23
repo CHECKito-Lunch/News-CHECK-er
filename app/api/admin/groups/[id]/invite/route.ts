@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 import type { NextRequest } from "next/server";
 import { sql } from "@/lib/db";
 import { json } from "@/lib/auth-server";
-import { withModerator, getParamNumber } from "@/lib/with-auth";
+import { withAdminRights, getParamNumber } from "@/lib/with-auth";
 
 type CountRow = { n: number };
 
@@ -15,7 +15,7 @@ export async function POST(
   ctx: any // eslint-disable-line @typescript-eslint/no-explicit-any
 ) {
   // Wrapper hier anwenden, damit die exportierte Signatur exakt passt.
-  return withModerator(async (req2, ctx2, me) => {
+  return withAdminRights(async (req2, ctx2, me) => {
     // groupId robust entpacken (Helper akzeptiert auch Promise-params)
     const groupId = await getParamNumber(ctx2, "id");
     if (!groupId || groupId <= 0) {

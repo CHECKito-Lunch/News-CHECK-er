@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // lib/with-auth.ts
 import { NextRequest } from "next/server";
@@ -11,7 +12,6 @@ import {
 // ------------------------------
 export type RouteParams = Record<string, string | string[]>;
 type MaybePromise<T> = T | Promise<T>;
-type LooseRouteContext = { params?: MaybePromise<RouteParams> };
 
 // --- Type guard ---
 function isPromise<T = unknown>(v: unknown): v is Promise<T> {
@@ -94,7 +94,7 @@ export function withRole<C>(roles: Role[] | Role, handler: AuthedHandler<C>) {
 /** Nur Admin */
 export const withAdmin = <C,>(h: AuthedHandler<C>) => withRole<C>("admin", h);
 
-/** Admin oder Moderator */
+/** Admin oder Moderator (ohne Teamleiter) */
 export const withModerator = <C,>(h: AuthedHandler<C>) => withRole<C>(["admin", "moderator"], h);
 
 /** Admin, Moderator oder Teamleiter (alle haben Admin-Rechte) */

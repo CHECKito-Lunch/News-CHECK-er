@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
-import { withModerator } from '@/lib/with-auth';
+import { withAdminRights } from '@/lib/with-auth';
 
 const json = (d: unknown, s = 200) => NextResponse.json(d, { status: s });
 
@@ -17,7 +17,7 @@ async function getParams(ctx: any) {
 }
 
 // GET: Mitglieder einer Gruppe (per UUID)
-export const GET = withModerator(async (_req: NextRequest, ctx) => {
+export const GET = withAdminRights(async (_req: NextRequest, ctx) => {
   const { id } = await getParams(ctx);
   const groupId = Number(Array.isArray(id) ? id[0] : id);
   if (!Number.isFinite(groupId) || groupId <= 0) {
@@ -54,7 +54,7 @@ export const GET = withModerator(async (_req: NextRequest, ctx) => {
 });
 
 // PUT: Mitglieder einer Gruppe setzen (exakte Menge, UUIDs)
-export const PUT = withModerator(async (req: NextRequest, ctx) => {
+export const PUT = withAdminRights(async (req: NextRequest, ctx) => {
   const { id } = await getParams(ctx);
   const groupId = Number(Array.isArray(id) ? id[0] : id);
   if (!Number.isFinite(groupId) || groupId <= 0) {
