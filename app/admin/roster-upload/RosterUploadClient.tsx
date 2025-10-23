@@ -43,28 +43,23 @@ function excelToSheets(file: File): Promise<ParsedSheet[]> {
   });
 }
 
-// "Mittwoch, 1. Oktober 2025"
 const deLongDateRx = /^[A-Za-zÄÖÜäöüß]+,\s*\d{1,2}\.\s*[A-Za-zÄÖÜäöüß]+\s+\d{4}\s*$/;
-
 const compactSpaces = (s: string) => s.trim().replace(/\s+/g, ' ');
 const normName = (s: string) => compactSpaces(s).toLowerCase();
 
 export default function RosterUploadPage() {
   const [teams, setTeams] = useState<TeamRow[]>([]);
   const [teamId, setTeamId] = useState<string>('');
-
   const [members, setMembers] = useState<Member[]>([]);
   const [membersLoadedFor, setMembersLoadedFor] = useState<string>('');
-
   const [file, setFile] = useState<File|null>(null);
   const [sheets, setSheets] = useState<ParsedSheet[]>([]);
   const [sheetIdx, setSheetIdx] = useState(0);
   const cur = sheets[sheetIdx];
 
-  // Mapping der Excel-Header
+  // keine Vollname-Spalte mehr nötig!
   const [firstNameCol, setFirstNameCol] = useState('');
   const [lastNameCol,  setLastNameCol]  = useState('');
-  const [fullNameCol,  setFullNameCol]  = useState('');
   const [roleCol,      setRoleCol]      = useState('');
   const [dateCols,     setDateCols]     = useState<string[]>([]);
 
@@ -75,7 +70,7 @@ export default function RosterUploadPage() {
   const [err,  setErr]  = useState('');
   const [out,  setOut]  = useState('');
 
-  /* ========== 1) Teams laden ========== */
+  /* Teams laden */
   useEffect(()=>{(async()=>{
     const r = await fetch('/api/teamhub/my-teams', { cache:'no-store' });
     const j = await r.json().catch(()=>null);
@@ -84,25 +79,23 @@ export default function RosterUploadPage() {
     if (!teamId && arr.length) setTeamId(arr[0].team_id);
   })()},[]);
 
-  /* ========== 2) Team-Mitglieder laden ========== */
+  /* Team-Mitglieder laden */
   useEffect(()=>{(async()=>{
     if (!teamId) { setMembers([]); setMembersLoadedFor(''); return; }
-    // Deine /members-Route kann optional ?team_id verstehen – wenn nicht, ignoriert sie den Param.
     const r = await fetch(`/api/teamhub/members?team_id=${encodeURIComponent(teamId)}`, { cache:'no-store' });
     const j = await r.json().catch(()=>null);
-    // Erwartetes Format: { members: [{user_id, name}, ...] }
     const arr: Member[] = Array.isArray(j?.members) ? j.members : [];
     setMembers(arr);
     setMembersLoadedFor(teamId);
   })()},[teamId]);
 
-  /* ========== 3) Datei einlesen ========== */
+  /* Datei einlesen */
   async function onFileChange(f: File|null){
     setFile(f);
     setSheets([]);
     setErr('');
     setOut('');
-    setFirstNameCol(''); setLastNameCol(''); setFullNameCol(''); setRoleCol('');
+    setFirstNameCol(''); setLastNameCol(''); setRoleCol('');
     setDateCols([]);
     setAssignments([]);
     if (!f) return;
@@ -111,65 +104,58 @@ export default function RosterUploadPage() {
     setSheetIdx(0);
   }
 
-  /* ========== 4) Auto-Guess / Neuaufbau bei Sheet- oder Mapping-Änderungen ========== */
+  /* Auto-Guess / Neuaufbau bei Sheet- oder Mapping-Änderungen */
   useEffect(()=>{
     if (!cur) return;
 
-    // 4a) Heuristik für Spaltenvorschläge nur beim ersten Betreten des Sheets
-    if (!firstNameCol && !lastNameCol && !fullNameCol && !roleCol && !dateCols.length) {
+    // Heuristik für Spaltenvorschläge
+    if (!firstNameCol && !lastNameCol && !roleCol && !dateCols.length) {
       const norm = cur.headers.map(h=>({ raw:h, norm: normalizeHeader(h) }));
       const find = (keys: string[]) => norm.find(h=>keys.includes(h.norm))?.raw || '';
-
       setLastNameCol (find(['nachname','name_nachname']));
       setFirstNameCol(find(['vorname','name_vorname']));
-      setFullNameCol (find(['name','mitarbeiter','vollname','fullname']));
       setRoleCol     (find(['aufgabe','rolle','role','position','funktion']));
-
       const dCols = cur.headers.filter(h => deLongDateRx.test(String(h).trim()));
       setDateCols(dCols);
     }
 
-    // 4b) Personenliste auf Basis der (aktuellen) Mapping-Auswahl
+    // Personenliste auf Basis Zuordnung
     const idx = (label:string) => cur.headers.indexOf(label);
     const peopleSeen = new Set<string>();
     const people: string[] = [];
-    const iFull  = idx(fullNameCol);
     const iFirst = idx(firstNameCol);
     const iLast  = idx(lastNameCol);
 
     for (const row of cur.rows) {
-      const full  = iFull  >= 0 ? row[iFull]  : '';
       const first = iFirst >= 0 ? row[iFirst] : '';
       const last  = iLast  >= 0 ? row[iLast]  : '';
-      const person = full ? compactSpaces(String(full)) : compactSpaces([last, first].filter(Boolean).join(' '));
+      const person = compactSpaces([last, first].filter(Boolean).join(' '));
       if (!person) continue;
       const key = normName(person);
       if (!peopleSeen.has(key)) { peopleSeen.add(key); people.push(person); }
     }
 
-    // 4c) Assignments neu bauen, bisherige Wahl dabei erhalten
+    // Assignments neu bauen
     setAssignments(prev=>{
       const prevMap = new Map(prev.map(a=>[normName(a.sheetName), a.user_id]));
       const next = people.map(p=>{
         const keep = prevMap.get(normName(p)) || '';
         if (keep) return { sheetName: p, user_id: keep };
-        // Auto-Match, wenn Excel-Name exakt Team-Mitgliedsname
         const hit = members.find(m => normName(m.name||'') === normName(p));
         return { sheetName: p, user_id: hit?.user_id || '' };
       });
       return next;
     });
 
-  // Dependencies: wenn sich Sheet, Header, Mapping oder Mitglieder ändern → neu berechnen
   }, [
     sheetIdx,
     cur?.headers.join('|'),
     cur?.rows.length,
-    firstNameCol, lastNameCol, fullNameCol, roleCol,
+    firstNameCol, lastNameCol, roleCol,
     members.map(m=>m.user_id).join(',')
   ]);
 
-  /* ========== 5) Helpers ========== */
+  /* Helpers */
   const headerOptions = useMemo(()=> (cur?.headers||[]).map(h=>({value:h,label:h})), [cur?.headers]);
 
   function setAssign(name:string, user_id:string){
@@ -180,34 +166,55 @@ export default function RosterUploadPage() {
   const previewRows = useMemo(()=>{
     if (!cur) return [];
     const idx = (label:string) => cur.headers.indexOf(label);
-    const iFull  = idx(fullNameCol);
     const iFirst = idx(firstNameCol);
     const iLast  = idx(lastNameCol);
     const di = dateCols.map(h => idx(h));
-
     return cur.rows.slice(0, 20).map(r => {
-      const full  = iFull  >= 0 ? r[iFull]  : '';
       const first = iFirst >= 0 ? r[iFirst] : '';
       const last  = iLast  >= 0 ? r[iLast]  : '';
-      const person = full ? compactSpaces(String(full)) : compactSpaces([last, first].filter(Boolean).join(' '));
+      const person = compactSpaces([last, first].filter(Boolean).join(' '));
       const cols = di.map(i => i>=0 ? String(r[i] ?? '') : '');
       return { person, cols };
     });
-  }, [cur, firstNameCol, lastNameCol, fullNameCol, dateCols]);
+  }, [cur, firstNameCol, lastNameCol, dateCols]);
 
-  /* ========== 6) Submit ========== */
+  /* Dubletten-Filter */
+  function filterDuplicates(rows: string[][], iFirst: number, iLast: number, di: number[], teamId: string) {
+    const seen = new Set<string>();
+    return rows.filter(row => {
+      const first = iFirst >= 0 ? row[iFirst] : '';
+      const last  = iLast  >= 0 ? row[iLast] : '';
+      const basePerson = normName(compactSpaces([last, first].filter(Boolean).join(' ')));
+      let isUnique = false;
+      for (const dIdx of di) {
+        const date = dIdx >= 0 ? row[dIdx] : '';
+        const key = `${teamId}|${basePerson}|${date}`;
+        if (!seen.has(key) && date) { seen.add(key); isUnique = true; }
+      }
+      return isUnique;
+    });
+  }
+
+  /* Submit */
   async function submit(e:React.FormEvent){
     e.preventDefault();
     setErr(''); setOut('');
     if (!teamId) { setErr('Bitte Team wählen.'); return; }
     if (!cur) { setErr('Bitte Excel auswählen.'); return; }
     if (!dateCols.length) { setErr('Keine Datums-Spalten erkannt.'); return; }
-    if (!firstNameCol && !lastNameCol && !fullNameCol) {
-      setErr('Bitte Namensspalten zuordnen (Vorname/Nachname oder Name).'); return;
+    if (!firstNameCol && !lastNameCol) {
+      setErr('Bitte Namensspalten zuordnen (Vorname/Nachname).'); return;
     }
 
     setBusy(true);
     try {
+      // Dubletten rausfiltern
+      const idx = (label:string) => cur.headers.indexOf(label);
+      const iFirst = idx(firstNameCol);
+      const iLast = idx(lastNameCol);
+      const di = dateCols.map(h => idx(h));
+      const filteredRows = filterDuplicates(cur.rows, iFirst, iLast, di, teamId);
+
       const res = await fetch('/api/teamhub/roster/upload', {
         method:'POST',
         headers:{ 'Content-Type':'application/json' },
@@ -215,12 +222,11 @@ export default function RosterUploadPage() {
           team_id: Number(teamId),
           sheet_name: cur.name,
           headers: cur.headers,
-          rows: cur.rows,
+          rows: filteredRows,
           mapping: {
             firstName: firstNameCol || undefined,
-            lastName:  lastNameCol  || undefined,
-            fullName:  fullNameCol  || undefined,
-            role:      roleCol || undefined,
+            lastName: lastNameCol  || undefined,
+            role:      roleCol     || undefined,
             dateCols
           },
           assignments
@@ -232,7 +238,7 @@ export default function RosterUploadPage() {
     } finally { setBusy(false); }
   }
 
-  /* ========== UI ========== */
+  /* UI */
   return (
     <div className="space-y-6">
       <h1 className="text-xl font-semibold">Dienstplan hochladen (Excel – breite Tagesspalten)</h1>
@@ -273,9 +279,8 @@ export default function RosterUploadPage() {
         <div className="max-w-4xl space-y-3">
           <div className="text-sm font-medium">Spalten-Zuordnung</div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            <MapSelect label="Nachname"     value={lastNameCol}  onChange={setLastNameCol}  options={headerOptions} />
-            <MapSelect label="Vorname"      value={firstNameCol} onChange={setFirstNameCol} options={headerOptions} />
-            <MapSelect label="Name (voll)"  value={fullNameCol}  onChange={setFullNameCol}  options={headerOptions} />
+            <MapSelect label="Vorname"     value={lastNameCol}  onChange={setLastNameCol}  options={headerOptions} />
+            <MapSelect label="Nachname"      value={firstNameCol} onChange={setFirstNameCol} options={headerOptions} />
             <MapSelect label="Aufgabe/Rolle" value={roleCol}     onChange={setRoleCol}      options={headerOptions} />
           </div>
 
@@ -358,7 +363,6 @@ export default function RosterUploadPage() {
           {busy ? 'Hochladen…' : 'Hochladen'}
         </button>
       </form>
-
       {out && <pre className="bg-black/5 p-3 rounded text-xs whitespace-pre-wrap">{out}</pre>}
     </div>
   );
