@@ -70,7 +70,7 @@ export default function AdminHeader({ initialRole }: { initialRole?: Role }) {
     <header className="sticky top-0 z-30 bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl border-b border-gray-200/50 dark:border-gray-800/50 shadow-sm">
       <div className="w-full max-w-[1920px] mx-auto px-6">
         {/* Top Row: Logo + Logout */}
-        <div className="flex items-center justify-between py-4">
+        <div className="flex items-center justify-between py-1">
           <Link href="/" className="shrink-0">
             <Image
               src="/header.svg"
