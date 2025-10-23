@@ -173,45 +173,67 @@ export default function RosterUploadPage() {
     });
   }
 
-  async function submit(e:React.FormEvent){
-    e.preventDefault();
-    setErr(''); setOut('');
-    const teamId = defaultTeamId;
-    if (!cur) { setErr('Bitte Excel auswählen.'); return; }
-    if (!dateCols.length) { setErr('Keine Datums-Spalten erkannt.'); return; }
-    if (!firstNameCol && !lastNameCol) {
-      setErr('Bitte Namensspalten zuordnen (Vorname/Nachname).'); return;
-    }
-    setBusy(true);
-    try {
-      const idx = (label:string) => cur.headers.indexOf(label);
-      const iFirst = idx(firstNameCol);
-      const iLast = idx(lastNameCol);
-      const di = dateCols.map(h => idx(h));
-      const filteredRows = filterDuplicates(cur.rows, iFirst, iLast, di, teamId);
-
-      const res = await fetch('/api/teamhub/roster/upload', {
-        method:'POST',
-        headers:{ 'Content-Type':'application/json' },
-        body: JSON.stringify({
-          team_id: Number(teamId),
-          sheet_name: cur.name,
-          headers: cur.headers,
-          rows: filteredRows,
-          mapping: {
-            firstName: firstNameCol || undefined,
-            lastName: lastNameCol  || undefined,
-            role:      roleCol     || undefined,
-            dateCols
-          },
-          assignments
-        })
-      });
-      const j = await res.json().catch(()=>null);
-      if (!res.ok) setErr(j?.error || `Fehler ${res.status}`);
-      else setOut(JSON.stringify(j, null, 2));
-    } finally { setBusy(false); }
+ async function submit(e:React.FormEvent){
+  e.preventDefault();
+  setErr(''); setOut('');
+  const teamId = defaultTeamId;
+  if (!cur) { setErr('Bitte Excel auswählen.'); return; }
+  if (!dateCols.length) { setErr('Keine Datums-Spalten erkannt.'); return; }
+  if (!firstNameCol && !lastNameCol) {
+    setErr('Bitte Namensspalten zuordnen (Vorname/Nachname).'); return;
   }
+  setBusy(true);
+  try {
+    const idx = (label:string) => cur.headers.indexOf(label);
+    const iFirst = idx(firstNameCol);
+    const iLast = idx(lastNameCol);
+    const di = dateCols.map(h => idx(h));
+    // Schritt 1: Nur Zeilen für zugeordnete User
+    const assignedMap = new Map(assignments.filter(a => a.user_id).map(a => [normName(a.sheetName), a.user_id]));
+    const assignedRows = cur.rows.filter(row => {
+      const first = iFirst >= 0 ? row[iFirst] : '';
+      const last  = iLast  >= 0 ? row[iLast]  : '';
+      const person = compactSpaces([first, last].filter(Boolean).join(' '));
+      const norm = normName(person);
+      return assignedMap.has(norm);
+    });
+    // Schritt 2: Dubletten raus
+    const seen = new Set<string>();
+    const filteredRows = assignedRows.filter(row => {
+      const first = iFirst >= 0 ? row[iFirst] : '';
+      const last  = iLast  >= 0 ? row[iLast] : '';
+      const basePerson = normName(compactSpaces([first, last].filter(Boolean).join(' ')));
+      let isUnique = false;
+      for (const dIdx of di) {
+        const date = dIdx >= 0 ? row[dIdx] : '';
+        const key = `${teamId}|${basePerson}|${date}`;
+        if (!seen.has(key) && date) { seen.add(key); isUnique = true; }
+      }
+      return isUnique;
+    });
+    // Upload wie immer...
+    const res = await fetch('/api/teamhub/roster/upload', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({
+        team_id: Number(teamId),
+        sheet_name: cur.name,
+        headers: cur.headers,
+        rows: filteredRows,
+        mapping: {
+          firstName: firstNameCol || undefined,
+          lastName: lastNameCol  || undefined,
+          role:      roleCol     || undefined,
+          dateCols
+        },
+        assignments
+      })
+    });
+    const j = await res.json().catch(()=>null);
+    if (!res.ok) setErr(j?.error || `Fehler ${res.status}`);
+    else setOut(JSON.stringify(j, null, 2));
+  } finally { setBusy(false); }
+}
 
   return (
     <div className="space-y-6">
