@@ -736,6 +736,18 @@ export default function UsersAdminPage() {
     loadGroups();
   }, [loadGroups]);
 
+  async function deleteGroup(id: number) {
+    if (!confirm('Diese Gruppe wirklich löschen? Alle Mitgliedschaften werden entfernt.')) return;
+    const res = await authedFetch(`/api/admin/groups/${id}`, { method: 'DELETE' });
+    if (res.ok) {
+      await loadGroups();
+      alert('Gruppe gelöscht.');
+    } else {
+      const j = await res.json().catch(() => ({}));
+      alert(j.error ?? 'Gruppe löschen fehlgeschlagen');
+    }
+  }
+
   const gFiltered = useMemo(() => {
     const q2 = gQ.trim().toLowerCase();
     return !q2 ? groups : groups.filter(g => g.name.toLowerCase().includes(q2) || (g.description ?? '').toLowerCase().includes(q2));
@@ -760,6 +772,18 @@ export default function UsersAdminPage() {
   useEffect(() => {
     loadTeams();
   }, [loadTeams]);
+
+  async function deleteTeam(id: number) {
+    if (!confirm('Dieses Team wirklich löschen? Alle Mitgliedschaften werden entfernt.')) return;
+    const res = await authedFetch(`/api/admin/teams/${id}`, { method: 'DELETE' });
+    if (res.ok) {
+      await loadTeams();
+      alert('Team gelöscht.');
+    } else {
+      const j = await res.json().catch(() => ({}));
+      alert(j.error ?? 'Team löschen fehlgeschlagen');
+    }
+  }
 
   const tFiltered = useMemo(() => {
     const q2 = tQ.trim().toLowerCase();
@@ -823,7 +847,6 @@ export default function UsersAdminPage() {
             </table>
           </div>
         )}
-        {/* Pagination */}
         {pages > 1 && (
           <div className="mt-4 flex justify-center gap-2">
             <button disabled={page <= 1} onClick={() => setPage(p => p - 1)} className={btnBase}>◀</button>
@@ -833,7 +856,7 @@ export default function UsersAdminPage() {
         )}
       </div>
 
-      {/* Teams */}
+      {/* Teams mit Löschen-Button */}
       <div className={cardClass}>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">Teams ({tFiltered.length})</h2>
@@ -852,16 +875,21 @@ export default function UsersAdminPage() {
                   <div className="font-medium">{t.name}</div>
                   <div className="text-xs text-gray-500">{t.memberCount} Mitglieder</div>
                 </div>
-                <button className="text-blue-600 hover:underline text-sm" onClick={() => setTeamModal({ open: true, team: t })}>
-                  Bearbeiten
-                </button>
+                <div className="flex gap-2">
+                  <button className="text-blue-600 hover:underline text-sm" onClick={() => setTeamModal({ open: true, team: t })}>
+                    Bearbeiten
+                  </button>
+                  <button className="text-red-600 hover:underline text-sm" onClick={() => deleteTeam(t.id)}>
+                    Löschen
+                  </button>
+                </div>
               </div>
             ))}
           </div>
         )}
       </div>
 
-      {/* Gruppen */}
+      {/* Gruppen mit Löschen-Button */}
       <div className={cardClass}>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">Gruppen ({gFiltered.length})</h2>
@@ -881,9 +909,14 @@ export default function UsersAdminPage() {
                   {g.description && <div className="text-xs text-gray-500">{g.description}</div>}
                   <div className="text-xs text-gray-500">{g.memberCount ?? 0} Mitglieder</div>
                 </div>
-                <button className="text-blue-600 hover:underline text-sm" onClick={() => setGroupModal({ open: true, group: g })}>
-                  Bearbeiten
-                </button>
+                <div className="flex gap-2">
+                  <button className="text-blue-600 hover:underline text-sm" onClick={() => setGroupModal({ open: true, group: g })}>
+                    Bearbeiten
+                  </button>
+                  <button className="text-red-600 hover:underline text-sm" onClick={() => deleteGroup(g.id)}>
+                    Löschen
+                  </button>
+                </div>
               </div>
             ))}
           </div>
