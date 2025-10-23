@@ -1,13 +1,10 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import * as XLSX from 'xlsx';
 
 type Member = { user_id: string; name: string; email?: string; employee_no?: string };
-type Team = { team_id: string; name: string };
 type ParsedSheet = { name: string; headers: string[]; rows: string[][] };
 type UploadResponse = {
   ok?: boolean;
@@ -20,15 +17,15 @@ type UploadResponse = {
 const deLongDateRx = /^[A-Za-zÄÖÜäöüß]+,\s*\d{1,2}\.\s*[A-Za-zÄÖÜäöüß]+\s+\d{4}\s*$/;
 const compactSpaces = (s: string) => String(s ?? '').trim().replace(/\s+/g, ' ');
 
-// ---- Normalisierung / Matching-Utils -------------------------------------------------
-const umlautMap: Record<string,string> = { 'ä':'ae','ö':'oe','ü':'ue','ß':'ss' };
+// --------- Normalisierung / Matching -------------------------------------------------
+const umlautMap: Record<string, string> = { ä: 'ae', ö: 'oe', ü: 'ue', ß: 'ss' };
 const normNameFull = (s: string) =>
   String(s ?? '')
     .trim()
     .replace(/\s+/g, ' ')
     .toLowerCase()
     .replace(/[äöüß]/g, c => umlautMap[c] || c)
-    .replace(/[^\p{L}\p{N}\s]/gu, ''); // nur Buchstaben/Ziffern/Space
+    .replace(/[^\p{L}\p{N}\s]/gu, '');
 
 const flipOrder = (full: string) => {
   const p = normNameFull(full).split(' ').filter(Boolean);
@@ -41,13 +38,13 @@ function similarity(a: string, b: string) {
   const m = s.length, n = t.length;
   if (!m && !n) return 1;
   if (!m || !n) return 0;
-  const dp = Array.from({ length: m + 1 }, (_, i) => new Array(n + 1).fill(0));
-  for (let i=0;i<=m;i++) dp[i][0] = i;
-  for (let j=0;j<=n;j++) dp[0][j] = j;
-  for (let i=1;i<=m;i++){
-    for (let j=1;j<=n;j++){
-      const cost = s[i-1] === t[j-1] ? 0 : 1;
-      dp[i][j] = Math.min(dp[i-1][j]+1, dp[i][j-1]+1, dp[i-1][j-1]+cost);
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = s[i - 1] === t[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
     }
   }
   const dist = dp[m][n];
@@ -88,7 +85,7 @@ function findUserForExcelName(
   const keyNorm = normNameFull(rawName);
   const keyFlip = flipOrder(rawName);
 
-  // 1) Overrides (email|user_id|employee_no oder auch name)
+  // 1) Overrides
   const overrideVal = overridesMap[keyNorm] || overridesMap[keyFlip];
   if (overrideVal) {
     const cand =
@@ -99,7 +96,7 @@ function findUserForExcelName(
     if (cand) return { user: cand, via: 'override' };
   }
 
-  // 2) Exakt (inkl. Flip, da im Index beide liegen)
+  // 2) Exakt (inkl. Flip)
   const exact = idx.byName.get(keyNorm) || idx.byName.get(keyFlip);
   if (exact) return { user: exact, via: 'name_exact' };
 
@@ -122,8 +119,7 @@ function findUserForExcelName(
   return { via: 'none' };
 }
 
-// --------------------------------------------------------------------------------------
-
+// --------- Excel Helpers --------------------------------------------------------------
 function normalizeHeader(h: string) {
   const map: Record<string, string> = { ä: 'ae', ö: 'oe', ü: 'ue', ß: 'ss' };
   return String(h || '')
@@ -146,13 +142,9 @@ async function excelToSheets(file: File): Promise<ParsedSheet[]> {
     if (!rows.length) continue;
 
     const headers = (rows[0] || []).map(v => String(v ?? '').trim());
-
-    // ✅ keine ungenutzten Variablen mehr:
     const body = rows.slice(1).map(r => {
       const arr = new Array<string>(headers.length);
-      for (let idx = 0; idx < headers.length; idx++) {
-        arr[idx] = String(r[idx] ?? '');
-      }
+      for (let idx = 0; idx < headers.length; idx++) arr[idx] = String(r[idx] ?? '');
       return arr;
     });
 
@@ -161,10 +153,10 @@ async function excelToSheets(file: File): Promise<ParsedSheet[]> {
   return out;
 }
 
+// --------- Component -----------------------------------------------------------------
 export default function RosterUploadPage() {
   // data
   const [members, setMembers] = useState<Member[]>([]);
-  
 
   // file/sheet
   const [file, setFile] = useState<File | null>(null);
@@ -179,9 +171,9 @@ export default function RosterUploadPage() {
   const [dateCols, setDateCols] = useState<string[]>([]);
 
   // assignments
-  const [assignments, setAssignments] = useState<Array<{ sheetName: string; user_id: string | ''; team_name?: string }>>([]);
+  const [assignments, setAssignments] = useState<Array<{ sheetName: string; user_id: string | '' }>>([]);
 
-  // overrides (normierter Name -> email|user_id|employee_no)
+  // overrides
   const [overrides, setOverrides] = useState<Record<string, string>>({});
   const [overridesText, setOverridesText] = useState<string>('');
 
@@ -190,29 +182,30 @@ export default function RosterUploadPage() {
   const [msg, setMsg] = useState<{ type: 'err' | 'ok'; text: string } | null>(null);
   const [jsonOut, setJsonOut] = useState('');
 
-  // parallel laden
+  // Load users
   useEffect(() => {
-  (async () => {
-    try {
-      const mRes = await fetch('/api/admin/users?page=1&pageSize=500', { cache: 'no-store' });
-      const mJson = await mRes.json().catch(() => null);
-      setMembers(
-        Array.isArray(mJson?.data)
-          ? mJson.data.map((u: any) => ({
-              user_id: String(u.user_id),
-              name: u.name ?? '',
-              email: u.email ?? '',
-              employee_no: u.employee_no ?? '',
-            }))
-          : [],
-      );
-    } catch {
-      /* noop */
-    }
-  })();
-}, []);
+    (async () => {
+      try {
+        const mRes = await fetch('/api/admin/users?page=1&pageSize=500', { cache: 'no-store' });
+        const mJson = await mRes.json().catch(() => null);
+        setMembers(
+          Array.isArray(mJson?.data)
+            ? mJson.data.map((u: any) => ({
+                user_id: String(u.user_id),
+                name: u.name ?? '',
+                email: u.email ?? '',
+                employee_no: u.employee_no ?? '',
+              }))
+            : [],
+        );
+      } catch {
+        /* noop */
+      }
+    })();
+  }, []);
 
-  async function onFileChange(f: File | null) {
+  // File change
+  const onFileChange = useCallback(async (f: File | null) => {
     setFile(f);
     setSheets([]);
     setMsg(null);
@@ -226,13 +219,10 @@ export default function RosterUploadPage() {
     const parsed = await excelToSheets(f);
     setSheets(parsed);
     setSheetIdx(0);
-  }
+  }, []);
 
   // memo helpers
-  const headerOptions = useMemo(
-    () => (cur?.headers || []).map(h => ({ value: h, label: h })),
-    [cur?.headers],
-  );
+  const headerOptions = useMemo(() => (cur?.headers || []).map(h => ({ value: h, label: h })), [cur?.headers]);
 
   const headerIndex = useMemo(() => {
     const map = new Map<string, number>();
@@ -242,12 +232,11 @@ export default function RosterUploadPage() {
 
   const userIdx = useMemo(() => buildUserIndexes(members), [members]);
 
-  // initial auto-map + assignments ableiten
+  // Auto-Mapping + Personenliste → Assignments
   const curKey = `${sheetIdx}|${cur?.headers.join('|') ?? ''}|${cur?.rows.length ?? 0}`;
   useEffect(() => {
     if (!cur) return;
 
-    // auto-map nur beim ersten Mal
     if (!firstNameCol && !lastNameCol && !roleCol && !dateCols.length) {
       const normalized = cur.headers.map(h => ({ raw: h, norm: normalizeHeader(h) }));
       const find = (keys: string[]) => normalized.find(h => keys.includes(h.norm))?.raw || '';
@@ -257,7 +246,6 @@ export default function RosterUploadPage() {
       setDateCols(cur.headers.filter(h => deLongDateRx.test(String(h).trim())));
     }
 
-    // Personen-Liste ableiten (unique, excel-Reihenfolge)
     const iFirst = headerIndex(firstNameCol);
     const iLast = headerIndex(lastNameCol);
     const seen = new Set<string>();
@@ -279,13 +267,9 @@ export default function RosterUploadPage() {
       const log: any[] = [];
       const next = people.map(p => {
         const keep = prevMap.get(normNameFull(p));
-        if (keep) return { sheetName: p, user_id: keep, team_name: _findTeamNameForUser(keep) };
+        if (keep) return { sheetName: p, user_id: keep };
         const hit = findUserForExcelName(p, userIdx, overrides, log);
-        return {
-          sheetName: p,
-          user_id: hit.user?.user_id || '',
-          team_name: hit.user ? _findTeamNameForUser(hit.user.user_id) : '',
-        };
+        return { sheetName: p, user_id: hit.user?.user_id || '' };
       });
       if (log.length) console.debug('[assignments-lookup]', log);
       return next;
@@ -293,14 +277,11 @@ export default function RosterUploadPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [curKey, firstNameCol, lastNameCol, roleCol, dateCols.length, members, overrides]);
 
-  function _findTeamNameForUser(_user_id: string): string {
-    return '';
-  }
-
-  function setAssign(name: string, user_id: string) {
+  const setAssign = useCallback((name: string, user_id: string) => {
     setAssignments(prev => prev.map(a => (a.sheetName === name ? { ...a, user_id } : a)));
-  }
+  }, []);
 
+  // Vorschau (nur Tageszellen)
   const previewRows = useMemo(() => {
     if (!cur) return [];
     const iFirst = headerIndex(firstNameCol);
@@ -315,17 +296,19 @@ export default function RosterUploadPage() {
     });
   }, [cur, firstNameCol, lastNameCol, dateCols, headerIndex]);
 
-  function auditMissingUsers(excelPeople: string[], idx: UserIndexes, overridesMap: Record<string,string>) {
+  // Audit
+  function auditMissingUsers(excelPeople: string[], idx: UserIndexes, overridesMap: Record<string, string>) {
     const missing: string[] = [];
     const log: any[] = [];
     for (const p of excelPeople) {
-      const hit = findUserForExcelName(p, idx, overridesMap, log, 0.95); // etwas strenger fürs Audit
+      const hit = findUserForExcelName(p, idx, overridesMap, log, 0.95);
       if (!hit.user) missing.push(normNameFull(p));
     }
     if (log.length) console.debug('[audit]', log);
-    return { missing, log };
+    return { missing };
   }
 
+  // Meldung bauen
   function buildCompactMessage(
     sheetName: string,
     sentRows: number,
@@ -334,8 +317,8 @@ export default function RosterUploadPage() {
     api: UploadResponse | null,
     missingCount: number
   ) {
-    const inserted = typeof api?.inserted === 'number' ? ` · inserted: ${api!.inserted}` : '';
-    const unresolvedCnt = Array.isArray(api?.unresolved) ? api!.unresolved!.length : 0;
+    const inserted = typeof api?.inserted === 'number' ? ` · inserted: ${api.inserted}` : '';
+    const unresolvedCnt = Array.isArray(api?.unresolved) ? api.unresolved.length : 0;
     const unresolved = unresolvedCnt ? ` · unresolved: ${unresolvedCnt}` : '';
     const statsPairs =
       api?.stats &&
@@ -344,96 +327,98 @@ export default function RosterUploadPage() {
         .join(', ');
     const tail = statsPairs ? ` (API: ${statsPairs})` : '';
     const audit = missingCount ? ` · Audit: ${missingCount} offen` : '';
-    // Beispiel: ✅ <Sheet> · 132 Zeilen · 18 Personen · 22 Tage · inserted:120 · unresolved:3 · Audit:2 offen (API: skipped:12)
     return `✅ ${sheetName} · ${sentRows} Zeilen · ${assignedUsers} Personen · ${dayCols} Tage${inserted}${unresolved}${audit}${tail}`;
   }
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setMsg(null);
-    setJsonOut('');
-    setBusy(true);
+  // Speichern (Submit)
+  const handleSave = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      setMsg(null);
+      setJsonOut('');
+      setBusy(true);
+      try {
+        if (!cur) throw new Error('Bitte Excel auswählen.');
+        if (!dateCols.length) throw new Error('Keine Datums-Spalten erkannt.');
+        if (!firstNameCol && !lastNameCol) throw new Error('Bitte Namensspalten zuordnen (Vorname/Nachname).');
 
-    try {
-      if (!cur) throw new Error('Bitte Excel auswählen.');
-      if (!dateCols.length) throw new Error('Keine Datums-Spalten erkannt.');
-      if (!firstNameCol && !lastNameCol) throw new Error('Bitte Namensspalten zuordnen (Vorname/Nachname).');
+        const iFirst = headerIndex(firstNameCol);
+        const iLast = headerIndex(lastNameCol);
+        const di = dateCols.map(h => headerIndex(h));
 
-      const iFirst = headerIndex(firstNameCol);
-      const iLast = headerIndex(lastNameCol);
-      const di = dateCols.map(h => headerIndex(h));
+        const assignedMap = new Map(assignments.filter(a => a.user_id).map(a => [normNameFull(a.sheetName), a.user_id]));
+        const filteredRows: string[][] = [];
+        const seen = new Set<string>();
 
-      const assignedMap = new Map(assignments.filter(a => a.user_id).map(a => [normNameFull(a.sheetName), a.user_id]));
-      const filteredRows: string[][] = [];
-      const seen = new Set<string>();
+        // De-Dupe pro Person + Datums-HEADER
+        for (const row of cur.rows) {
+          const first = iFirst >= 0 ? row[iFirst] : '';
+          const last = iLast >= 0 ? row[iLast] : '';
+          const basePerson = normNameFull(compactSpaces([first, last].filter(Boolean).join(' ')));
+          if (!assignedMap.has(basePerson)) continue;
 
-      // De-Dupe pro Person + Datums-HEADER (nicht Zellinhalt)
-      for (const row of cur.rows) {
-        const first = iFirst >= 0 ? row[iFirst] : '';
-        const last = iLast >= 0 ? row[iLast] : '';
-        const basePerson = normNameFull(compactSpaces([first, last].filter(Boolean).join(' ')));
-        if (!assignedMap.has(basePerson)) continue;
-
-        let take = false;
-        for (let k = 0; k < di.length; k++) {
-          const dIdx = di[k];
-          const dateHeader = dateCols[k];         // wichtig: Header als Tages-Ident
-          const cellVal = dIdx >= 0 ? row[dIdx] : '';
-          if (!cellVal) continue;
-          const key = `${basePerson}|${dateHeader}`;
-          if (!seen.has(key)) {
-            seen.add(key);
-            take = true;
+          let take = false;
+          for (let k = 0; k < di.length; k++) {
+            const dIdx = di[k];
+            const dateHeader = dateCols[k];
+            const cellVal = dIdx >= 0 ? row[dIdx] : '';
+            if (!cellVal) continue;
+            const key = `${basePerson}|${dateHeader}`;
+            if (!seen.has(key)) {
+              seen.add(key);
+              take = true;
+            }
           }
+          if (take) filteredRows.push(row);
         }
-        if (take) filteredRows.push(row);
-      }
 
-      // Audit: nur relevante Personen (die mindestens eine belegte Tageszelle hatten)
-      const relevantPeople = Array.from(
-        new Set(
-          filteredRows.map(r => {
-            const f = iFirst >= 0 ? r[iFirst] : '';
-            const l = iLast >= 0 ? r[iLast] : '';
-            return compactSpaces([f, l].filter(Boolean).join(' '));
+        // Audit nur für relevante Personen
+        const relevantPeople = Array.from(
+          new Set(
+            filteredRows.map(r => {
+              const f = iFirst >= 0 ? r[iFirst] : '';
+              const l = iLast >= 0 ? r[iLast] : '';
+              return compactSpaces([f, l].filter(Boolean).join(' '));
+            }),
+          ),
+        );
+        const { missing } = auditMissingUsers(relevantPeople, userIdx, overrides);
+        const missingCount = missing.length;
+
+        const res = await fetch('/api/teamhub/roster/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sheet_name: cur.name,
+            headers: cur.headers,
+            rows: filteredRows,
+            mapping: {
+              firstName: firstNameCol || undefined,
+              lastName: lastNameCol || undefined,
+              role: roleCol || undefined,
+              dateCols,
+            },
+            assignments,
           }),
-        ),
-      );
-      const { missing } = auditMissingUsers(relevantPeople, userIdx, overrides);
-      const missingCount = missing.length;
+        });
 
-      const res = await fetch('/api/teamhub/roster/upload', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sheet_name: cur.name,
-          headers: cur.headers,
-          rows: filteredRows,
-          mapping: {
-            firstName: firstNameCol || undefined,
-            lastName: lastNameCol || undefined,
-            role: roleCol || undefined,
-            dateCols,
-          },
-          assignments,
-        }),
-      });
-
-      const j: UploadResponse | null = await res.json().catch(() => null);
-      if (!res.ok) {
-        setMsg({ type: 'err', text: j?.error || `Fehler ${res.status}` });
-      } else {
-        const uniqueUsers = new Set(assignments.filter(a => a.user_id).map(a => a.user_id)).size;
-        const compact = buildCompactMessage(cur.name, filteredRows.length, uniqueUsers, dateCols.length, j, missingCount);
-        setMsg({ type: 'ok', text: compact });
-        setJsonOut(JSON.stringify(j, null, 2));
+        const j: UploadResponse | null = await res.json().catch(() => null);
+        if (!res.ok) {
+          setMsg({ type: 'err', text: j?.error || `Fehler ${res.status}` });
+        } else {
+          const uniqueUsers = new Set(assignments.filter(a => a.user_id).map(a => a.user_id)).size;
+          const compact = buildCompactMessage(cur.name, filteredRows.length, uniqueUsers, dateCols.length, j, missingCount);
+          setMsg({ type: 'ok', text: compact });
+          setJsonOut(JSON.stringify(j, null, 2));
+        }
+      } catch (err: any) {
+        setMsg({ type: 'err', text: String(err?.message || err) });
+      } finally {
+        setBusy(false);
       }
-    } catch (e: any) {
-      setMsg({ type: 'err', text: String(e?.message || e) });
-    } finally {
-      setBusy(false);
-    }
-  }
+    },
+    [cur, dateCols, firstNameCol, lastNameCol, headerIndex, assignments, userIdx, overrides, roleCol],
+  );
 
   return (
     <div className="space-y-6">
@@ -474,6 +459,7 @@ export default function RosterUploadPage() {
             <MapSelect label="Vorname" value={firstNameCol} onChange={setFirstNameCol} options={headerOptions} />
             <MapSelect label="Aufgabe/Rolle" value={roleCol} onChange={setRoleCol} options={headerOptions} />
           </div>
+
           <div>
             <div className="text-sm font-medium mb-1">Datums-Spalten</div>
             <div className="flex flex-wrap gap-2">
@@ -499,11 +485,12 @@ export default function RosterUploadPage() {
                 );
               })}
             </div>
+            <div className="text-xs text-gray-500 mt-1">{dateCols.length} ausgewählt</div>
           </div>
 
           {/* Overrides (optional) */}
           <details className="max-w-3xl">
-            <summary className="cursor-pointer text-sm font-medium">Overrides (JSON) – Sonderfälle abbilden</summary>
+            <summary className="cursor-pointer text-sm font-medium">Overrides (JSON) – Sonderfälle</summary>
             <div className="mt-2 space-y-2">
               <textarea
                 className="w-full border rounded p-2 text-xs font-mono"
@@ -514,16 +501,16 @@ export default function RosterUploadPage() {
                 onBlur={() => {
                   try {
                     const obj = overridesText ? JSON.parse(overridesText) : {};
-                    if (obj && typeof obj === 'object') setOverrides(obj as Record<string,string>);
+                    if (obj && typeof obj === 'object') setOverrides(obj as Record<string, string>);
                     setMsg(m => (m?.type === 'err' ? null : m));
-                  } catch (err:any) {
+                  } catch (err: any) {
                     setMsg({ type: 'err', text: `Overrides-JSON fehlerhaft: ${String(err.message || err)}` });
                   }
                 }}
               />
               <div className="text-xs text-gray-500">
-                Schlüssel sind <i>normalisierte</i> Namen (automatisch toleriert), Werte können <code>email</code>,{' '}
-                <code>user_id</code>, <code>employee_no</code> oder auch ein eindeutiger Name sein.
+                Schlüssel sind normalisierte Namen (Toleranz aktiv); Werte: <code>email</code>, <code>user_id</code>,{' '}
+                <code>employee_no</code> oder eindeutiger Name.
               </div>
             </div>
           </details>
@@ -532,14 +519,12 @@ export default function RosterUploadPage() {
 
       {cur && (
         <div className="max-w-3xl space-y-2">
-          <div className="text-sm font-medium">Mitarbeiter-Zuordnung (Excel → Benutzer im System)</div>
+          <div className="text-sm font-medium">Mitarbeiter-Zuordnung (Excel → Benutzer)</div>
           {assignments.length === 0 && <div className="text-xs text-gray-500">Keine Personen gefunden.</div>}
           <ul className="divide-y border rounded bg-white">
             {assignments.map(a => (
               <li key={a.sheetName} className="p-2 flex items-center gap-3">
-                <div className="min-w-[220px] text-sm">
-                  {a.sheetName} {a.team_name && <span className="text-gray-500 ml-2">({a.team_name})</span>}
-                </div>
+                <div className="min-w-[220px] text-sm">{a.sheetName}</div>
                 <select
                   value={a.user_id}
                   onChange={e => setAssign(a.sheetName, e.target.value)}
@@ -556,22 +541,27 @@ export default function RosterUploadPage() {
             ))}
           </ul>
           <div className="text-xs text-gray-500">
-            Tipp: Automatisch zugeordnet via ID/Email/Personalnr oder – falls nicht vorhanden – per Name (inkl. Flip & Fuzzy).
+            Auto-Zuordnung via ID/Email/Personalnr – sonst Name (inkl. Flip & Fuzzy).
           </div>
         </div>
       )}
 
-      <form onSubmit={submit} className="space-y-2 max-w-xl">
+      <form onSubmit={handleSave} className="space-y-2 max-w-xl">
         {msg && (
           <div className={`text-sm ${msg.type === 'err' ? 'text-red-600' : 'text-green-700'}`}>{msg.text}</div>
         )}
-        <button
-          type="submit"
-          className="px-3 py-1.5 rounded bg-blue-600 text-white disabled:opacity-70"
-          disabled={busy || !cur || !dateCols.length}
-        >
-          {busy ? 'Hochladen…' : 'Hochladen'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="submit"
+            className="px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-70"
+            disabled={busy || !cur || !dateCols.length}
+          >
+            {busy ? 'Speichern…' : 'Speichern'}
+          </button>
+          <span className="text-xs text-gray-500">
+            {assignments.filter(a => a.user_id).length} von {assignments.length} Personen zugeordnet
+          </span>
+        </div>
       </form>
 
       {jsonOut && (

@@ -178,8 +178,8 @@ export async function POST(req: NextRequest){
 
     if (!out.length) return json({ ok:false, error:'no_parsed_rows' }, 400);
 
-    // Hauptinsert mit Resolution: assignment -> app_users -> team_memberships(active)
-    const inserted = await sql/*sql*/`
+// --- INSERT ---------------------------------------------------------------
+const inserted = await sql/*sql*/`
 WITH src AS (
   SELECT * FROM jsonb_to_recordset(${sqlJson(out)}) AS r(
     roster_date     text,
@@ -193,7 +193,6 @@ WITH src AS (
     cross_midnight  boolean
   )
 ),
--- assignments (vom Frontend) als Map: normalized sheetName -> user_id
 assign_map AS (
   SELECT
     regexp_replace(lower(a.sheetName), '\\s+', ' ', 'g') AS sheet_name_norm,
@@ -204,14 +203,12 @@ assign_map AS (
   )
   WHERE a.user_id IS NOT NULL
 ),
--- employee_name normalisieren für sauberes Matching
 src_norm AS (
   SELECT
     s.*,
     regexp_replace(lower(s.employee_name), '\\s+', ' ', 'g') AS employee_name_norm
   FROM src s
 ),
--- user_id auflösen: assignments bevorzugt, sonst exakter Namensmatch in aktiven app_users
 resolved_user AS (
   SELECT
     sn.*,
@@ -223,44 +220,44 @@ resolved_user AS (
     ON au.active = true
    AND regexp_replace(lower(au.name), '\\s+', ' ', 'g') = sn.employee_name_norm
 ),
--- team_id über aktive Membership bestimmen
-resolved_team AS (
+-- NEU: team_id kommt direkt aus app_users (Primärteam)
+resolved_primary AS (
   SELECT
     ru.*,
-    mem.team_id
+    au2.team_id
   FROM resolved_user ru
-  LEFT JOIN public.team_memberships mem
-    ON mem.user_id = ru.user_id
-   AND mem.active = true
+  LEFT JOIN public.app_users au2
+    ON au2.user_id = ru.user_id
+   AND au2.active  = true
 )
 INSERT INTO public.team_roster (
   team_id, roster_date, start_time, end_time,
   employee_name, user_id, role, status, raw_cell, created_by
 )
 SELECT
-  rt.team_id,
-  rt.roster_date::date,
-  CASE WHEN rt.start_time IS NOT NULL THEN rt.start_time::time END,
-  CASE WHEN rt.end_time   IS NOT NULL THEN rt.end_time::time END,
-  rt.employee_name,
-  rt.user_id,
-  rt.role,
-  rt.status,
-  rt.raw_cell,
-  rt.created_by
-FROM resolved_team rt
-WHERE rt.team_id IS NOT NULL
+  rp.team_id,
+  rp.roster_date::date,
+  CASE WHEN rp.start_time IS NOT NULL THEN rp.start_time::time END,
+  CASE WHEN rp.end_time   IS NOT NULL THEN rp.end_time::time END,
+  rp.employee_name,
+  rp.user_id,
+  rp.role,
+  rp.status,
+  rp.raw_cell,
+  rp.created_by
+FROM resolved_primary rp
+WHERE rp.team_id IS NOT NULL
   AND NOT EXISTS (
     SELECT 1 FROM public.team_roster tr
-    WHERE tr.team_id = rt.team_id
-      AND tr.roster_date = rt.roster_date::date
-      AND tr.employee_name = rt.employee_name
+    WHERE tr.team_id = rp.team_id
+      AND tr.roster_date = rp.roster_date::date
+      AND tr.employee_name = rp.employee_name
   )
 RETURNING id;
-    `;
+`;
 
-    // Unaufgelöste Zeilen (für UI-Rückmeldung)
-    const unresolved = await sql/*sql*/`
+// --- UNRESOLVED -----------------------------------------------------------
+const unresolved = await sql/*sql*/`
 WITH src AS (
   SELECT * FROM jsonb_to_recordset(${sqlJson(out)}) AS r(
     roster_date     text,
@@ -301,22 +298,23 @@ resolved_user AS (
     ON au.active = true
    AND regexp_replace(lower(au.name), '\\s+', ' ', 'g') = sn.employee_name_norm
 ),
-resolved_team AS (
+resolved_primary AS (
   SELECT
     ru.*,
-    mem.team_id
+    au2.team_id
   FROM resolved_user ru
-  LEFT JOIN public.team_memberships mem
-    ON mem.user_id = ru.user_id
-   AND mem.active = true
+  LEFT JOIN public.app_users au2
+    ON au2.user_id = ru.user_id
+   AND au2.active  = true
 )
 SELECT
   employee_name,
-  (user_id IS NULL)                                  AS reason_no_user,
-  (user_id IS NOT NULL AND team_id IS NULL)          AS reason_no_active_team
-FROM resolved_team
+  (user_id IS NULL)                  AS reason_no_user,
+  (user_id IS NOT NULL AND team_id IS NULL) AS reason_no_primary_team
+FROM resolved_primary
 WHERE team_id IS NULL;
-    `;
+`;
+
 
     return json({
       ok: true,
