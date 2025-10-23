@@ -129,7 +129,7 @@ export default function RosterUploadPage() {
     for (const row of cur.rows) {
       const first = iFirst >= 0 ? row[iFirst] : '';
       const last  = iLast  >= 0 ? row[iLast]  : '';
-      const person = compactSpaces([last, first].filter(Boolean).join(' '));
+      const person = compactSpaces([first, last].filter(Boolean).join(' '));
       if (!person) continue;
       const key = normName(person);
       if (!peopleSeen.has(key)) { peopleSeen.add(key); people.push(person); }
@@ -172,7 +172,7 @@ export default function RosterUploadPage() {
     return cur.rows.slice(0, 20).map(r => {
       const first = iFirst >= 0 ? r[iFirst] : '';
       const last  = iLast  >= 0 ? r[iLast]  : '';
-      const person = compactSpaces([last, first].filter(Boolean).join(' '));
+      const person = compactSpaces([first, last].filter(Boolean).join(' '));
       const cols = di.map(i => i>=0 ? String(r[i] ?? '') : '');
       return { person, cols };
     });
@@ -184,7 +184,7 @@ export default function RosterUploadPage() {
     return rows.filter(row => {
       const first = iFirst >= 0 ? row[iFirst] : '';
       const last  = iLast  >= 0 ? row[iLast] : '';
-      const basePerson = normName(compactSpaces([last, first].filter(Boolean).join(' ')));
+      const basePerson = normName(compactSpaces([first, last].filter(Boolean).join(' ')));
       let isUnique = false;
       for (const dIdx of di) {
         const date = dIdx >= 0 ? row[dIdx] : '';
@@ -279,8 +279,8 @@ export default function RosterUploadPage() {
         <div className="max-w-4xl space-y-3">
           <div className="text-sm font-medium">Spalten-Zuordnung</div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            <MapSelect label="Vorname"     value={lastNameCol}  onChange={setLastNameCol}  options={headerOptions} />
-            <MapSelect label="Nachname"      value={firstNameCol} onChange={setFirstNameCol} options={headerOptions} />
+            <MapSelect label="Nachname"     value={lastNameCol}  onChange={setLastNameCol}  options={headerOptions} />
+            <MapSelect label="Vorname"      value={firstNameCol} onChange={setFirstNameCol} options={headerOptions} />
             <MapSelect label="Aufgabe/Rolle" value={roleCol}     onChange={setRoleCol}      options={headerOptions} />
           </div>
 
