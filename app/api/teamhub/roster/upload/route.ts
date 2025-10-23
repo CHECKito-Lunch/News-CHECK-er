@@ -25,7 +25,6 @@ type UploadBody = {
   assignments: Array<{ sheetName: string; user_id: string|null }>;
 };
 
-/* ---------- Helpers: Header "Mittwoch, 1. Oktober 2025" -> YYYY-MM-DD ---------- */
 const DE_MONTHS: Record<string, number> = {
   januar:1, februar:2, märz:3, maerz:3, april:4, mai:5, juni:6, juli:7,
   august:8, september:9, oktober:10, november:11, dezember:12
@@ -91,12 +90,10 @@ export async function POST(req: NextRequest){
   try {
     const me = await getUserFromCookies().catch(()=>null);
     if (!me) return json({ ok:false, error:'unauthorized' }, 401);
-    // Teamleiter und Admins dürfen immer!
     if (me.role !== 'teamleiter' && me.role !== 'admin') {
       return json({ ok:false, error:'forbidden' }, 403);
     }
 
-    // Body als JSON
     const body = await req.json() as UploadBody;
     const teamId = Number(body?.team_id ?? NaN);
     const headers = Array.isArray(body?.headers) ? body.headers : [];
@@ -108,14 +105,23 @@ export async function POST(req: NextRequest){
     if (!headers.length || !rows.length) return json({ ok:false, error:'no_rows' }, 400);
     if (!mapping?.dateCols?.length) return json({ ok:false, error:'no_date_columns' }, 400);
 
-    // Name→user_id Lookuptabelle (aus Dropdown)
-    const nameToUser = new Map<string,string>(); // key = normalized sheet name
+    // Prüfen, ob User aktives Mitglied im Team ist oder Admin
+    const membership = await sql<{active:boolean}[]>/*sql*/`
+      select tm.active from public.team_memberships tm
+      where tm.team_id = ${teamId}::bigint
+        and tm.user_id = ${me.user_id}::uuid
+      limit 1
+    `;
+    if (!membership?.[0]?.active && me.role !== 'admin') {
+      return json({ ok:false, error:'forbidden' }, 403);
+    }
+
+    const nameToUser = new Map<string,string>();
     for (const a of assigns) {
       const k = compactSpaces(String(a.sheetName||'').toLowerCase());
       if (a.user_id) nameToUser.set(k, a.user_id);
     }
 
-    // Zielrows bauen
     type Out = {
       team_id: number;
       roster_date: string;
@@ -135,20 +141,28 @@ export async function POST(req: NextRequest){
       const first = pick(headers, row, mapping.firstName);
       const last  = pick(headers, row, mapping.lastName);
       const full  = pick(headers, row, mapping.fullName);
+
       const sheetName = full
         ? compactSpaces(String(full))
         : compactSpaces([last, first].filter(Boolean).join(' '));
+
       if (!sheetName) continue;
+
       const role = pick<string>(headers, row, mapping.role);
+
       for (const col of mapping.dateCols) {
         const dateISO = parseGermanLongDate(col);
         if (!dateISO) continue;
+
         const rawCell = pick<string>(headers, row, col) ?? '';
         if (!rawCell) continue;
+
         const parsed = parseCell(rawCell);
         if (!parsed) continue;
+
         const normKey = sheetName.toLowerCase();
         const user_id = nameToUser.get(normKey) ?? null;
+
         if ('start_time' in parsed && parsed.start_time && parsed.end_time) {
           out.push({
             team_id: teamId,
