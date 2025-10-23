@@ -31,8 +31,8 @@ type ParsedRow = {
 
 type ExistingRow = {
   id: number;
-  ts?: string | null;                  // optional Alias
-  feedback_at: string;                 // YYYY-MM-DD
+  ts?: string | null;
+  feedback_at: string;
   channel: string | null;
   rating_overall: number | null;
   rating_friend: number | null;
@@ -56,6 +56,73 @@ const buildAgentKey = (r: ParsedRow) => {
   const fallback = [r.agent_first, r.agent_last].filter(Boolean).join(' ').trim();
   return normName(r.agent_name || fallback) || '';
 };
+
+/**
+ * 🔥 Intelligentes Name-Matching
+ */
+function normalizeNameForMatching(name: string): string[] {
+  const clean = name.trim().replace(/\s+/g, ' ');
+  const parts = clean.split(' ');
+  const variants = new Set<string>();
+  
+  variants.add(clean.toLowerCase());
+  
+  if (parts.length >= 2) {
+    variants.add(parts.reverse().join(' ').toLowerCase());
+    parts.reverse();
+  }
+  
+  const wordSet = parts.map(p => p.toLowerCase()).join('|');
+  variants.add(wordSet);
+  
+  return Array.from(variants);
+}
+
+function namesMatch(name1: string, name2: string): boolean {
+  const variants1 = normalizeNameForMatching(name1);
+  const variants2 = normalizeNameForMatching(name2);
+  
+  for (const v1 of variants1) {
+    for (const v2 of variants2) {
+      if (v1 === v2) return true;
+    }
+  }
+  
+  const words1 = name1.toLowerCase().split(/\s+/).filter(w => w.length > 1);
+  const words2 = name2.toLowerCase().split(/\s+/).filter(w => w.length > 1);
+  const matches = words1.filter(w => words2.includes(w));
+  
+  return matches.length >= Math.min(2, Math.min(words1.length, words2.length));
+}
+
+/**
+ * 🔥 Auto-Matching: Findet passende User-IDs für CSV-Namen
+ */
+function autoMatchAgents(
+  agents: { key: string; label: string; count: number }[], 
+  users: User[]
+): Record<string, string> {
+  const matched: Record<string, string> = {};
+  
+  for (const agent of agents) {
+    const csvName = agent.label || agent.key;
+    if (!csvName) continue;
+
+    const match = users.find(u => {
+      const userName = u.name || u.email || '';
+      return namesMatch(csvName, userName);
+    });
+
+    if (match) {
+      matched[agent.key] = match.id;
+      console.log(`[Feedback] Auto-matched: "${csvName}" -> "${match.name || match.email}" (${match.id})`);
+    } else {
+      console.log(`[Feedback] No match found for: "${csvName}"`);
+    }
+  }
+
+  return matched;
+}
 
 const parseTsToMs = (ts?: string | null, fallbackDate?: string) => {
   const s = (ts ?? fallbackDate ?? '').trim();
@@ -81,39 +148,30 @@ const parseTsToMs = (ts?: string | null, fallbackDate?: string) => {
 =========================== */
 export default function AdminFeedbackPage(){
   const [users,setUsers]=useState<User[]>([]);
-  const [assignMode,setAssignMode]=useState<'auto'|'fixed'>('auto'); // 'auto' = manuelle Zuordnung pro Berater
+  const [assignMode,setAssignMode]=useState<'auto'|'fixed'>('auto');
 
-  // Import: fixed target (alle Zeilen auf einen Mitarbeiter)
   const [fixedUserId,setFixedUserId]=useState('');
-
-  // Rechts: bestehende Feedbacks
   const [viewUserId,setViewUserId]=useState('');
   const [tab,setTab]=useState<'upload'|'existing'>('upload');
 
-  // Upload-Vorschau
   const [rows,setRows]=useState<ParsedRow[]>([]);
   const [loading,setLoading]=useState(false);
   const [saving,setSaving]=useState(false);
   const [dropDupes,setDropDupes]=useState(true);
 
-  // NEU: Auswahl einzelner CSV-Zeilen für Teil-Upload
   const [selectedIdx, setSelectedIdx] = useState<Set<number>>(new Set());
 
-  // Bestehende
   const [existing,setExisting]=useState<ExistingRow[]>([]);
   const [loadingExisting,setLoadingExisting]=useState(false);
 
-  // Modal
   const [openId,setOpenId]=useState<number|null>(null);
   const openIndex = useMemo(()=> openId ? existing.findIndex(x=>x.id===openId) : -1,[openId, existing]);
   const openItem = openIndex>=0 ? existing[openIndex] : null;
   const [modalDraft,setModalDraft]=useState<Partial<ExistingRow>>({});
   const [savingModal,setSavingModal]=useState(false);
 
-  // Manuelles Agent-Mapping: erkannter Name-Key → userId (leer = noch nicht zugeordnet)
   const [agentMap, setAgentMap] = useState<Record<string, string>>({});
 
-  // schneller Zugriff id→User
   const usersById = useMemo(()=> new Map(users.map(u=>[u.id, u])), [users]);
 
   /* ---------- Nutzerliste ---------- */
@@ -132,12 +190,10 @@ export default function AdminFeedbackPage(){
     }catch{}
   })();},[]);
 
-  /* ---------- Rechts: Auswahl schaltet auf „existing“ ---------- */
   useEffect(()=>{
     if (viewUserId) setTab('existing');
   },[viewUserId]);
 
-  /* ---------- Bestehende laden ---------- */
   useEffect(()=>{
     if (!viewUserId || tab!=='existing') return;
     (async ()=>{
@@ -148,7 +204,6 @@ export default function AdminFeedbackPage(){
         const items: ExistingRow[] = Array.isArray(j?.items) ? j.items : [];
         items.sort((a,b)=> parseTsToMs(b.ts, b.feedback_at) - parseTsToMs(a.ts, a.feedback_at));
         setExisting(items);
-        // kein Auto-Open – Modal bleibt zu, bis man in der Liste klickt
         setOpenId(null);
         setModalDraft({});
       } finally {
@@ -196,20 +251,28 @@ export default function AdminFeedbackPage(){
           setRows(safe);
           setTab('upload');
 
-          // Auswahl initial: ALLE markieren
           setSelectedIdx(new Set(safe.map((_,i)=> i)));
 
-          // erkannte Agenten sammeln & Mapping leeren
-          const unique = new Map<string,string>(); // key -> label
+          // 🔥 Erkannte Agenten sammeln
+          const unique = new Map<string,string>();
           for (const r of safe) {
             const key = buildAgentKey(r);
             if (!key) continue;
             const label = (r.agent_name || [r.agent_first, r.agent_last].filter(Boolean).join(' ').trim() || '').trim();
             if (!unique.has(key)) unique.set(key, label || key);
           }
-          const emptyMap: Record<string,string> = {};
-          unique.forEach((_label, key)=>{ emptyMap[key] = ''; });
-          setAgentMap(emptyMap);
+          
+          const agentSummary = Array.from(unique.entries()).map(([key, label]) => ({
+            key,
+            label,
+            count: safe.filter(r => buildAgentKey(r) === key).length
+          }));
+
+          // 🔥 Automatisches Matching
+          const autoMatched = autoMatchAgents(agentSummary, users);
+          setAgentMap(autoMatched);
+          
+          console.log('[Feedback] Auto-matched agents:', autoMatched);
         } else {
           alert(j?.error||'CSV konnte nicht gelesen werden');
         }
@@ -223,7 +286,6 @@ export default function AdminFeedbackPage(){
     i.click();
   }
 
-  /* ---------- Duplikate in Vorschau ---------- */
   const dupInfo = useMemo(()=>{
     const map = new Map<string, number[]>();
     rows.forEach((r, i)=>{
@@ -250,7 +312,6 @@ export default function AdminFeedbackPage(){
     return { dupIdx, duplicates: map };
   },[rows]);
 
-  // Übersicht erkannter Agenten (Label + Häufigkeit)
   const agentSummary = useMemo(()=>{
     const map = new Map<string,{label:string,count:number}>();
     for (const r of rows) {
@@ -264,7 +325,6 @@ export default function AdminFeedbackPage(){
     return Array.from(map.entries()).map(([key, v])=>({ key, label: v.label || key, count: v.count }));
   }, [rows]);
 
-  // Speichern erlaubt? → Jede erkannte Person MUSS gemappt sein
   const canSaveAuto = useMemo(()=>{
     if (assignMode !== 'auto') return true;
     for (const a of agentSummary) {
@@ -273,11 +333,10 @@ export default function AdminFeedbackPage(){
     return true;
   }, [assignMode, agentSummary, agentMap]);
 
-  // Sichtbare Auswahl-Helpers
   function isAllVisibleSelected(){
     let all=true, any=false;
     rows.forEach((_,i)=>{
-      if (dropDupes && dupInfo.dupIdx.has(i)) return; // "unsichtbar"
+      if (dropDupes && dupInfo.dupIdx.has(i)) return;
       const sel = selectedIdx.has(i);
       any = any || sel;
       all = all && sel;
@@ -294,33 +353,26 @@ export default function AdminFeedbackPage(){
     setSelectedIdx(next);
   }
 
-  // Rows für Save: nur ausgewählte & ggf. Duplikate raus
- // Rows für Save: nur ausgewählte & ggf. Duplikate raus
-const rowsForSave = useMemo(()=>{
-  const filtered = rows.filter((_,i)=> selectedIdx.has(i) && !(dropDupes && dupInfo.dupIdx.has(i)));
+  const rowsForSave = useMemo(()=>{
+    const filtered = rows.filter((_,i)=> selectedIdx.has(i) && !(dropDupes && dupInfo.dupIdx.has(i)));
 
-  return filtered
-    .filter(r=>{
-      if (assignMode === 'fixed') return true; // fixed: alles erlauben
-      const key = buildAgentKey(r);
-      // auto: NUR importieren, wenn ein Mapping existiert; sonst überspringen
-      return !!(key && agentMap[key]);
-    })
-    .map(r=>{
-      const key = buildAgentKey(r);
-      if (!key) return r;
-      const chosenId = agentMap[key];
-      if (!chosenId) return r;
-      const u = usersById.get(chosenId);
-      if (u?.name) return { ...r, agent_name: u.name, agent_first: null, agent_last: null } as ParsedRow;
-      return r;
-    });
-}, [rows, dropDupes, dupInfo, agentMap, usersById, selectedIdx, assignMode]);
+    return filtered
+      .filter(r=>{
+        if (assignMode === 'fixed') return true;
+        const key = buildAgentKey(r);
+        return !!(key && agentMap[key]);
+      })
+      .map(r=>{
+        const key = buildAgentKey(r);
+        if (!key) return r;
+        const chosenId = agentMap[key];
+        if (!chosenId) return r;
+        const u = usersById.get(chosenId);
+        if (u?.name) return { ...r, agent_name: u.name, agent_first: null, agent_last: null } as ParsedRow;
+        return r;
+      });
+  }, [rows, dropDupes, dupInfo, agentMap, usersById, selectedIdx, assignMode]);
 
-  /* ---------- Speichern ----------
-     fixed  → braucht fixedUserId
-     auto   → nutze eine beliebige der gewählten IDs für das Pflichtfeld user_id
-  --------------------------------- */
   async function save(){
     if (rowsForSave.length===0) return;
 
@@ -328,12 +380,11 @@ const rowsForSave = useMemo(()=>{
     if (assignMode==='fixed') {
       if (!fixedUserId) { alert('Bitte Mitarbeiter für feste Zuordnung wählen.'); return; }
       effectiveUserId = fixedUserId;
-} else {
- 
-const fallbackId = Object.values(agentMap).find(Boolean) || users[0]?.id;
-if (!fallbackId) { alert('Kein Benutzer vorhanden.'); return; }
-effectiveUserId = fallbackId;
-}
+    } else {
+      const fallbackId = Object.values(agentMap).find(Boolean) || users[0]?.id;
+      if (!fallbackId) { alert('Kein Benutzer vorhanden.'); return; }
+      effectiveUserId = fallbackId;
+    }
 
     setSaving(true);
     try{
@@ -362,7 +413,6 @@ effectiveUserId = fallbackId;
     }
   }
 
-  /* ---------- Modal öffnen/schließen + Paging ---------- */
   function openModal(id:number){
     const row = existing.find(x=>x.id===id);
     if (!row) return;
@@ -386,7 +436,6 @@ effectiveUserId = fallbackId;
     setOpenId(nxt.id);
   }
 
-  /* ---------- Modal speichern/löschen ---------- */
   async function saveModal(){
     if (!openId) return;
     setSavingModal(true);
@@ -428,9 +477,6 @@ effectiveUserId = fallbackId;
     }
   }
 
-  /* ===========================
-     UI
-  ============================ */
   const { all: allSelected } = isAllVisibleSelected();
 
   return (
@@ -444,7 +490,6 @@ effectiveUserId = fallbackId;
 
       <section className="rounded-2xl border border-gray-200 dark:border-gray-800 p-4 bg-white dark:bg-gray-900 space-y-4">
         <div className="grid gap-4 lg:grid-cols-2">
-          {/* Import-Einstellungen (links) */}
           <fieldset className="rounded-xl border border-gray-200 dark:border-gray-700 p-3">
             <legend className="px-1 text-sm text-gray-600">Wie möchtest du importieren?</legend>
 
@@ -480,18 +525,15 @@ effectiveUserId = fallbackId;
             </div>
           </fieldset>
 
-          {/* Rechts: bestehende Feedbacks */}
-          <fieldset className="rounded-XL border border-gray-200 dark:border-gray-700 p-3">
+          <fieldset className="rounded-xl border border-gray-200 dark:border-gray-700 p-3">
             <legend className="px-1 text-sm text-gray-600">Bestehende Feedbacks ansehen und bearbeiten</legend>
             <div className="grid gap-2">
               <UserSelectWithSearch users={users} value={viewUserId} onChange={setViewUserId} placeholder="– Mitarbeiter wählen –" />
-              <div className="inline-flex rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden self-start"></div>
-              <p className="text-xs text-gray-500">Klicke in der Liste auf einen Eintrag, um das Feedback zu bearbeiten.</p>
+              <p className="text-xs text-gray-500">🔥 Automatisches Name-Matching aktiv – Namen werden beim CSV-Upload automatisch erkannt!</p>
             </div>
           </fieldset>
         </div>
 
-        {/* Agent-Mapping Panel (nur bei CSV & manuellem Modus) */}
         {tab==='upload' && rows.length>0 && assignMode==='auto' && (
           <AgentMappingPanel
             agents={agentSummary}
@@ -501,7 +543,6 @@ effectiveUserId = fallbackId;
           />
         )}
 
-        {/* Upload-Vorschau */}
         {tab==='upload' && (
           <>
             {rows.length>0 ? (
@@ -613,16 +654,16 @@ effectiveUserId = fallbackId;
 
                 <div className="mt-3 flex justify-end">
                   <button
-  onClick={save}
-  disabled={
-    saving ||
-    rowsForSave.length === 0 ||
-    (assignMode === 'fixed' && !fixedUserId) // nur im fixed-Modus nötig
-  }
-  className="inline-flex items-center gap-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white px-4 py-2 text-sm"
->
-  {saving ? 'Speichere…' : `Speichern (${rowsForSave.length})`}
-</button>
+                    onClick={save}
+                    disabled={
+                      saving ||
+                      rowsForSave.length === 0 ||
+                      (assignMode === 'fixed' && !fixedUserId)
+                    }
+                    className="inline-flex items-center gap-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white px-4 py-2 text-sm"
+                  >
+                    {saving ? 'Speichere…' : `Speichern (${rowsForSave.length})`}
+                  </button>
                 </div>
               </>
             ) : (
@@ -631,10 +672,9 @@ effectiveUserId = fallbackId;
           </>
         )}
 
-        {/* Bestehende + Modal */}
         {tab==='existing' && (
           <>
-            {!viewUserId && <div className="text-sm text-amber-700">Bitte oben „Mitarbeiter wählen“.</div>}
+            {!viewUserId && <div className="text-sm text-amber-700">Bitte oben „Mitarbeiter wählen&quot;.</div>}
             {loadingExisting && <div className="text-sm text-gray-500">Lade…</div>}
             {!loadingExisting && viewUserId && existing.length===0 && (
               <div className="text-sm text-gray-500">Keine Feedbacks gefunden.</div>
@@ -784,7 +824,7 @@ effectiveUserId = fallbackId;
 }
 
 /* ===========================
-   Agent-Mapping Panel (nur manuell)
+   Agent-Mapping Panel
 =========================== */
 function AgentMappingPanel({
   agents, users, agentMap, setAgentMap
@@ -795,35 +835,46 @@ function AgentMappingPanel({
   setAgentMap: React.Dispatch<React.SetStateAction<Record<string, string>>>;
 }){
   if (agents.length === 0) return null;
+  
+  const matchedCount = Object.values(agentMap).filter(Boolean).length;
+  
   return (
     <section className="rounded-xl border border-gray-200 dark:border-gray-700 p-3 bg-gray-50/60 dark:bg-gray-800/30">
-      <div className="text-sm font-medium mb-2">Erkannte Bearbeiter in der CSV (bitte zuordnen)</div>
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-sm font-medium">
+          Erkannte Bearbeiter in der CSV
+          <span className="ml-2 text-xs text-gray-500">
+            ({matchedCount}/{agents.length} automatisch zugeordnet)
+          </span>
+        </div>
+      </div>
       <div className="overflow-auto">
         <table className="min-w-[760px] w-full text-sm">
           <thead className="bg-white/70 dark:bg-gray-900/40">
             <tr>
               <th className="text-left px-3 py-2">Name (CSV)</th>
               <th className="text-left px-3 py-2">Häufigkeit</th>
-              <th className="text-left px-3 py-2 w-[420px]">Zuordnung (optional, nicht ausgewählt wird übersprungen)</th>
+              <th className="text-left px-3 py-2 w-[420px]">Zuordnung</th>
             </tr>
           </thead>
           <tbody>
             {agents.map(a=>{
               const val = agentMap[a.key] ?? '';
+              const isAutoMatched = !!val;
               return (
-                <tr key={a.key} className="border-t border-gray-200 dark:border-gray-800">
-                  <td className="px-3 py-2">{a.label || '(leer)'}</td>
+                <tr key={a.key} className={`border-t border-gray-200 dark:border-gray-800 ${isAutoMatched ? 'bg-green-50/30 dark:bg-green-900/10' : ''}`}>
+                  <td className="px-3 py-2">
+                    {a.label || '(leer)'}
+                    {isAutoMatched && <span className="ml-2 text-xs text-green-600">✓ automatisch</span>}
+                  </td>
                   <td className="px-3 py-2">{a.count}</td>
                   <td className="px-3 py-2">
-                    <div className="flex items-center gap-2 w-full">
-                      <UserSelectWithSearch
-                        users={users}
-                        value={val}
-                        onChange={(v)=> setAgentMap(prev=>({ ...prev, [a.key]: v }))}
-                        placeholder="– Mitarbeiter wählen –"
-                      />
-                      
-                    </div>
+                    <UserSelectWithSearch
+                      users={users}
+                      value={val}
+                      onChange={(v)=> setAgentMap(prev=>({ ...prev, [a.key]: v }))}
+                      placeholder="– Mitarbeiter wählen –"
+                    />
                   </td>
                 </tr>
               );
@@ -839,7 +890,7 @@ function AgentMappingPanel({
 }
 
 /* ===========================
-   Kleine UI-Bausteine
+   UI Components
 =========================== */
 function UserSelect({ users, value, onChange, placeholder }:{
   users: User[]; value: string; onChange:(v:string)=>void; placeholder?:string;
@@ -860,7 +911,6 @@ function UserSelect({ users, value, onChange, placeholder }:{
   );
 }
 
-// NEU: Suchbare Variante
 function UserSelectWithSearch({ users, value, onChange, placeholder }:{
   users: User[]; value: string; onChange:(v:string)=>void; placeholder?:string;
 }){
@@ -1001,8 +1051,8 @@ function fixMojibake(s:string|null){
     .replace(/Ã¶/g,'ö').replace(/Ã–/g,'Ö')
     .replace(/Ã¼/g,'ü').replace(/Ãœ/g,'Ü')
     .replace(/ÃŸ/g,'ß')
-    .replace(/â€“/g,'–').replace(/â€”/g,'—')
-    .replace(/â€ž/g,'„').replace(/â€œ/g,'“')
+    .replace(/â€"/g,'–').replace(/â€"/g,'—')
+    .replace(/â€ž/g,'„').replace(/â€œ/g,'"')
     .replace(/Â·/g,'·').replace(/Â /g,' ')
     .replace(/â€¦/g,'…')
     .trim();

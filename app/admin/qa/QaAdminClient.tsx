@@ -9,15 +9,15 @@ type User = { id: string; name?: string|null; email?: string|null };
 
 // CSV → Parsed Row (rohe Werte aus Upload)
 type ParsedRow = {
-  ts?: string | null;              // Datum/Uhrzeit (z. B. 14.10.2025 09:30)
-  incident_type?: string | null;   // z. B. "Fehler", "Hinweis", "Rekla"
-  category?: string | null;        // z. B. "Angebot", "Beratung", "Sonstiges"
-  severity?: string | null;        // z. B. "low|medium|high" oder Score
-  description?: string | null;     // Freitext / Kommentar
-  booking_number?: string | null;  // optional, wird zu BO verlinkt
-  agent_first?: string | null;     // aus CSV
-  agent_last?: string | null;      // aus CSV
-  agent_name?: string | null;      // aus CSV (falls vorhanden)
+  ts?: string | null;
+  incident_type?: string | null;
+  category?: string | null;
+  severity?: string | null;
+  description?: string | null;
+  booking_number?: string | null;
+  agent_first?: string | null;
+  agent_last?: string | null;
+  agent_name?: string | null;
 };
 
 // Bereits gespeicherter Datensatz (vereinfacht)
@@ -35,10 +35,79 @@ type ExistingRow = {
 };
 
 const norm = (s?: string|null) => (s??'').toLowerCase().replace(/\s+/g,' ').trim();
+
 const buildAgentKey = (r: ParsedRow) => {
   const fallback = [r.agent_first, r.agent_last].filter(Boolean).join(' ').trim();
   return norm(r.agent_name || fallback) || '';
 };
+
+/**
+ * 🔥 Intelligentes Name-Matching (identisch zu den anderen Routen)
+ */
+function normalizeNameForMatching(name: string): string[] {
+  const clean = name.trim().replace(/\s+/g, ' ');
+  const parts = clean.split(' ');
+  const variants = new Set<string>();
+  
+  variants.add(clean.toLowerCase());
+  
+  if (parts.length >= 2) {
+    variants.add(parts.reverse().join(' ').toLowerCase());
+    parts.reverse();
+  }
+  
+  const wordSet = parts.map(p => p.toLowerCase()).join('|');
+  variants.add(wordSet);
+  
+  return Array.from(variants);
+}
+
+function namesMatch(name1: string, name2: string): boolean {
+  const variants1 = normalizeNameForMatching(name1);
+  const variants2 = normalizeNameForMatching(name2);
+  
+  for (const v1 of variants1) {
+    for (const v2 of variants2) {
+      if (v1 === v2) return true;
+    }
+  }
+  
+  const words1 = name1.toLowerCase().split(/\s+/).filter(w => w.length > 1);
+  const words2 = name2.toLowerCase().split(/\s+/).filter(w => w.length > 1);
+  const matches = words1.filter(w => words2.includes(w));
+  
+  return matches.length >= Math.min(2, Math.min(words1.length, words2.length));
+}
+
+/**
+ * 🔥 Auto-Matching: Findet passende User-IDs für CSV-Namen
+ */
+function autoMatchAgents(
+  agents: { key: string; label: string; count: number }[], 
+  users: User[]
+): Record<string, string> {
+  const matched: Record<string, string> = {};
+  
+  for (const agent of agents) {
+    const csvName = agent.label || agent.key;
+    if (!csvName) continue;
+
+    // Suche passenden User
+    const match = users.find(u => {
+      const userName = u.name || u.email || '';
+      return namesMatch(csvName, userName);
+    });
+
+    if (match) {
+      matched[agent.key] = match.id;
+      console.log(`[QA Import] Auto-matched: "${csvName}" -> "${match.name || match.email}" (${match.id})`);
+    } else {
+      console.log(`[QA Import] No match found for: "${csvName}"`);
+    }
+  }
+
+  return matched;
+}
 
 export default function AdminQAPage(){
   const [users, setUsers] = useState<User[]>([]);
@@ -51,7 +120,7 @@ export default function AdminQAPage(){
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const [agentMap, setAgentMap] = useState<Record<string, string>>({}); // erkannter Name → user_id
+  const [agentMap, setAgentMap] = useState<Record<string, string>>({});
 
   const usersById = useMemo(()=> new Map(users.map(u=>[u.id, u])), [users]);
 
@@ -60,7 +129,11 @@ export default function AdminQAPage(){
       const r = await fetch('/api/admin/users', { cache:'no-store' });
       const j = await r.json().catch(()=>({}));
       const data = Array.isArray(j?.data) ? j.data : [];
-      setUsers(data.map((u:any)=>({ id:String(u.user_id??u.id??''), name:u.name??null, email:u.email??null })));
+      setUsers(data.map((u:any)=>({ 
+        id: String(u.user_id ?? u.id ?? ''), 
+        name: u.name ?? null, 
+        email: u.email ?? null 
+      })));
     }catch{}
   })();},[]);
 
@@ -76,19 +149,30 @@ export default function AdminQAPage(){
         const j = await r.json().catch(()=>({ ok:false }));
         if (r.ok && j?.ok) {
           const parsed: ParsedRow[] = Array.isArray(j.rows) ? j.rows : [];
-          // Debug-Ausgabe , um zu sehen, was aus der API kommt:
-  console.log('parsed example row', Array.isArray(j.rows) ? j.rows[0] : j.rows);
+          console.log('parsed example row', Array.isArray(j.rows) ? j.rows[0] : j.rows);
+          
           setRows(parsed);
           setSelectedIdx(new Set(parsed.map((_,i)=>i)));
-          // erkannte Agenten sammeln
+          
+          // 🔥 Erkannte Agenten sammeln
           const unique = new Map<string,string>();
           for (const row of parsed) {
             const key = buildAgentKey(row); if (!key) continue;
             const label = (row.agent_name || [row.agent_first,row.agent_last].filter(Boolean).join(' ').trim() || '').trim();
             if (!unique.has(key)) unique.set(key, label || key);
           }
-          const empty: Record<string,string> = {}; unique.forEach((_v,k)=> empty[k] = '');
-          setAgentMap(empty);
+          
+          const agentSummary = Array.from(unique.entries()).map(([key, label]) => ({
+            key,
+            label,
+            count: parsed.filter(r => buildAgentKey(r) === key).length
+          }));
+
+          // 🔥 Automatisches Matching
+          const autoMatched = autoMatchAgents(agentSummary, users);
+          setAgentMap(autoMatched);
+          
+          console.log('[QA Import] Auto-matched agents:', autoMatched);
         } else {
           alert(j?.error || 'CSV konnte nicht gelesen werden');
         }
@@ -100,7 +184,15 @@ export default function AdminQAPage(){
   const dupInfo = useMemo(()=>{
     const map = new Map<string, number[]>();
     rows.forEach((r,i)=>{
-      const key = [norm(r.ts||''), norm(r.incident_type), norm(r.category), norm(r.severity), (r.description||'').trim(), (r.booking_number||'').trim(), buildAgentKey(r)].join('|');
+      const key = [
+        norm(r.ts||''), 
+        norm(r.incident_type), 
+        norm(r.category), 
+        norm(r.severity), 
+        (r.description||'').trim(), 
+        (r.booking_number||'').trim(), 
+        buildAgentKey(r)
+      ].join('|');
       const arr = map.get(key) ?? []; arr.push(i); map.set(key, arr);
     });
     const dupIdx = new Set<number>();
@@ -113,7 +205,10 @@ export default function AdminQAPage(){
     for (const r of rows) {
       const key = buildAgentKey(r); if (!key) continue;
       const label = (r.agent_name || [r.agent_first,r.agent_last].filter(Boolean).join(' ').trim() || '').trim();
-      const cur = map.get(key) ?? { label, count:0 }; cur.count++; cur.label = cur.label || label; map.set(key,cur);
+      const cur = map.get(key) ?? { label, count:0 }; 
+      cur.count++; 
+      cur.label = cur.label || label; 
+      map.set(key,cur);
     }
     return Array.from(map.entries()).map(([key,v])=>({ key, label: v.label || key, count: v.count }));
   },[rows]);
@@ -122,7 +217,8 @@ export default function AdminQAPage(){
     const filtered = rows.filter((_,i)=> selectedIdx.has(i) && !(dropDupes && dupInfo.dupIdx.has(i)));
     return filtered.filter(r=> assignMode==='fixed' ? true : !!(buildAgentKey(r) && agentMap[buildAgentKey(r)]) )
       .map(r=>{
-        const k = buildAgentKey(r); const chosenId = agentMap[k];
+        const k = buildAgentKey(r); 
+        const chosenId = agentMap[k];
         if (assignMode==='auto' && chosenId) {
           const u = usersById.get(chosenId);
           if (u?.name) return { ...r, agent_name: u.name, agent_first:null, agent_last:null } as ParsedRow;
@@ -185,6 +281,7 @@ export default function AdminQAPage(){
           <fieldset className="rounded-xl border border-gray-200 dark:border-gray-700 p-3">
             <legend className="px-1 text-sm text-gray-600">Hinweise</legend>
             <ul className="list-disc pl-5 text-sm text-gray-600 dark:text-gray-300 space-y-1">
+              <li>🔥 <strong>Automatisches Matching:</strong> Namen werden jetzt automatisch erkannt (Vor-/Nachname in beliebiger Reihenfolge).</li>
               <li>Namens-Erkennung: Spalten <code>agent_name</code> oder <code>agent_first/agent_last</code>.</li>
               <li>Duplikate werden optional entfernt (gleicher Timestamp/Typ/Kategorie/Text/Agent).</li>
               <li>BO-Link wird aus <code>booking_number</code> erstellt, sofern vorhanden.</li>
@@ -256,9 +353,20 @@ function AgentMapping({ agents, users, agentMap, setAgentMap }:{
   setAgentMap: React.Dispatch<React.SetStateAction<Record<string,string>>>;
 }){
   if (agents.length===0) return null;
+  
+  // 🔥 Zeige Matching-Status
+  const matchedCount = Object.values(agentMap).filter(Boolean).length;
+  
   return (
     <section className="rounded-xl border border-gray-200 dark:border-gray-700 p-3 bg-gray-50/60 dark:bg-gray-800/30">
-      <div className="text-sm font-medium mb-2">Erkannte Namen in der CSV (bitte zuordnen)</div>
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-sm font-medium">
+          Erkannte Namen in der CSV 
+          <span className="ml-2 text-xs text-gray-500">
+            ({matchedCount}/{agents.length} automatisch zugeordnet)
+          </span>
+        </div>
+      </div>
       <div className="overflow-auto">
         <table className="min-w-[760px] w-full text-sm">
           <thead className="bg-white/70 dark:bg-gray-900/40">
@@ -271,9 +379,13 @@ function AgentMapping({ agents, users, agentMap, setAgentMap }:{
           <tbody>
             {agents.map(a=>{
               const val = agentMap[a.key] ?? '';
+              const isAutoMatched = !!val;
               return (
-                <tr key={a.key} className="border-t border-gray-200 dark:border-gray-800">
-                  <td className="px-3 py-2">{a.label || '(leer)'}</td>
+                <tr key={a.key} className={`border-t border-gray-200 dark:border-gray-800 ${isAutoMatched ? 'bg-green-50/30 dark:bg-green-900/10' : ''}`}>
+                  <td className="px-3 py-2">
+                    {a.label || '(leer)'}
+                    {isAutoMatched && <span className="ml-2 text-xs text-green-600">✓ automatisch</span>}
+                  </td>
                   <td className="px-3 py-2">{a.count}</td>
                   <td className="px-3 py-2">
                     <UserSelect users={users} value={val} onChange={(v)=> setAgentMap(prev=>({ ...prev, [a.key]: v }))} placeholder="– Mitarbeiter wählen –" />
