@@ -5,9 +5,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
 
-type TeamRow = { team_id: string; name: string };
 type Member  = { user_id: string; name: string };
-
 type ParsedSheet = { name: string; headers: string[]; rows: string[][] };
 
 function normalizeHeader(h: string){
@@ -29,8 +27,8 @@ function excelToSheets(file: File): Promise<ParsedSheet[]> {
         for (const name of wb.SheetNames) {
           const ws = wb.Sheets[name];
           if (!ws) continue;
-          const aoa = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1, raw: true }) as any[];
-          const rows = (aoa || []).filter(r => Array.isArray(r) && r.length>0) as string[][];
+          const aoa = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1, raw: true }) as string[][];
+          const rows = (aoa || []).filter(r => Array.isArray(r) && r.length>0);
           if (!rows.length) continue;
           const headers = (rows[0] || []).map(v => String(v ?? '').trim());
           const body = rows.slice(1).map(r => headers.map((_,i)=>String(r[i] ?? '')));
@@ -48,48 +46,33 @@ const compactSpaces = (s: string) => s.trim().replace(/\s+/g, ' ');
 const normName = (s: string) => compactSpaces(s).toLowerCase();
 
 export default function RosterUploadPage() {
-  const [teams, setTeams] = useState<TeamRow[]>([]);
-  const [teamId, setTeamId] = useState<string>('');
+  const defaultTeamId = '1'; // ggf. dynamisch oder per UI
   const [members, setMembers] = useState<Member[]>([]);
-  const [membersLoadedFor, setMembersLoadedFor] = useState<string>('');
   const [file, setFile] = useState<File|null>(null);
   const [sheets, setSheets] = useState<ParsedSheet[]>([]);
   const [sheetIdx, setSheetIdx] = useState(0);
   const cur = sheets[sheetIdx];
 
-  // keine Vollname-Spalte mehr nötig!
   const [firstNameCol, setFirstNameCol] = useState('');
   const [lastNameCol,  setLastNameCol]  = useState('');
   const [roleCol,      setRoleCol]      = useState('');
   const [dateCols,     setDateCols]     = useState<string[]>([]);
-
-  // Excel-Name -> user_id (Dropdown)
-  const [assignments, setAssignments] = useState<Array<{sheetName:string; user_id:string|''}>>([]);
-
+  const [assignments, setAssignments]   = useState<Array<{sheetName:string; user_id:string|''}>>([]);
   const [busy, setBusy] = useState(false);
   const [err,  setErr]  = useState('');
   const [out,  setOut]  = useState('');
 
-  /* Teams laden */
-  useEffect(()=>{(async()=>{
-    const r = await fetch('/api/teamhub/my-teams', { cache:'no-store' });
-    const j = await r.json().catch(()=>null);
-    const arr: TeamRow[] = Array.isArray(j?.items) ? j.items : [];
-    setTeams(arr);
-    if (!teamId && arr.length) setTeamId(arr[0].team_id);
-  })()},[]);
+  useEffect(() => {
+    (async()=>{
+      const r = await fetch('/api/admin/users?page=1&pageSize=500', { cache:'no-store' });
+      const j = await r.json().catch(()=>null);
+      const arr: Member[] = Array.isArray(j?.data)
+        ? j.data.map((u: any) => ({ user_id: String(u.user_id), name: u.name ?? '' }))
+        : [];
+      setMembers(arr);
+    })();
+  }, []);
 
-  /* Team-Mitglieder laden */
-  useEffect(()=>{(async()=>{
-    if (!teamId) { setMembers([]); setMembersLoadedFor(''); return; }
-    const r = await fetch(`/api/teamhub/members?team_id=${encodeURIComponent(teamId)}`, { cache:'no-store' });
-    const j = await r.json().catch(()=>null);
-    const arr: Member[] = Array.isArray(j?.members) ? j.members : [];
-    setMembers(arr);
-    setMembersLoadedFor(teamId);
-  })()},[teamId]);
-
-  /* Datei einlesen */
   async function onFileChange(f: File|null){
     setFile(f);
     setSheets([]);
@@ -104,11 +87,13 @@ export default function RosterUploadPage() {
     setSheetIdx(0);
   }
 
-  /* Auto-Guess / Neuaufbau bei Sheet- oder Mapping-Änderungen */
+  // Dependency extraction for useEffect
+  const curHeaders = cur?.headers.join('|') ?? '';
+  const curRowsLength = cur?.rows.length ?? 0;
+  const membersList = members.map(m=>m.user_id).join(',');
+
   useEffect(()=>{
     if (!cur) return;
-
-    // Heuristik für Spaltenvorschläge
     if (!firstNameCol && !lastNameCol && !roleCol && !dateCols.length) {
       const norm = cur.headers.map(h=>({ raw:h, norm: normalizeHeader(h) }));
       const find = (keys: string[]) => norm.find(h=>keys.includes(h.norm))?.raw || '';
@@ -119,7 +104,6 @@ export default function RosterUploadPage() {
       setDateCols(dCols);
     }
 
-    // Personenliste auf Basis Zuordnung
     const idx = (label:string) => cur.headers.indexOf(label);
     const peopleSeen = new Set<string>();
     const people: string[] = [];
@@ -135,7 +119,6 @@ export default function RosterUploadPage() {
       if (!peopleSeen.has(key)) { peopleSeen.add(key); people.push(person); }
     }
 
-    // Assignments neu bauen
     setAssignments(prev=>{
       const prevMap = new Map(prev.map(a=>[normName(a.sheetName), a.user_id]));
       const next = people.map(p=>{
@@ -149,20 +132,16 @@ export default function RosterUploadPage() {
 
   }, [
     sheetIdx,
-    cur?.headers.join('|'),
-    cur?.rows.length,
-    firstNameCol, lastNameCol, roleCol,
-    members.map(m=>m.user_id).join(',')
+    curHeaders,
+    curRowsLength,
+    firstNameCol, lastNameCol, roleCol, dateCols.length, membersList
   ]);
 
-  /* Helpers */
   const headerOptions = useMemo(()=> (cur?.headers||[]).map(h=>({value:h,label:h})), [cur?.headers]);
-
   function setAssign(name:string, user_id:string){
     setAssignments(prev => prev.map(a => a.sheetName===name ? { ...a, user_id } : a));
   }
 
-  // Vorschau: erste 20 Zeilen, nur die gewählten Tages-Spalten
   const previewRows = useMemo(()=>{
     if (!cur) return [];
     const idx = (label:string) => cur.headers.indexOf(label);
@@ -178,7 +157,6 @@ export default function RosterUploadPage() {
     });
   }, [cur, firstNameCol, lastNameCol, dateCols]);
 
-  /* Dubletten-Filter */
   function filterDuplicates(rows: string[][], iFirst: number, iLast: number, di: number[], teamId: string) {
     const seen = new Set<string>();
     return rows.filter(row => {
@@ -195,20 +173,17 @@ export default function RosterUploadPage() {
     });
   }
 
-  /* Submit */
   async function submit(e:React.FormEvent){
     e.preventDefault();
     setErr(''); setOut('');
-    if (!teamId) { setErr('Bitte Team wählen.'); return; }
+    const teamId = defaultTeamId;
     if (!cur) { setErr('Bitte Excel auswählen.'); return; }
     if (!dateCols.length) { setErr('Keine Datums-Spalten erkannt.'); return; }
     if (!firstNameCol && !lastNameCol) {
       setErr('Bitte Namensspalten zuordnen (Vorname/Nachname).'); return;
     }
-
     setBusy(true);
     try {
-      // Dubletten rausfiltern
       const idx = (label:string) => cur.headers.indexOf(label);
       const iFirst = idx(firstNameCol);
       const iLast = idx(lastNameCol);
@@ -238,20 +213,9 @@ export default function RosterUploadPage() {
     } finally { setBusy(false); }
   }
 
-  /* UI */
   return (
     <div className="space-y-6">
       <h1 className="text-xl font-semibold">Dienstplan hochladen (Excel – breite Tagesspalten)</h1>
-
-      {/* Team */}
-      <div className="max-w-xl space-y-2">
-        <label className="block text-sm font-medium">Team</label>
-        <select value={teamId} onChange={e=>setTeamId(e.target.value)} className="w-full border rounded px-2 py-1.5">
-          {teams.map(t => <option key={t.team_id} value={t.team_id}>{t.name}</option>)}
-        </select>
-        {teamId && membersLoadedFor!==teamId && <div className="text-xs text-gray-500">Lade Teammitglieder…</div>}
-      </div>
-
       {/* Datei */}
       <div className="max-w-xl space-y-2">
         <label className="block text-sm font-medium">Excel (.xlsx/.xls)</label>
@@ -262,7 +226,6 @@ export default function RosterUploadPage() {
         />
         {file && <div className="text-xs text-gray-500">Datei: {file.name}</div>}
       </div>
-
       {/* Sheet-Picker */}
       {sheets.length > 1 && (
         <div className="max-w-xl">
@@ -273,7 +236,6 @@ export default function RosterUploadPage() {
           </select>
         </div>
       )}
-
       {/* Mapping */}
       {cur && (
         <div className="max-w-4xl space-y-3">
@@ -283,8 +245,6 @@ export default function RosterUploadPage() {
             <MapSelect label="Vorname"      value={firstNameCol} onChange={setFirstNameCol} options={headerOptions} />
             <MapSelect label="Aufgabe/Rolle" value={roleCol}     onChange={setRoleCol}      options={headerOptions} />
           </div>
-
-          {/* Date Columns Auswahl */}
           <div>
             <div className="text-sm font-medium mb-1">Datums-Spalten</div>
             <div className="flex flex-wrap gap-2">
@@ -302,11 +262,10 @@ export default function RosterUploadPage() {
           </div>
         </div>
       )}
-
       {/* Mitarbeiter-Zuordnung */}
       {cur && (
         <div className="max-w-3xl space-y-2">
-          <div className="text-sm font-medium">Mitarbeiter-Zuordnung (Excel → Teammitglied)</div>
+          <div className="text-sm font-medium">Mitarbeiter-Zuordnung (Excel → Benutzer im System)</div>
           {assignments.length === 0 && <div className="text-xs text-gray-500">Keine Personen gefunden.</div>}
           <ul className="divide-y border rounded bg-white">
             {assignments.map(a=>(
@@ -324,11 +283,10 @@ export default function RosterUploadPage() {
             ))}
           </ul>
           <div className="text-xs text-gray-500">
-            Tipp: Automatisch zugeordnet, wenn Excel-Name exakt dem Team-Mitgliedsnamen entspricht.
+            Tipp: Automatisch zugeordnet, wenn Excel-Name exakt dem System-Namen entspricht.
           </div>
         </div>
       )}
-
       {/* Vorschau */}
       {cur && (
         <div className="max-w-[1000px]">
@@ -354,12 +312,11 @@ export default function RosterUploadPage() {
           </div>
         </div>
       )}
-
       {/* Submit */}
       <form onSubmit={submit} className="space-y-2">
         {err && <div className="text-sm text-red-600">{err}</div>}
         <button className="px-3 py-1.5 rounded bg-blue-600 text-white disabled:opacity-60"
-                disabled={!cur || !teamId || !dateCols.length || busy}>
+          disabled={!cur || !dateCols.length || busy}>
           {busy ? 'Hochladen…' : 'Hochladen'}
         </button>
       </form>
