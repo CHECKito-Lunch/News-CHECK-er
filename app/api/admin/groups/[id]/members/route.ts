@@ -62,15 +62,11 @@ export const PUT = withAdminRights(async (req: NextRequest, ctx) => {
   }
 
   const body: unknown = await req.json().catch(() => ({} as unknown));
-  // 1) Rohdaten typneutral lesen
   const inputRaw: unknown[] = Array.isArray((body as any)?.userIds)
     ? ((body as any).userIds as unknown[])
     : [];
 
-  // 2) Nur Strings erlauben → string[]
   const inputIds: string[] = inputRaw.filter((v: unknown): v is string => typeof v === 'string');
-
-  // 3) Normalisieren/trimmen + Duplikate raus
   const want: string[] = Array.from(
     new Set(
       inputIds
@@ -79,12 +75,10 @@ export const PUT = withAdminRights(async (req: NextRequest, ctx) => {
     )
   );
 
-  // (optional) sehr leichter UUID-Check — lässt nur plausible UUIDs durch
   const uuidish = (s: string) =>
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s);
   const wantUuids: string[] = want.filter((v: string) => uuidish(v));
 
-  // aktuelle Mitglieder holen
   const cur = await sql<{ user_id: string }[]>`
     select user_id::text as user_id
     from public.group_members
@@ -92,34 +86,30 @@ export const PUT = withAdminRights(async (req: NextRequest, ctx) => {
   `;
   const have = new Set<string>(cur.map((r: { user_id: string }) => r.user_id));
 
-  // Differenzen bilden
   const toAdd: string[] = wantUuids.filter((uuid: string) => !have.has(uuid));
   const wantSet = new Set<string>(wantUuids);
   const toRemove: string[] = [...have].filter((uuid: string) => !wantSet.has(uuid));
 
-  // Einfügen (bulk) — Tuples mit sql.join(..., sql`, `) trennen
-  if (toAdd.length > 0) {
-    const tuples = toAdd.map((uuid: string) =>
-      sql`(${groupId}, ${uuid}::uuid, ${'member'}, now())`
-    );
+  // Transaktion für atomare Änderungen
+  await sql.begin(async (tx: any) => {
+    // Einfügen - einzeln
+    for (const uuid of toAdd) {
+      await tx`
+        insert into public.group_members (group_id, user_id, role, joined_at)
+        values (${groupId}, ${uuid}::uuid, ${'member'}, now())
+        on conflict (group_id, user_id) do nothing
+      `;
+    }
 
-    await sql`
-      insert into public.group_members (group_id, user_id, role, joined_at)
-      values ${sql.join(tuples, sql`, `)}
-      on conflict (group_id, user_id) do nothing
-    `;
-  }
-
-  // Löschen — Cast auf uuid, um Typmismatch zu vermeiden
-  if (toRemove.length > 0) {
-    await sql`
-      delete from public.group_members
-      where group_id = ${groupId}
-        and user_id in (
-          select x::uuid from unnest(${toRemove}::text[]) as t(x)
-        )
-    `;
-  }
+    // Löschen - bulk
+    if (toRemove.length > 0) {
+      await tx`
+        delete from public.group_members
+        where group_id = ${groupId}
+          and user_id = ANY(${toRemove}::uuid[])
+      `;
+    }
+  });
 
   return json({
     ok: true,
@@ -128,6 +118,7 @@ export const PUT = withAdminRights(async (req: NextRequest, ctx) => {
     ignoredInvalid: want.length - wantUuids.length,
   });
 });
+
 
 export function POST() {
   return new Response('Method Not Allowed', { status: 405, headers: { Allow: 'GET, PUT' } });
