@@ -105,17 +105,6 @@ export async function POST(req: NextRequest){
     if (!headers.length || !rows.length) return json({ ok:false, error:'no_rows' }, 400);
     if (!mapping?.dateCols?.length) return json({ ok:false, error:'no_date_columns' }, 400);
 
-    // Prüfen, ob User aktives Mitglied im Team ist oder Admin
-    const membership = await sql<{active:boolean}[]>/*sql*/`
-      select tm.active from public.team_memberships tm
-      where tm.team_id = ${teamId}::bigint
-        and tm.user_id = ${me.user_id}::uuid
-      limit 1
-    `;
-    if (!membership?.[0]?.active && me.role !== 'admin') {
-      return json({ ok:false, error:'forbidden' }, 403);
-    }
-
     const nameToUser = new Map<string,string>();
     for (const a of assigns) {
       const k = compactSpaces(String(a.sheetName||'').toLowerCase());
@@ -128,14 +117,13 @@ export async function POST(req: NextRequest){
       start_time: string|null;
       end_time: string|null;
       employee_name: string;
-      user_id: string|null;
       role: string|null;
       status: string|null;
       raw_cell: string|null;
       created_by: string;
       cross_midnight: boolean;
     };
-    const out: Out[] = [];
+    const out: Omit<Out, 'user_id'>[] = [];
 
     for (const row of rows) {
       const first = pick(headers, row, mapping.firstName);
@@ -160,9 +148,6 @@ export async function POST(req: NextRequest){
         const parsed = parseCell(rawCell);
         if (!parsed) continue;
 
-        const normKey = sheetName.toLowerCase();
-        const user_id = nameToUser.get(normKey) ?? null;
-
         if ('start_time' in parsed && parsed.start_time && parsed.end_time) {
           out.push({
             team_id: teamId,
@@ -170,7 +155,6 @@ export async function POST(req: NextRequest){
             start_time: parsed.start_time,
             end_time: parsed.end_time,
             employee_name: sheetName,
-            user_id,
             role: role ? String(role) : null,
             status: parsed.status ?? null,
             raw_cell: rawCell,
@@ -184,7 +168,6 @@ export async function POST(req: NextRequest){
             start_time: null,
             end_time: null,
             employee_name: sheetName,
-            user_id,
             role: role ? String(role) : null,
             status: parsed.status ?? null,
             raw_cell: rawCell,
@@ -197,48 +180,49 @@ export async function POST(req: NextRequest){
 
     if (!out.length) return json({ ok:false, error:'no_parsed_rows' }, 400);
 
-const res = await sql/*sql*/`
-  with src as (
-    select * from jsonb_to_recordset(${sqlJson(out)}) as r(
-      team_id bigint,
-      roster_date text,
-      start_time text,
-      end_time text,
-      employee_name text,
-      role text,
-      status text,
-      raw_cell text,
-      created_by uuid,
-      cross_midnight boolean
-    )
-  )
-  insert into public.team_roster (
-    team_id, roster_date, start_time, end_time,
-    employee_name, user_id, role, status, raw_cell, created_by
-  )
-  select
-    src.team_id,
-    src.roster_date::date,
-    case when src.start_time is not null then src.start_time::time end,
-    case when src.end_time   is not null then src.end_time::time end,
-    src.employee_name,
-    mem.user_id,
-    src.role,
-    src.status,
-    src.raw_cell,
-    src.created_by
-  from src
-  left join public.team_memberships mem
-    on mem.team_id = src.team_id
-    and lower(mem.user_id::text) = lower(src.employee_name)  -- diese Logik kannst du anpassen!
-  where not exists (
-    select 1 from public.team_roster tr
-    where tr.team_id = src.team_id
-      and tr.roster_date = src.roster_date::date
-      and tr.employee_name = src.employee_name
-  )
-  returning id
-`;
+    // INSERT mit automatischer user_id Zuweisung über LEFT JOIN auf team_memberships
+    const res = await sql/*sql*/`
+      with src as (
+        select * from jsonb_to_recordset(${sqlJson(out)}) as r(
+          team_id bigint,
+          roster_date text,
+          start_time text,
+          end_time text,
+          employee_name text,
+          role text,
+          status text,
+          raw_cell text,
+          created_by uuid,
+          cross_midnight boolean
+        )
+      )
+      insert into public.team_roster (
+        team_id, roster_date, start_time, end_time,
+        employee_name, user_id, role, status, raw_cell, created_by
+      )
+      select
+        src.team_id,
+        src.roster_date::date,
+        case when src.start_time is not null then src.start_time::time end,
+        case when src.end_time   is not null then src.end_time::time end,
+        src.employee_name,
+        mem.user_id,
+        src.role,
+        src.status,
+        src.raw_cell,
+        src.created_by
+      from src
+      left join public.team_memberships mem
+        on mem.team_id = src.team_id
+        and lower(mem.user_id::text) = lower(src.employee_name)  -- ggf. anpassen
+      where not exists (
+        select 1 from public.team_roster tr
+        where tr.team_id = src.team_id
+          and tr.roster_date = src.roster_date::date
+          and tr.employee_name = src.employee_name
+      )
+      returning id
+    `;
 
     return json({ ok:true, inserted: Array.isArray(res) ? res.length : 0 });
   } catch (e:any) {
