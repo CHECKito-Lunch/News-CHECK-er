@@ -197,41 +197,48 @@ export async function POST(req: NextRequest){
 
     if (!out.length) return json({ ok:false, error:'no_parsed_rows' }, 400);
 
-    const res = await sql/*sql*/`
-      with src as (
-        select * from jsonb_to_recordset(${sqlJson(out)}) as r(
-          team_id bigint,
-          roster_date text,
-          start_time text,
-          end_time text,
-          employee_name text,
-          user_id uuid,
-          role text,
-          status text,
-          raw_cell text,
-          created_by uuid,
-          cross_midnight boolean
-        )
-      )
-      insert into public.team_roster (
-        team_id, roster_date, start_time, end_time,
-        employee_name, user_id, role, status, raw_cell, created_by
-      )
-      select
-        team_id,
-        roster_date::date,
-        case when start_time is not null then start_time::time end,
-        case when end_time   is not null then end_time::time end,
-        employee_name, user_id, role, status, raw_cell, created_by
-      from src
-      where not exists (
-        select 1 from public.team_roster t
-        where t.team_id = src.team_id
-          and t.roster_date = src.roster_date::date
-          and t.employee_name = src.employee_name
-      )
-      returning id
-    `;
+const res = await sql/*sql*/`
+  with src as (
+    select * from jsonb_to_recordset(${sqlJson(out)}) as r(
+      team_id bigint,
+      roster_date text,
+      start_time text,
+      end_time text,
+      employee_name text,
+      role text,
+      status text,
+      raw_cell text,
+      created_by uuid,
+      cross_midnight boolean
+    )
+  )
+  insert into public.team_roster (
+    team_id, roster_date, start_time, end_time,
+    employee_name, user_id, role, status, raw_cell, created_by
+  )
+  select
+    src.team_id,
+    src.roster_date::date,
+    case when src.start_time is not null then src.start_time::time end,
+    case when src.end_time   is not null then src.end_time::time end,
+    src.employee_name,
+    mem.user_id,
+    src.role,
+    src.status,
+    src.raw_cell,
+    src.created_by
+  from src
+  left join public.team_memberships mem
+    on mem.team_id = src.team_id
+    and lower(mem.user_id::text) = lower(src.employee_name)  -- diese Logik kannst du anpassen!
+  where not exists (
+    select 1 from public.team_roster tr
+    where tr.team_id = src.team_id
+      and tr.roster_date = src.roster_date::date
+      and tr.employee_name = src.employee_name
+  )
+  returning id
+`;
 
     return json({ ok:true, inserted: Array.isArray(res) ? res.length : 0 });
   } catch (e:any) {
