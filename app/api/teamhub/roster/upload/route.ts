@@ -17,7 +17,7 @@ type Mapping = {
 };
 
 type UploadBody = {
-  team_id: number|string;
+  // team_id: number|string;           // ❌ nicht mehr benötigt
   sheet_name?: string;
   headers: string[];
   rows: string[][];
@@ -91,39 +91,39 @@ export async function POST(req: NextRequest){
     const me = await getUserFromCookies().catch(()=>null);
     if (!me) return json({ ok:false, error:'unauthorized' }, 401);
 
-    // Erlaube Upload für teamleiter und admin ohne Membership-Prüfung:
+    // Upload nur für Teamleiter/Admin (unabhängig von deren Membership)
     if (me.role !== 'teamleiter' && me.role !== 'admin') {
       return json({ ok:false, error:'forbidden' }, 403);
     }
 
     const body = await req.json() as UploadBody;
-    const teamId = Number(body?.team_id ?? NaN);
     const headers = Array.isArray(body?.headers) ? body.headers : [];
     const rows = Array.isArray(body?.rows) ? body.rows : [];
     const mapping = body?.mapping as Mapping;
     const assigns = Array.isArray(body?.assignments) ? body.assignments : [];
 
-    if (!Number.isFinite(teamId) || !teamId) return json({ ok:false, error:'invalid team_id' }, 400);
     if (!headers.length || !rows.length) return json({ ok:false, error:'no_rows' }, 400);
     if (!mapping?.dateCols?.length) return json({ ok:false, error:'no_date_columns' }, 400);
 
-  const nameToUser = new Map<string,string>();
-for (const a of assigns) {
-  const k = compactSpaces(String(a.sheetName||'').toLowerCase());
-  if (a.user_id) nameToUser.set(k, a.user_id);
-}
+    // Name->User aus assignments (vom Frontend gemappt) vorbereiten
+    const nameToUser = new Map<string,string>();
+    for (const a of assigns) {
+      const k = compactSpaces(String(a.sheetName||'').toLowerCase());
+      if (a.user_id) nameToUser.set(k, a.user_id);
+    }
 
-type Out = {
-  roster_date: string;
-  start_time: string|null;
-  end_time: string|null;
-  employee_name: string;
-  role: string|null;
-  status: string|null;
-  raw_cell: string|null;
-  created_by: string;
-  cross_midnight: boolean;
-};
+    type Out = {
+      roster_date: string;
+      start_time: string|null;
+      end_time: string|null;
+      employee_name: string;
+      role: string|null;
+      status: string|null;
+      raw_cell: string|null;
+      created_by: string;
+      cross_midnight: boolean;
+    };
+
     const out: Out[] = [];
 
     for (const row of rows) {
@@ -149,30 +149,27 @@ type Out = {
         const parsed = parseCell(rawCell);
         if (!parsed) continue;
 
+        const base = {
+          roster_date: dateISO,
+          employee_name: sheetName,
+          role: role ? String(role) : null,
+          status: parsed.status ?? null,
+          raw_cell: rawCell,
+          created_by: me.user_id as string,
+        };
+
         if ('start_time' in parsed && parsed.start_time && parsed.end_time) {
           out.push({
-            team_id: teamId,
-            roster_date: dateISO,
+            ...base,
             start_time: parsed.start_time,
             end_time: parsed.end_time,
-            employee_name: sheetName,
-            role: role ? String(role) : null,
-            status: parsed.status ?? null,
-            raw_cell: rawCell,
-            created_by: me.user_id,
             cross_midnight: parsed.cross_midnight ?? false,
           });
         } else {
           out.push({
-            team_id: teamId,
-            roster_date: dateISO,
+            ...base,
             start_time: null,
             end_time: null,
-            employee_name: sheetName,
-            role: role ? String(role) : null,
-            status: parsed.status ?? null,
-            raw_cell: rawCell,
-            created_by: me.user_id,
             cross_midnight: false,
           });
         }
@@ -181,40 +178,52 @@ type Out = {
 
     if (!out.length) return json({ ok:false, error:'no_parsed_rows' }, 400);
 
-   const res = await sql/*sql*/`
+    // Hauptinsert mit Resolution: assignment -> app_users -> team_memberships(active)
+    const inserted = await sql/*sql*/`
 WITH src AS (
   SELECT * FROM jsonb_to_recordset(${sqlJson(out)}) AS r(
-    roster_date text,
-    start_time text,
-    end_time text,
-    employee_name text,
-    role text,
-    status text,
-    raw_cell text,
-    created_by uuid,
-    cross_midnight boolean
+    roster_date     text,
+    start_time      text,
+    end_time        text,
+    employee_name   text,
+    role            text,
+    status          text,
+    raw_cell        text,
+    created_by      uuid,
+    cross_midnight  boolean
   )
 ),
+-- assignments (vom Frontend) als Map: normalized sheetName -> user_id
 assign_map AS (
   SELECT
-    LOWER(compact_spaces ->> 'sheetName') AS sheet_name_lc,
-    (compact_spaces ->> 'user_id')::uuid   AS user_id
-  FROM (
-    SELECT jsonb_array_elements(${sqlJson(assigns)}) AS compact_spaces
-  ) t
-  WHERE (compact_spaces ->> 'user_id') IS NOT NULL
+    regexp_replace(lower(a.sheetName), '\\s+', ' ', 'g') AS sheet_name_norm,
+    NULLIF(a.user_id, '')::uuid                         AS user_id
+  FROM jsonb_to_recordset(${sqlJson(assigns)}) AS a(
+    sheetName text,
+    user_id   text
+  )
+  WHERE a.user_id IS NOT NULL
 ),
-resolved_user AS (
+-- employee_name normalisieren für sauberes Matching
+src_norm AS (
   SELECT
     s.*,
-    COALESCE(am.user_id, au.user_id) AS user_id
+    regexp_replace(lower(s.employee_name), '\\s+', ' ', 'g') AS employee_name_norm
   FROM src s
+),
+-- user_id auflösen: assignments bevorzugt, sonst exakter Namensmatch in aktiven app_users
+resolved_user AS (
+  SELECT
+    sn.*,
+    COALESCE(am.user_id, au.user_id) AS user_id
+  FROM src_norm sn
   LEFT JOIN assign_map am
-    ON am.sheet_name_lc = LOWER(s.employee_name)
+    ON am.sheet_name_norm = sn.employee_name_norm
   LEFT JOIN public.app_users au
     ON au.active = true
-   AND LOWER(au.name) = LOWER(s.employee_name)
+   AND regexp_replace(lower(au.name), '\\s+', ' ', 'g') = sn.employee_name_norm
 ),
+-- team_id über aktive Membership bestimmen
 resolved_team AS (
   SELECT
     ru.*,
@@ -247,12 +256,78 @@ WHERE rt.team_id IS NOT NULL
       AND tr.roster_date = rt.roster_date::date
       AND tr.employee_name = rt.employee_name
   )
-RETURNING id
-`;
+RETURNING id;
+    `;
 
-    return json({ ok:true, inserted: Array.isArray(res) ? res.length : 0 });
+    // Unaufgelöste Zeilen (für UI-Rückmeldung)
+    const unresolved = await sql/*sql*/`
+WITH src AS (
+  SELECT * FROM jsonb_to_recordset(${sqlJson(out)}) AS r(
+    roster_date     text,
+    start_time      text,
+    end_time        text,
+    employee_name   text,
+    role            text,
+    status          text,
+    raw_cell        text,
+    created_by      uuid,
+    cross_midnight  boolean
+  )
+),
+assign_map AS (
+  SELECT
+    regexp_replace(lower(a.sheetName), '\\s+', ' ', 'g') AS sheet_name_norm,
+    NULLIF(a.user_id, '')::uuid                         AS user_id
+  FROM jsonb_to_recordset(${sqlJson(assigns)}) AS a(
+    sheetName text,
+    user_id   text
+  )
+  WHERE a.user_id IS NOT NULL
+),
+src_norm AS (
+  SELECT
+    s.*,
+    regexp_replace(lower(s.employee_name), '\\s+', ' ', 'g') AS employee_name_norm
+  FROM src s
+),
+resolved_user AS (
+  SELECT
+    sn.*,
+    COALESCE(am.user_id, au.user_id) AS user_id
+  FROM src_norm sn
+  LEFT JOIN assign_map am
+    ON am.sheet_name_norm = sn.employee_name_norm
+  LEFT JOIN public.app_users au
+    ON au.active = true
+   AND regexp_replace(lower(au.name), '\\s+', ' ', 'g') = sn.employee_name_norm
+),
+resolved_team AS (
+  SELECT
+    ru.*,
+    mem.team_id
+  FROM resolved_user ru
+  LEFT JOIN public.team_memberships mem
+    ON mem.user_id = ru.user_id
+   AND mem.active = true
+)
+SELECT
+  employee_name,
+  (user_id IS NULL)                                  AS reason_no_user,
+  (user_id IS NOT NULL AND team_id IS NULL)          AS reason_no_active_team
+FROM resolved_team
+WHERE team_id IS NULL;
+    `;
+
+    return json({
+      ok: true,
+      inserted: Array.isArray(inserted) ? inserted.length : 0,
+      unresolved: Array.isArray(unresolved) ? unresolved : []
+    });
   } catch (e: any) {
     console.error('[roster/upload]', e);
+    if (e?.code === '23503') {
+      return json({ ok:false, error:'foreign_key_violation: ensure active team membership & teams exist' }, 400);
+    }
     return json({ ok:false, error: e?.message ?? 'server_error' }, 500);
   }
 }
