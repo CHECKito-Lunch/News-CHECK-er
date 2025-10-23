@@ -4,6 +4,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { authedFetch } from '@/lib/fetchWithSupabase';
+import Link from 'next/link';
 
 type Role = 'admin' | 'moderator' | 'teamleiter' | 'user';
 
@@ -74,6 +75,96 @@ function Switch({ checked, onChange, label, className = '' }: {
         />
       </button>
     </label>
+  );
+}
+
+/* ========= USER EDIT MODAL ========= */
+function UserEditModal({
+  open,
+  onClose,
+  user,
+  onSaved,
+}: {
+  open: boolean;
+  onClose: () => void;
+  user: AppUser | null;
+  onSaved: () => void;
+}) {
+  const [email, setEmail] = useState('');
+  const [name, setName] = useState('');
+  const [role, setRole] = useState<Role>('user');
+  const [active, setActive] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  useEffect(() => {
+    if (!open || !user) return;
+    setEmail(user.email);
+    setName(user.name ?? '');
+    setRole(user.role);
+    setActive(user.active);
+    setMsg('');
+  }, [open, user]);
+
+  async function save() {
+    if (!user) return;
+    setSaving(true);
+    setMsg('');
+    try {
+      const res = await authedFetch(`/api/admin/users/${user.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), name: name.trim() || null, role, active })
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || 'Fehler beim Speichern');
+      onSaved();
+      onClose();
+    } catch (e: any) {
+      setMsg(e?.message ?? 'Fehler beim Speichern');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!open || !user) return null;
+
+  return (
+    <div className="fixed inset-0 z-50">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="absolute inset-x-0 top-20 mx-auto max-w-lg rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-xl">
+        <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+          <div className="text-lg font-semibold">Benutzer bearbeiten</div>
+          <div className="flex gap-2">
+            <button className={btnBase} onClick={onClose}>Abbrechen</button>
+            <button className={btnPrimary} onClick={save} disabled={saving}>
+              {saving ? 'Speichern…' : 'Speichern'}
+            </button>
+          </div>
+        </div>
+        <div className="p-5 space-y-4">
+          {msg && <div className="text-sm text-red-600">{msg}</div>}
+          <div>
+            <label className="form-label">E-Mail</label>
+            <input className={inputClass} value={email} onChange={(e) => setEmail(e.target.value)} />
+          </div>
+          <div>
+            <label className="form-label">Name</label>
+            <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div>
+            <label className="form-label">Rolle</label>
+            <select className={inputClass} value={role} onChange={(e) => setRole(e.target.value as Role)}>
+              <option value="user">User</option>
+              <option value="teamleiter">Teamleiter</option>
+              <option value="moderator">Moderator</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+          <Switch checked={active} onChange={setActive} label="Aktiv" />
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -560,40 +651,20 @@ export default function UsersAdminPage() {
   const [loading, setLoading] = useState(false);
   const pageSize = 20;
 
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [fEmail, setFEmail] = useState('');
-  const [fName, setFName] = useState('');
-  const [fRole, setFRole] = useState<Role>('user');
-  const [fActive, setFActive] = useState(true);
-  const [fPassword, setFPassword] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [msg, setMsg] = useState('');
+  const [userEditModal, setUserEditModal] = useState<{ open: boolean; user: AppUser | null }>({ open: false, user: null });
 
   const [groups, setGroups] = useState<Group[]>([]);
   const [gQ, setGQ] = useState('');
   const [gLoading, setGLoading] = useState(false);
   const [groupModal, setGroupModal] = useState<{ open: boolean; group: Group | null }>({ open: false, group: null });
 
-  const [assignOpen, setAssignOpen] = useState<null | { user: AppUser; groupIds: number[] }>(null);
-
-  const [inviteOpen, setInviteOpen] = useState<null | {
-    groupId: number | null;
-    selectedIds: number[];
-    message: string;
-    filter: string;
-    onlyPrivate: boolean;
-  }>(null);
-
   const [teams, setTeams] = useState<Team[]>([]);
   const [tQ, setTQ] = useState('');
   const [tLoading, setTLoading] = useState(false);
   const [teamModal, setTeamModal] = useState<{ open: boolean; team: Team | null }>({ open: false, team: null });
 
-  const [teamAssignOpen, setTeamAssignOpen] = useState<null | { user: AppUser; teamId: number | null }>(null);
-
   const pages = useMemo(() => Math.max(1, Math.ceil(total / pageSize)), [total, pageSize]);
 
-  // Lade ALLE User für Modals (nicht paginiert)
   const loadAllUsers = useCallback(async () => {
     const res = await authedFetch('/api/admin/users?pageSize=9999');
     const json = await res.json().catch(() => ({}));
@@ -615,67 +686,11 @@ export default function UsersAdminPage() {
     setUsers(json.data ?? []);
     setTotal(json.total ?? 0);
     setLoading(false);
-  }, [q, page, pageSize]);
+  }, [q, page]);
 
   useEffect(() => {
     load();
   }, [load]);
-
-  function resetForm() {
-    setEditingId(null);
-    setFEmail('');
-    setFName('');
-    setFRole('user');
-    setFActive(true);
-    setFPassword('');
-    setMsg('');
-  }
-
-  async function save() {
-    setSaving(true);
-    setMsg('');
-    const creating = editingId === null;
-    if (!fEmail.trim()) {
-      setMsg('E-Mail ist erforderlich.');
-      setSaving(false);
-      return;
-    }
-    if (creating && fPassword.length < 8) {
-      setMsg('Passwort ist erforderlich (mindestens 8 Zeichen).');
-      setSaving(false);
-      return;
-    }
-    const payload: any = { email: fEmail.trim(), name: fName.trim() || null, role: fRole, active: fActive };
-    if (creating) payload.password = fPassword;
-    try {
-      const url = creating ? '/api/admin/users' : `/api/admin/users/${editingId}`;
-      const method = creating ? 'POST' : 'PATCH';
-      const res = await authedFetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(j.error || 'Fehler beim Speichern');
-      setMsg(creating ? 'Benutzer angelegt.' : 'Aktualisiert.');
-      await load();
-      await loadAllUsers();
-      if (creating) resetForm();
-    } catch (e: any) {
-      setMsg(e?.message ?? 'Fehler');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function startEdit(id: number) {
-    setMsg('');
-    const u = users.find((x) => x.id === id);
-    if (!u) return;
-    setEditingId(u.id);
-    setFEmail(u.email);
-    setFName(u.name ?? '');
-    setFRole(u.role);
-    setFActive(u.active);
-    setFPassword('');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }
 
   async function deleteUser(id: number) {
     if (!confirm('Diesen Benutzer löschen?')) return;
@@ -683,7 +698,6 @@ export default function UsersAdminPage() {
     if (res.ok) {
       await load();
       await loadAllUsers();
-      if (editingId === id) resetForm();
     } else {
       const j = await res.json().catch(() => ({}));
       alert(j.error ?? 'Löschen fehlgeschlagen');
@@ -722,30 +736,6 @@ export default function UsersAdminPage() {
     loadGroups();
   }, [loadGroups]);
 
-  async function openAssign(u: AppUser) {
-    const r = await authedFetch(`/api/admin/users/${u.id}/groups`);
-    const j = await r.json().catch(() => ({}));
-    const ids: number[] = Array.isArray(j.groupIds) ? j.groupIds : [];
-    setAssignOpen({ user: u, groupIds: ids });
-  }
-
-  async function saveAssign() {
-    if (!assignOpen) return;
-    const ids = assignOpen.groupIds;
-    const r = await authedFetch(`/api/admin/users/${assignOpen.user.id}/groups`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ groupIds: ids })
-    });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) {
-      alert(j.error ?? 'Zuweisung fehlgeschlagen');
-      return;
-    }
-    setAssignOpen(null);
-    loadGroups();
-  }
-
   const gFiltered = useMemo(() => {
     const q2 = gQ.trim().toLowerCase();
     return !q2 ? groups : groups.filter(g => g.name.toLowerCase().includes(q2) || (g.description ?? '').toLowerCase().includes(q2));
@@ -771,140 +761,147 @@ export default function UsersAdminPage() {
     loadTeams();
   }, [loadTeams]);
 
-  async function openTeamAssign(u: AppUser) {
-    if (!u.user_id) {
-      alert('Nutzer hat keine Auth-UUID.');
-      return;
-    }
-    let activeTeamId: number | null = null;
-    for (const t of teams) {
-      const r = await authedFetch(`/api/admin/teams/${t.id}/members/${u.user_id}`);
-      if (r.ok) {
-        const j = await r.json().catch(() => ({}));
-        if (j?.member && j.member.active) {
-          activeTeamId = t.id;
-          break;
-        }
-      }
-    }
-    setTeamAssignOpen({ user: u, teamId: activeTeamId });
-  }
-
-  async function saveTeamAssign() {
-    if (!teamAssignOpen) return;
-    const teamId = teamAssignOpen.teamId;
-    const userUuid = teamAssignOpen.user.user_id;
-    if (!teamId || !userUuid) {
-      alert('Bitte Team wählen & Nutzer mit UUID.');
-      return;
-    }
-    const r = await authedFetch(`/api/admin/teams/${teamId}/members/${userUuid}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ active: true }),
-    });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) {
-      alert(j.error ?? 'Teamzuweisung fehlgeschlagen');
-      return;
-    }
-    setTeamAssignOpen(null);
-    loadTeams();
-  }
-
   const tFiltered = useMemo(() => {
     const q2 = tQ.trim().toLowerCase();
     return !q2 ? teams : teams.filter(t => t.name.toLowerCase().includes(q2));
   }, [tQ, teams]);
 
-  const allUsersById = useMemo(() => {
-    const m = new Map<number, AppUser>();
-    for (const u of allUsersForModals) m.set(u.id, u);
-    return m;
-  }, [allUsersForModals]);
-
-  function addRecipient(id: number) {
-    setInviteOpen(prev => prev ? { ...prev, selectedIds: Array.from(new Set([...prev.selectedIds, id])) } : prev);
-  }
-
-  function removeRecipient(id: number) {
-    setInviteOpen(prev => prev ? { ...prev, selectedIds: prev.selectedIds.filter(x => x !== id) } : prev);
-  }
-
-  async function sendInvites() {
-    if (!inviteOpen) return;
-    const groupId = inviteOpen.groupId;
-    if (!groupId) {
-      alert('Bitte eine Zielgruppe auswählen.');
-      return;
-    }
-    if (inviteOpen.selectedIds.length === 0) {
-      alert('Bitte mindestens einen Empfänger auswählen.');
-      return;
-    }
-    const selectedUuids = inviteOpen.selectedIds
-      .map(id => allUsersById.get(id)?.user_id || null)
-      .filter((x): x is string => !!x);
-    if (selectedUuids.length === 0) {
-      alert('Ausgewählte Benutzer haben keine verknüpfte Auth-ID (user_id).');
-      return;
-    }
-    const r = await authedFetch(`/api/admin/groups/${groupId}/invite`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userIds: selectedUuids, message: inviteOpen.message || null })
-    });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) {
-      alert(j.error || 'Einladungen konnten nicht gesendet werden.');
-      return;
-    }
-    setInviteOpen(null);
-    alert('Einladungen verschickt.');
-  }
-
-  const modalAvailableUsers = useMemo(() => {
-    if (!inviteOpen) return [];
-    const f = inviteOpen.filter.trim().toLowerCase();
-    return allUsersForModals
-      .filter(u => !!u.user_id)
-      .filter(u => !inviteOpen.selectedIds.includes(u.id))
-      .filter(u => {
-        if (!f) return true;
-        const hay = `${u.email} ${u.name ?? ''}`.toLowerCase();
-        return hay.includes(f);
-      });
-  }, [allUsersForModals, inviteOpen]);
-
-  const modalSelectedUsers = useMemo(() => {
-    if (!inviteOpen) return [];
-    return inviteOpen.selectedIds
-      .map(id => allUsersById.get(id))
-      .filter((u): u is AppUser => !!u);
-  }, [inviteOpen, allUsersById]);
-
-  function onDragStartUser(e: React.DragEvent, id: number) {
-    e.dataTransfer.setData('text/plain', String(id));
-    e.dataTransfer.effectAllowed = 'move';
-  }
-
-  function onDropToSelected(e: React.DragEvent) {
-    e.preventDefault();
-    const id = Number(e.dataTransfer.getData('text/plain'));
-    if (Number.isFinite(id)) addRecipient(id);
-  }
-
-  function onDropToAvailable(e: React.DragEvent) {
-    e.preventDefault();
-    const id = Number(e.dataTransfer.getData('text/plain'));
-    if (Number.isFinite(id)) removeRecipient(id);
-  }
-
   return (
-    <div className="container max-w-15xl mx-auto py-6 space-y-5">
-      {/* Rest der UI wie bisher, Modals am Ende */}
-      
-      {/* TEAMS MODAL - NUTZT allUsersForModals */}
+    <div className="container max-w-7xl mx-auto py-6 space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Benutzerverwaltung</h1>
+        <Link href="/register" className={btnPrimary}>
+          Neuen Benutzer registrieren
+        </Link>
+      </div>
+
+      {/* User-Suche & Tabelle */}
+      <div className={cardClass}>
+        <div className="mb-4">
+          <input
+            className={inputClass}
+            placeholder="Benutzer suchen…"
+            value={q}
+            onChange={(e) => { setQ(e.target.value); setPage(1); }}
+          />
+        </div>
+        {loading && <div className="text-sm text-gray-500">Lädt…</div>}
+        {!loading && users.length === 0 && <div className="text-sm text-gray-500">Keine Benutzer gefunden.</div>}
+        {!loading && users.length > 0 && (
+          <div className="overflow-auto">
+            <table className="min-w-full text-sm">
+              <thead className="bg-gray-50 dark:bg-gray-800">
+                <tr>
+                  <th className="px-3 py-2 text-left">E-Mail</th>
+                  <th className="px-3 py-2 text-left">Name</th>
+                  <th className="px-3 py-2 text-left">Rolle</th>
+                  <th className="px-3 py-2 text-left">Aktiv</th>
+                  <th className="px-3 py-2 text-right">Aktionen</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {users.map((u) => (
+                  <tr key={u.id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                    <td className="px-3 py-2">{u.email}</td>
+                    <td className="px-3 py-2">{u.name ?? '—'}</td>
+                    <td className="px-3 py-2">{u.role}</td>
+                    <td className="px-3 py-2">{u.active ? '✓' : '✗'}</td>
+                    <td className="px-3 py-2 text-right space-x-2">
+                      <button className="text-blue-600 hover:underline" onClick={() => setUserEditModal({ open: true, user: u })}>
+                        Bearbeiten
+                      </button>
+                      <button className="text-amber-600 hover:underline" onClick={() => setPasswordForUser(u)}>
+                        Passwort
+                      </button>
+                      <button className="text-red-600 hover:underline" onClick={() => deleteUser(u.id)}>
+                        Löschen
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {/* Pagination */}
+        {pages > 1 && (
+          <div className="mt-4 flex justify-center gap-2">
+            <button disabled={page <= 1} onClick={() => setPage(p => p - 1)} className={btnBase}>◀</button>
+            <span className="text-sm flex items-center">Seite {page} von {pages}</span>
+            <button disabled={page >= pages} onClick={() => setPage(p => p + 1)} className={btnBase}>▶</button>
+          </div>
+        )}
+      </div>
+
+      {/* Teams */}
+      <div className={cardClass}>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold">Teams ({tFiltered.length})</h2>
+          <button className={btnPrimary} onClick={() => setTeamModal({ open: true, team: null })}>
+            Neues Team
+          </button>
+        </div>
+        <input className={inputClass} placeholder="Team suchen…" value={tQ} onChange={(e) => setTQ(e.target.value)} />
+        {tLoading && <div className="mt-2 text-sm text-gray-500">Lädt…</div>}
+        {!tLoading && tFiltered.length === 0 && <div className="mt-2 text-sm text-gray-500">Keine Teams.</div>}
+        {!tLoading && tFiltered.length > 0 && (
+          <div className="mt-3 grid gap-2">
+            {tFiltered.map((t) => (
+              <div key={t.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-gray-50 dark:hover:bg-gray-800">
+                <div>
+                  <div className="font-medium">{t.name}</div>
+                  <div className="text-xs text-gray-500">{t.memberCount} Mitglieder</div>
+                </div>
+                <button className="text-blue-600 hover:underline text-sm" onClick={() => setTeamModal({ open: true, team: t })}>
+                  Bearbeiten
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Gruppen */}
+      <div className={cardClass}>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold">Gruppen ({gFiltered.length})</h2>
+          <button className={btnPrimary} onClick={() => setGroupModal({ open: true, group: null })}>
+            Neue Gruppe
+          </button>
+        </div>
+        <input className={inputClass} placeholder="Gruppe suchen…" value={gQ} onChange={(e) => setGQ(e.target.value)} />
+        {gLoading && <div className="mt-2 text-sm text-gray-500">Lädt…</div>}
+        {!gLoading && gFiltered.length === 0 && <div className="mt-2 text-sm text-gray-500">Keine Gruppen.</div>}
+        {!gLoading && gFiltered.length > 0 && (
+          <div className="mt-3 grid gap-2">
+            {gFiltered.map((g) => (
+              <div key={g.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-gray-50 dark:hover:bg-gray-800">
+                <div>
+                  <div className="font-medium">{g.name}</div>
+                  {g.description && <div className="text-xs text-gray-500">{g.description}</div>}
+                  <div className="text-xs text-gray-500">{g.memberCount ?? 0} Mitglieder</div>
+                </div>
+                <button className="text-blue-600 hover:underline text-sm" onClick={() => setGroupModal({ open: true, group: g })}>
+                  Bearbeiten
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* MODALS */}
+      <UserEditModal
+        open={userEditModal.open}
+        onClose={() => setUserEditModal({ open: false, user: null })}
+        user={userEditModal.user}
+        onSaved={() => {
+          load();
+          loadAllUsers();
+          setUserEditModal({ open: false, user: null });
+        }}
+      />
+
       <TeamModal
         open={teamModal.open}
         onClose={() => setTeamModal({ open: false, team: null })}
@@ -917,7 +914,6 @@ export default function UsersAdminPage() {
         }}
       />
 
-      {/* GRUPPEN MODAL - NUTZT allUsersForModals */}
       <GroupModal
         open={groupModal.open}
         onClose={() => setGroupModal({ open: false, group: null })}
@@ -929,8 +925,6 @@ export default function UsersAdminPage() {
           loadAllUsers();
         }}
       />
-
-      {/* REST DER UI (Tabellen, Forms etc.) */}
     </div>
   );
 }
