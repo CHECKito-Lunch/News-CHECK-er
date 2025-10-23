@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
     const rows = await sql<any[]>`
       with my_groups as (
         select gm.group_id
-        from public.group_memberships gm
+        from public.group_members gm
         where gm.user_id = ${me.sub}::uuid
       ),
       cand as (

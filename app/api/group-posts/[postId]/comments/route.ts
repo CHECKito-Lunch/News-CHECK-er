@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // app/api/group-posts/[postId]/comments/route.ts
 import { NextResponse } from 'next/server';
 import { isActiveGroup, isMember, query } from '@/lib/groups';

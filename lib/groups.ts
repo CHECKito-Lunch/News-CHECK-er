@@ -22,7 +22,7 @@ export async function isActiveGroup(groupId: number): Promise<boolean> {
  */
 export async function isMember(userId: string, groupId: number): Promise<boolean> {
   const rows = await sql`
-    select 1 from public.group_memberships
+    select 1 from public.group_members
     where user_id = ${userId}::uuid and group_id = ${groupId}
     limit 1
   `;
