@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // app/api/groups/mine/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -24,11 +25,11 @@ export const GET = withAuth(async (_req, _ctx, me) => {
       g.description,
       coalesce(mc.member_count, 0)::int as "memberCount",
       true as "isMember"
-    from group_members m
+    from group_memberships m
     join groups g on g.id = m.group_id
     left join (
       select group_id, count(*)::int as member_count
-      from group_members
+      from group_memberships
       group by group_id
     ) mc on mc.group_id = g.id
     where m.user_id::text = ${me.sub}

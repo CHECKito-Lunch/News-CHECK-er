@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // app/api/groups/previews/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -25,7 +26,7 @@ export async function GET(req: NextRequest) {
     const rows = await sql<any[]>`
       with my_groups as (
         select gm.group_id
-        from public.group_members gm
+        from public.group_memberships gm
         where gm.user_id = ${me.sub}::uuid
       ),
       cand as (

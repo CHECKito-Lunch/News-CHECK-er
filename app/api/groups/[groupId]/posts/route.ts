@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // app/api/groups/[groupId]/posts/route.ts
 import { NextResponse } from 'next/server';
 import { isActiveGroup, isMember, query } from '@/lib/groups';
@@ -16,10 +17,25 @@ export async function GET(req: Request, { params }: any) {
     if (!Number.isFinite(gid) || gid <= 0) return bad('Ungültige Gruppen-ID', 400);
 
     const me = await getUserFromRequest(req);
+    console.log('[groups/:id/posts GET] me:', JSON.stringify(me, null, 2));
+    
     if (!me?.id) return bad('Nicht angemeldet', 401);
 
-    if (!(await isActiveGroup(gid))) return bad('Unbekannte oder inaktive Gruppe', 404);
-    if (!(await isMember(String(me.id), gid))) return bad('Kein Zugriff auf diese Gruppe', 403);
+    // Verwende die UUID (me.id oder me.sub)
+    const userId = String(me.id);
+    console.log('[groups/:id/posts GET] userId:', userId, 'groupId:', gid);
+
+    if (!(await isActiveGroup(gid))) {
+      console.log('[groups/:id/posts GET] group not active');
+      return bad('Unbekannte oder inaktive Gruppe', 404);
+    }
+    
+    const memberCheck = await isMember(userId, gid);
+    console.log('[groups/:id/posts GET] isMember result:', memberCheck);
+    
+    if (!memberCheck) {
+      return bad('Kein Zugriff auf diese Gruppe', 403);
+    }
 
     const { searchParams } = new URL(req.url);
     const page     = Math.max(1, Number(searchParams.get('page') ?? '1'));
@@ -42,7 +58,6 @@ export async function GET(req: Request, { params }: any) {
       limit ${pageSize} offset ${offset}
     `;
 
-    // sowohl items als auch data für Kompatibilität
     return NextResponse.json({ ok: true, items, data: items, page, pageSize });
   } catch (err) {
     console.error('[groups/:id/posts] GET error', err);
@@ -59,8 +74,10 @@ export async function POST(req: Request, { params }: any) {
     const me = await getUserFromRequest(req);
     if (!me?.id) return bad('Nicht angemeldet', 401);
 
+    const userId = String(me.id);
+
     if (!(await isActiveGroup(gid))) return bad('Unbekannte oder inaktive Gruppe', 404);
-    if (!(await isMember(String(me.id), gid))) return bad('Kein Zugriff auf diese Gruppe', 403);
+    if (!(await isMember(userId, gid))) return bad('Kein Zugriff auf diese Gruppe', 403);
 
     const body = await req.json().catch(() => ({}));
     const title = String(body?.title ?? '').trim();
@@ -72,7 +89,7 @@ export async function POST(req: Request, { params }: any) {
 
     const rows = await query<{ id: number; slug: string }>`
       insert into group_posts (group_id, user_id, title, summary, content, hero_image_url)
-      values (${gid}, ${String(me.id)}, ${title}, ${summary}, ${content}, ${hero_image_url})
+      values (${gid}, ${userId}::uuid, ${title}, ${summary}, ${content}, ${hero_image_url})
       returning id, slug
     `;
 

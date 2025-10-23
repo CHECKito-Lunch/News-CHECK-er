@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // app/api/groups/memberships/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -22,7 +23,7 @@ export const GET = withAuth(async (_req, _ctx, me) => {
            g.name     as "groupName",
            m.role,
            m.joined_at as "joinedAt"
-      from group_members m
+      from group_memberships m
       join groups g on g.id = m.group_id
      where m.user_id = ${me.sub}::uuid
      order by g.name asc
@@ -49,14 +50,14 @@ export const POST = withAuth(async (req, _ctx, me) => {
       insert into group_members (group_id, user_id, role, joined_at)
       select ${groupId}, ${me.sub}::uuid, 'member', now()
       where not exists (
-        select 1 from group_members
+        select 1 from group_memberships
          where group_id = ${groupId}
            and user_id  = ${me.sub}::uuid
       )
     `;
     return json({ ok: true, joined: true, groupId });
   } else {
-    await sql`delete from group_members where group_id = ${groupId} and user_id = ${me.sub}::uuid`;
+    await sql`delete from group_memberships where group_id = ${groupId} and user_id = ${me.sub}::uuid`;
     return json({ ok: true, joined: false, groupId });
   }
 });
@@ -71,7 +72,7 @@ export const PUT = withAuth(async (req, _ctx, me) => {
   if (groupIds.length === 0) return json({ ok: false, error: 'groupIds_required' }, 400);
 
   const current = await sql<{ group_id: number }[]>`
-    select group_id from group_members where user_id = ${me.sub}::uuid
+    select group_id from group_memberships where user_id = ${me.sub}::uuid
   `;
 
   // Typisiere Set explizit → keine impliziten any
@@ -86,7 +87,7 @@ export const PUT = withAuth(async (req, _ctx, me) => {
       sql`(${id}, ${me.sub}::uuid, 'member', now())`
     );
     await sql`
-      insert into group_members (group_id, user_id, role, joined_at)
+      insert into group_memberships (group_id, user_id, role, joined_at)
       values ${sql(tuples)}
       on conflict (group_id, user_id) do nothing
     `;
@@ -94,7 +95,7 @@ export const PUT = withAuth(async (req, _ctx, me) => {
 
   if (toRemove.length) {
     await sql`
-      delete from group_members
+      delete from group_memberships
        where user_id = ${me.sub}::uuid
          and group_id in ${sql(toRemove)}
     `;

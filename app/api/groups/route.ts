@@ -39,13 +39,13 @@ export async function GET(req: NextRequest) {
         g.id, g.name, g.description, g.is_private, g.is_active,
         coalesce(c.cnt, 0)::int as member_count,
         exists (
-          select 1 from public.group_members m
+          select 1 from public.group_memberships m
           where m.group_id = g.id and m.user_id::text = ${userId}
         ) as is_member
       from public.groups g
       left join (
         select group_id, count(*)::int as cnt
-        from public.group_members
+        from public.group_memberships
         group by group_id
       ) c on c.group_id = g.id
       where g.id in ${sql(ids)} and g.is_active = true
@@ -73,7 +73,7 @@ export async function GET(req: NextRequest) {
     mine as (
       select g.*
       from public.groups g
-      join public.group_members m on m.group_id = g.id
+      join public.group_memberships m on m.group_id = g.id
       where g.is_active = true and m.user_id::text = ${userId}
     ),
     all_g as (
@@ -83,14 +83,14 @@ export async function GET(req: NextRequest) {
     ),
     counts as (
       select group_id, count(*)::int as cnt
-      from public.group_members
+      from public.group_memberships
       group by group_id
     )
     select
       g.id, g.name, g.description, g.is_private, g.is_active,
       coalesce(c.cnt, 0)::int as member_count,
       exists (
-        select 1 from public.group_members m
+        select 1 from public.group_memberships m
         where m.group_id = g.id and m.user_id::text = ${userId}
       ) as is_member
     from all_g g
