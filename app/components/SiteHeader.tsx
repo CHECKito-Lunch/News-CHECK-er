@@ -170,7 +170,7 @@ export default function SiteHeader() {
       </span>
       <span
         aria-hidden
-        className="absolute -top-1 -right-1 inline-flex min-w-[1.1rem] h-5 px-1 items-center justify-center rounded-full text-[10px] font-semibold bg-red-600 text-white shadow z-10"
+        className="absolute -top-1 -right-1 inline-flex min-w-[1.25rem] h-5 px-1.5 items-center justify-center rounded-full text-[10px] font-bold bg-red-500 text-white shadow-lg shadow-red-500/50 ring-2 ring-white dark:ring-gray-900 z-10"
       >
         {count > 99 ? '99+' : count}
       </span>
@@ -178,9 +178,9 @@ export default function SiteHeader() {
   );
 
   return (
-    <header className="sticky top-0 z-30 bg-white/80 dark:bg-gray-900/80 backdrop-blur-lg border-b border-gray-200 dark:border-gray-800">
-      <div className="w-full max-w-full 2xl:max-w-[1920px] mx-auto px-4">
-        {/* Top Row: Logo + Actions */}
+    <header className="sticky top-0 z-30 bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl border-b border-gray-200/50 dark:border-gray-800/50 shadow-sm">
+      <div className="w-full max-w-[1920px] mx-auto px-6">
+        {/* Top Row */}
         <div className="flex items-center justify-between py-4">
           <Link href="/" aria-label="Startseite" className="shrink-0">
             <Image
@@ -190,29 +190,30 @@ export default function SiteHeader() {
               height={50}
               className="h-10 md:h-12 w-auto dark:opacity-90"
               priority
-              sizes="(max-width: 768px) 160px, (max-width: 1280px) 200px, 240px"
+              sizes="(max-width: 768px) 160px, 200px"
             />
           </Link>
 
           <div className="flex items-center gap-3">
-            {/* Mark All Read Button */}
+            {/* Mark All Read */}
             {me && counts.total > 0 && (
               <motion.button
                 type="button"
                 onClick={markAllRead}
                 disabled={marking}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
                 initial={false}
                 animate={
                   prefersReducedMotion
                     ? {}
                     : {
-                        scale: markedOk ? 1.02 : 1,
                         boxShadow: markedOk
-                          ? '0 4px 12px rgba(59,130,246,.25)'
-                          : '0 1px 2px rgba(0,0,0,.05)',
+                          ? '0 4px 16px rgba(59,130,246,.3)'
+                          : '0 2px 8px rgba(0,0,0,.05)',
                       }
                 }
-                className="hidden sm:inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium bg-blue-50 text-blue-700 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-200 dark:hover:bg-blue-900/40 border border-blue-200 dark:border-blue-800 transition-colors disabled:opacity-60"
+                className="hidden sm:inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-700 hover:from-blue-100 hover:to-indigo-100 dark:from-blue-900/20 dark:to-indigo-900/20 dark:text-blue-300 dark:hover:from-blue-900/30 dark:hover:to-indigo-900/30 border border-blue-200/50 dark:border-blue-800/50 shadow-sm transition-all disabled:opacity-60"
                 title="Alle Benachrichtigungen als gelesen markieren"
               >
                 {marking ? (
@@ -228,24 +229,23 @@ export default function SiteHeader() {
               </motion.button>
             )}
 
-            {/* Logout Button */}
-            {me && (
+            {/* Logout / Login */}
+            {me ? (
               <form action="/api/logout" method="post">
-                <button
+                <motion.button
                   type="submit"
-                  className="inline-flex items-center gap-2 rounded-xl bg-red-600 hover:bg-red-700 text-white px-3 py-2 text-sm shadow-sm transition-colors"
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-red-600 to-red-500 hover:from-red-700 hover:to-red-600 text-white px-4 py-2 text-sm font-medium shadow-md shadow-red-500/20 transition-all"
                 >
                   <IconPower />
                   <span className="hidden sm:inline">Abmelden</span>
-                </button>
+                </motion.button>
               </form>
-            )}
-
-            {/* Login Link */}
-            {!me && (
+            ) : (
               <Link
                 href="https://www.karl-marx-checknitz.de/login"
-                className="inline-flex items-center gap-2 rounded-xl border border-blue-600 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 text-sm shadow-sm transition-colors"
+                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white px-4 py-2 text-sm font-medium shadow-md shadow-blue-500/20 transition-all"
               >
                 Anmelden
               </Link>
@@ -255,7 +255,7 @@ export default function SiteHeader() {
 
         {/* Tropfen-Navigation */}
         <nav
-          className="flex items-end justify-center gap-1 -mb-px overflow-x-auto pb-2 scrollbar-hide"
+          className="flex items-end justify-center gap-2 -mb-px overflow-x-auto pb-3 scrollbar-hide"
           aria-label="Hauptnavigation"
         >
           {links.map((item) => {
@@ -279,51 +279,52 @@ export default function SiteHeader() {
                 <motion.div
                   initial={false}
                   animate={{
-                    height: isActive ? 56 : 32,
-                    backgroundColor: isActive
-                      ? 'rgb(37, 99, 235)' // blue-600
-                      : 'rgba(156, 163, 175, 0.3)', // gray-400/30
+                    height: isActive ? 60 : 36,
                   }}
                   transition={{
                     type: 'spring',
-                    stiffness: 400,
-                    damping: 30,
+                    stiffness: 500,
+                    damping: 35,
                   }}
-                  className={`
-                    relative w-12 rounded-b-full
-                    ${isActive ? 'shadow-lg shadow-blue-500/30' : ''}
-                    transition-shadow
-                  `}
+                  className="relative w-14 rounded-b-full overflow-hidden"
                   style={{
                     borderBottomLeftRadius: '50%',
                     borderBottomRightRadius: '50%',
                   }}
                 >
-                  {/* Icon am Ende des Tropfens */}
+                  {/* Gradient Background */}
                   <div
                     className={`
-                      absolute bottom-2 left-1/2 -translate-x-1/2
-                      flex items-center justify-center
+                      absolute inset-0
                       ${
                         isActive
-                          ? 'text-white'
-                          : 'text-gray-600 dark:text-gray-400 group-hover:text-gray-800 dark:group-hover:text-gray-200'
+                          ? 'bg-gradient-to-b from-blue-500 to-blue-600 shadow-lg shadow-blue-500/40'
+                          : 'bg-gradient-to-b from-gray-300/60 to-gray-400/60 dark:from-gray-700/60 dark:to-gray-600/60 group-hover:from-gray-400/70 group-hover:to-gray-500/70'
                       }
-                      transition-colors
+                      transition-all duration-200
                     `}
-                  >
-                    <Icon strokeWidth={isActive ? 2.5 : 2} />
+                  />
+
+                  {/* Icon */}
+                  <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center justify-center">
+                    <Icon
+                      strokeWidth={isActive ? 2.5 : 2}
+                      className={`
+                        ${isActive ? 'text-white' : 'text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white'}
+                        transition-colors
+                      `}
+                    />
                   </div>
                 </motion.div>
 
                 {/* Label */}
                 <span
                   className={`
-                    mt-1 px-2 py-0.5 text-[10px] font-medium rounded-full whitespace-nowrap
+                    mt-2 px-2.5 py-0.5 text-[11px] font-semibold rounded-full whitespace-nowrap
                     ${
                       isActive
-                        ? 'bg-blue-100 text-blue-900 dark:bg-blue-900/30 dark:text-blue-100'
-                        : 'text-gray-600 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-gray-200'
+                        ? 'bg-blue-100 text-blue-900 dark:bg-blue-900/40 dark:text-blue-100'
+                        : 'text-gray-600 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-gray-100'
                     }
                     transition-colors
                   `}
@@ -353,6 +354,7 @@ function IconMenuThin() {
     </svg>
   );
 }
+
 function IconSpinner() {
   return (
     <svg viewBox="0 0 24 24" width="16" height="16" className="animate-spin" aria-hidden>
@@ -361,6 +363,7 @@ function IconSpinner() {
     </svg>
   );
 }
+
 function IconCheck() {
   return (
     <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden>
@@ -375,9 +378,10 @@ function IconCheck() {
     </svg>
   );
 }
-function IconHome({ strokeWidth = 2 }: { strokeWidth?: number }) {
+
+function IconHome({ strokeWidth = 2 }: { strokeWidth?: number; className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden>
+    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden>
       <path
         d="M3 10l9-7 9 7v9a2 2 0 0 1-2 2h-4V12H9v9H5a2 2 0 0 1-2-2z"
         fill="none"
@@ -389,9 +393,9 @@ function IconHome({ strokeWidth = 2 }: { strokeWidth?: number }) {
   );
 }
 
-function IconNews({ strokeWidth = 2 }: { strokeWidth?: number }) {
+function IconNews({ strokeWidth = 2 }: { strokeWidth?: number; className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden>
+    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden>
       <path
         d="M4 5h12v14H6a2 2 0 0 1-2-2V5zM16 7h4v10a2 2 0 0 1-2 2h-2"
         fill="none"
@@ -410,9 +414,9 @@ function IconNews({ strokeWidth = 2 }: { strokeWidth?: number }) {
   );
 }
 
-function IconGroups({ strokeWidth = 2 }: { strokeWidth?: number }) {
+function IconGroups({ strokeWidth = 2 }: { strokeWidth?: number; className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden>
+    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden>
       <path
         d="M16 11a4 4 0 1 0-8 0M3 20a7 7 0 0 1 18 0"
         fill="none"
@@ -425,9 +429,9 @@ function IconGroups({ strokeWidth = 2 }: { strokeWidth?: number }) {
   );
 }
 
-function IconCalendar({ strokeWidth = 2 }: { strokeWidth?: number }) {
+function IconCalendar({ strokeWidth = 2 }: { strokeWidth?: number; className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden>
+    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden>
       <path
         d="M7 3v4M17 3v4M3 9h18M5 9h14v11H5z"
         fill="none"
@@ -440,9 +444,9 @@ function IconCalendar({ strokeWidth = 2 }: { strokeWidth?: number }) {
   );
 }
 
-function IconTrophy({ strokeWidth = 2 }: { strokeWidth?: number }) {
+function IconTrophy({ strokeWidth = 2 }: { strokeWidth?: number; className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden>
+    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden>
       <path
         d="M8 21h8M12 17a5 5 0 0 0 5-5V4H7v8a5 5 0 0 0 5 5zM5 6H3a3 3 0 0 0 3 3M19 6h2a3 3 0 0 1-3 3"
         fill="none"
@@ -455,9 +459,9 @@ function IconTrophy({ strokeWidth = 2 }: { strokeWidth?: number }) {
   );
 }
 
-function IconChat({ strokeWidth = 2 }: { strokeWidth?: number }) {
+function IconChat({ strokeWidth = 2 }: { strokeWidth?: number; className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden>
+    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden>
       <path
         d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"
         fill="none"
@@ -476,9 +480,9 @@ function IconChat({ strokeWidth = 2 }: { strokeWidth?: number }) {
   );
 }
 
-function IconClipboardCheck({ strokeWidth = 2 }: { strokeWidth?: number }) {
+function IconClipboardCheck({ strokeWidth = 2 }: { strokeWidth?: number; className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden>
+    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden>
       <path
         d="M9 5h6a2 2 0 0 1 2 2v12H7V7a2 2 0 0 1 2-2z"
         fill="none"
@@ -497,9 +501,9 @@ function IconClipboardCheck({ strokeWidth = 2 }: { strokeWidth?: number }) {
   );
 }
 
-function IconTeam({ strokeWidth = 2 }: { strokeWidth?: number }) {
+function IconTeam({ strokeWidth = 2 }: { strokeWidth?: number; className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden>
+    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden>
       <path
         d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Zm6 8a6 6 0 0 0-12 0"
         fill="none"
@@ -512,9 +516,9 @@ function IconTeam({ strokeWidth = 2 }: { strokeWidth?: number }) {
   );
 }
 
-function IconUser({ strokeWidth = 2 }: { strokeWidth?: number }) {
+function IconUser({ strokeWidth = 2 }: { strokeWidth?: number; className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden>
+    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden>
       <path
         d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5Zm7 8a7 7 0 0 0-14 0"
         fill="none"
@@ -527,9 +531,9 @@ function IconUser({ strokeWidth = 2 }: { strokeWidth?: number }) {
   );
 }
 
-function IconShield({ strokeWidth = 2 }: { strokeWidth?: number }) {
+function IconShield({ strokeWidth = 2 }: { strokeWidth?: number; className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden>
+    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden>
       <path
         d="M12 3l7 4v5c0 5-3.5 8.5-7 9-3.5-.5-7-4-7-9V7l7-4z"
         fill="none"
@@ -548,6 +552,7 @@ function IconShield({ strokeWidth = 2 }: { strokeWidth?: number }) {
     </svg>
   );
 }
+
 function IconPower() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden className="shrink-0">
