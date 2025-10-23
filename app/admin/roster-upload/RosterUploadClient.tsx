@@ -47,7 +47,7 @@ const compactSpaces = (s: string) => s.trim().replace(/\s+/g, ' ');
 const normName = (s: string) => compactSpaces(s).toLowerCase();
 
 export default function RosterUploadPage() {
-  const defaultTeamId = '1'; // fallback
+  const defaultTeamId = '1';
   const [members, setMembers] = useState<Member[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [file, setFile] = useState<File|null>(null);
@@ -64,29 +64,27 @@ export default function RosterUploadPage() {
   const [err,  setErr]  = useState('');
   const [out,  setOut]  = useState('');
 
-  // Teams laden (unbemerkt für Nutzer)
+  // Teams laden
   useEffect(() => {
-    (async() => {
-      const r = await fetch('/api/teamhub/all-teams', { cache:'no-store' });
-      const j = await r.json().catch(() => null);
-      const arr: Team[] = Array.isArray(j?.items) ? j.items : [];
-      setTeams(arr);
+    (async () => {
+      const res = await fetch('/api/teamhub/all-teams', { cache:'no-store' });
+      const data = await res.json().catch(() => null);
+      setTeams(Array.isArray(data?.items) ? data.items : []);
     })();
   }, []);
 
-  // Nutzer laden
+  // Mitglieder laden
   useEffect(() => {
-    (async() => {
-      const r = await fetch('/api/admin/users?page=1&pageSize=500', { cache:'no-store' });
-      const j = await r.json().catch(() => null);
-      const arr: Member[] = Array.isArray(j?.data)
-           ? j.data.map((u: any) => ({ user_id: String(u.user_id), name: u.name ?? '' }))
-           : [];
-      setMembers(arr);
+    (async () => {
+      const res = await fetch('/api/admin/users?page=1&pageSize=500', { cache:'no-store' });
+      const data = await res.json().catch(() => null);
+      setMembers(Array.isArray(data?.data)
+        ? data.data.map((u: any) => ({ user_id: String(u.user_id), name: u.name ?? '' }))
+        : []);
     })();
   }, []);
 
-  async function onFileChange(f: File|null){
+  async function onFileChange(f: File|null) {
     setFile(f);
     setSheets([]);
     setErr('');
@@ -102,11 +100,8 @@ export default function RosterUploadPage() {
     setSheetIdx(0);
   }
 
-  // Dependency extraction for useEffect
   const curHeaders = cur?.headers.join('|') ?? '';
   const curRowsLength = cur?.rows.length ?? 0;
-  const membersList = members.map(m => m.user_id).join(',');
-  const teamsList = teams.map(t => t.team_id).join(',');
 
   useEffect(() => {
     if (!cur) return;
@@ -120,7 +115,6 @@ export default function RosterUploadPage() {
       setDateCols(dCols);
     }
 
-    // Personenliste auf Basis der Zuordnung
     const idx = (label: string) => cur.headers.indexOf(label);
     const peopleSeen = new Set<string>();
     const people: string[] = [];
@@ -133,30 +127,35 @@ export default function RosterUploadPage() {
       const person = compactSpaces([first, last].filter(Boolean).join(' '));
       if (!person) continue;
       const key = normName(person);
-      if (!peopleSeen.has(key)) { peopleSeen.add(key); people.push(person); }
+      if (!peopleSeen.has(key)) {
+        peopleSeen.add(key);
+        people.push(person);
+      }
     }
 
     setAssignments(prev => {
       const prevMap = new Map(prev.map(a => [normName(a.sheetName), a.user_id]));
       const next = people.map(p => {
         const keep = prevMap.get(normName(p)) || '';
-        if (keep) return { sheetName: p, user_id: keep, team_name: prevMap.get(normName(p)) ? _findTeamNameForUser(keep) : '' };
+        if (keep) return {
+          sheetName: p,
+          user_id: keep,
+          team_name: _findTeamNameForUser(keep)
+        };
         const hit = members.find(m => normName(m.name || '') === normName(p));
-        return { sheetName: p, user_id: hit?.user_id || '', team_name: hit?.user_id ? _findTeamNameForUser(hit.user_id) : '' };
+        return {
+          sheetName: p,
+          user_id: hit?.user_id || '',
+          team_name: hit?.user_id ? _findTeamNameForUser(hit.user_id) : ''
+        };
       });
       return next;
     });
 
-  }, [sheetIdx, curHeaders, curRowsLength, firstNameCol, lastNameCol, roleCol, dateCols.length, membersList, teamsList]);
+  }, [sheetIdx, curHeaders, curRowsLength, firstNameCol, lastNameCol, roleCol, dateCols.length]);
 
-  // Hilfsfunktion, um Teamname für User zu finden.
+  // Hilfsfunktion Teamname für User finden (derzeit leer, erwarte Backend-Erweiterung)
   function _findTeamNameForUser(user_id: string): string {
-    // Prüfe alle Teams, ob user Mitglied ist. 
-    // Hier brauchst du eine Data-Struktur von Teams + deren Members am besten im State.
-    // Wenn nicht verfügbar, nur Dummy-Logik (oder leer)
-    // Beispiel, wenn teams Zustand so was beinhaltet (team_id und team_name):
-    // Da wir nur teams haben und nicht Members pro Team im Frontend, müsstest du serverseitig erweitern oder per API.
-    // Für jetzt gibt es keine Member-Teams im Frontend, deshalb leer:
     return '';
   }
 
@@ -185,14 +184,24 @@ export default function RosterUploadPage() {
     e.preventDefault();
     setErr('');
     setOut('');
+    setBusy(true);
     const teamId = defaultTeamId;
-    if (!cur) { setErr('Bitte Excel auswählen.'); return; }
-    if (!dateCols.length) { setErr('Keine Datums-Spalten erkannt.'); return; }
-    if (!firstNameCol && !lastNameCol) {
-      setErr('Bitte Namensspalten zuordnen (Vorname/Nachname).');
+    if (!cur) {
+      setErr('Bitte Excel auswählen.');
+      setBusy(false);
       return;
     }
-    setBusy(true);
+    if (!dateCols.length) {
+      setErr('Keine Datums-Spalten erkannt.');
+      setBusy(false);
+      return;
+    }
+    if (!firstNameCol && !lastNameCol) {
+      setErr('Bitte Namensspalten zuordnen (Vorname/Nachname).');
+      setBusy(false);
+      return;
+    }
+
     try {
       const idx = (label: string) => cur.headers.indexOf(label);
       const iFirst = idx(firstNameCol);
@@ -242,9 +251,12 @@ export default function RosterUploadPage() {
           assignments
         })
       });
+
       const j = await res.json().catch(() => null);
       if (!res.ok) setErr(j?.error || `Fehler ${res.status}`);
       else setOut(JSON.stringify(j, null, 2));
+    } catch (e) {
+      setErr(String(e));
     } finally {
       setBusy(false);
     }
@@ -253,7 +265,7 @@ export default function RosterUploadPage() {
   return (
     <div className="space-y-6">
       <h1 className="text-xl font-semibold">Dienstplan hochladen (Excel – breite Tagesspalten)</h1>
-      {/* Datei */}
+      
       <div className="max-w-xl space-y-2">
         <label className="block text-sm font-medium">Excel (.xlsx/.xls)</label>
         <input
@@ -263,17 +275,18 @@ export default function RosterUploadPage() {
         />
         {file && <div className="text-xs text-gray-500">Datei: {file.name}</div>}
       </div>
-      {/* Sheet-Picker */}
+
       {sheets.length > 1 && (
         <div className="max-w-xl">
           <label className="block text-sm font-medium mb-1">Tabelle (Sheet)</label>
           <select value={sheetIdx} onChange={e => setSheetIdx(Number(e.target.value))}
-            className="w-full border rounded px-2 py-1.5">
-            {sheets.map((s, i) => <option key={s.name} value={i}>{s.name}</option>)}
+            className="w-full border rounded px-2 py-1.5"
+          >
+            {sheets.map((s, i) => (<option key={s.name} value={i}>{s.name}</option>))}
           </select>
         </div>
       )}
-      {/* Mapping */}
+
       {cur && (
         <div className="max-w-4xl space-y-3">
           <div className="text-sm font-medium">Spalten-Zuordnung</div>
@@ -289,9 +302,8 @@ export default function RosterUploadPage() {
                 <label key={h} className={`text-xs px-2 py-1 rounded border cursor-pointer ${dateCols.includes(h) ? 'bg-blue-50 border-blue-200' : 'bg-gray-50 border-gray-200'}`}>
                   <input type="checkbox" className="mr-1"
                     checked={dateCols.includes(h)}
-                    onChange={(e) => {
-                      setDateCols(prev => e.target.checked ? [...prev, h] : prev.filter(x => x !== h));
-                    }} />
+                    onChange={(e) => setDateCols(prev => e.target.checked ? [...prev, h] : prev.filter(x => x !== h))}
+                  />
                   {h}
                 </label>
               ))}
@@ -299,7 +311,7 @@ export default function RosterUploadPage() {
           </div>
         </div>
       )}
-      {/* Mitarbeiter-Zuordnung */}
+
       {cur && (
         <div className="max-w-3xl space-y-2">
           <div className="text-sm font-medium">Mitarbeiter-Zuordnung (Excel → Benutzer im System)</div>
@@ -307,7 +319,9 @@ export default function RosterUploadPage() {
           <ul className="divide-y border rounded bg-white">
             {assignments.map(a => (
               <li key={a.sheetName} className="p-2 flex items-center gap-3">
-                <div className="min-w-[220px] text-sm">{a.sheetName} {a.team_name && <span className="text-gray-500 ml-2">({a.team_name})</span>}</div>
+                <div className="min-w-[220px] text-sm">
+                  {a.sheetName} {a.team_name && <span className="text-gray-500 ml-2">({a.team_name})</span>}
+                </div>
                 <select
                   value={a.user_id}
                   onChange={e => setAssign(a.sheetName, e.target.value)}
@@ -324,13 +338,47 @@ export default function RosterUploadPage() {
           </div>
         </div>
       )}
+
+      <form onSubmit={submit} className="space-y-2 max-w-xl">
+        {err && <div className="text-sm text-red-600">{err}</div>}
+        <button type="submit" className="px-3 py-1.5 rounded bg-blue-600 text-white disabled:opacity-70"
+          disabled={busy || !cur || !dateCols.length}>
+          {busy ? 'Hochladen…' : 'Hochladen'}
+        </button>
+      </form>
+
+      {out && 
+        <pre className="bg-black/5 p-3 rounded text-xs whitespace-pre-wrap max-w-xl">
+          {out}
+        </pre>
+      }
+
+      {previewRows.length > 0 && (
+        <div className="max-w-xl overflow-auto border rounded mt-5">
+          <div className="text-sm font-medium mb-2">Vorschau (erste 20 Zeilen · nur Tageszellen)</div>
+          <table className="min-w-full text-sm">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-2 py-1.5 border-b text-left">Mitarbeiter (Excel)</th>
+                {dateCols.map(h => <th key={h} className="px-2 py-1.5 border-b text-left">{h}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {previewRows.map((r, i) => (
+                <tr key={i} className="odd:bg-white even:bg-gray-50/50">
+                  <td className="px-2 py-1.5 border-b">{r.person}</td>
+                  {r.cols.map((c, ci) => <td key={ci} className="px-2 py-1.5 border-b whitespace-pre align-top">{c}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
 
-function MapSelect({
-  label, value, onChange, options
-}: { label: string; value: string; onChange: (v: string) => void; options: Array<{ value: string; label: string }> }) {
+function MapSelect({ label, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options: Array<{ value: string; label: string }> }) {
   return (
     <label className="block text-sm">
       <span className="block mb-1">{label}</span>
