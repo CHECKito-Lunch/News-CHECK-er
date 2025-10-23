@@ -1,5 +1,4 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-// app/api/teams/[id]/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -18,10 +17,13 @@ function getTeamId(url: string): number | null {
 
 export async function PATCH(req: NextRequest) {
   const me = await getAdminFromCookies(req);
-  const canEdit = me && (me.role === 'admin' || me.role === 'teamleiter');
+  
+  // Teamleiter dürfen bearbeiten
+  const canEdit = me && (me.role === 'admin' || me.role === 'moderator' || me.role === 'teamleiter');
   if (!canEdit) {
     return NextResponse.json({ ok:false, error:'forbidden' }, { status:403 });
   }
+  
   const id = getTeamId(req.url);
   if (!id) return NextResponse.json({ ok:false, error:'bad_id' }, { status:400 });
 
@@ -36,10 +38,13 @@ export async function PATCH(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   const me = await getAdminFromCookies(req);
-const canEdit = me && (me.role === 'admin' || me.role === 'moderator' || me.role === 'teamleiter');
-if (!canEdit) {
-  return NextResponse.json({ ok:false, error:'forbidden' }, { status:403 });
-}
+  
+  // Teamleiter dürfen löschen
+  const canEdit = me && (me.role === 'admin' || me.role === 'moderator' || me.role === 'teamleiter');
+  if (!canEdit) {
+    return NextResponse.json({ ok:false, error:'forbidden' }, { status:403 });
+  }
+  
   const id = getTeamId(req.url);
   if (!id) return NextResponse.json({ ok:false, error:'bad_id' }, { status:400 });
 
