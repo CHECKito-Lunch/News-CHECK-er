@@ -178,86 +178,24 @@ export default function SiteHeader() {
   );
 
   return (
-    <header className="sticky top-0 z-30 bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl border-b border-gray-200/50 dark:border-gray-800/50 shadow-sm">
-      <div className="w-full max-w-[1920px] mx-auto px-6">
-        {/* Top Row */}
-        <div className="flex items-center justify-between py-1">
-          <Link href="/" aria-label="Startseite" className="shrink-0">
-            <Image
-              src="/header.svg"
-              alt="NewsCHECKer"
-              width={200}
-              height={50}
-              className="h-10 md:h-12 w-auto dark:opacity-90"
-              priority
-              sizes="(max-width: 768px) 160px, 200px"
-            />
-          </Link>
+  <header className="sticky top-0 z-30 bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl border-b border-gray-200/50 dark:border-gray-800/50 shadow-sm">
+    <div className="w-full max-w-[1920px] mx-auto px-6 py-3">
+      <div className="flex items-center justify-between gap-4">
+        {/* Logo Links */}
+        <Link href="/" aria-label="Startseite" className="shrink-0">
+          <Image
+            src="/header.svg"
+            alt="NewsCHECKer"
+            width={200}
+            height={50}
+            className="h-10 md:h-12 w-auto dark:opacity-90"
+            priority
+            sizes="(max-width: 768px) 160px, 200px"
+          />
+        </Link>
 
-          <div className="flex items-center gap-3">
-            {/* Mark All Read */}
-            {me && counts.total > 0 && (
-              <motion.button
-                type="button"
-                onClick={markAllRead}
-                disabled={marking}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                initial={false}
-                animate={
-                  prefersReducedMotion
-                    ? {}
-                    : {
-                        boxShadow: markedOk
-                          ? '0 4px 16px rgba(59,130,246,.3)'
-                          : '0 2px 8px rgba(0,0,0,.05)',
-                      }
-                }
-                className="hidden sm:inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-700 hover:from-blue-100 hover:to-indigo-100 dark:from-blue-900/20 dark:to-indigo-900/20 dark:text-blue-300 dark:hover:from-blue-900/30 dark:hover:to-indigo-900/30 border border-blue-200/50 dark:border-blue-800/50 shadow-sm transition-all disabled:opacity-60"
-                title="Alle Benachrichtigungen als gelesen markieren"
-              >
-                {marking ? (
-                  <IconSpinner />
-                ) : markedOk ? (
-                  <IconCheck />
-                ) : (
-                  <IconMenuThin />
-                )}
-                <span className="hidden md:inline">
-                  {markedOk ? 'Erledigt!' : `${counts.total} als gelesen`}
-                </span>
-              </motion.button>
-            )}
-
-            {/* Logout / Login */}
-            {me ? (
-              <form action="/api/logout" method="post">
-                <motion.button
-                  type="submit"
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-red-600 to-red-500 hover:from-red-700 hover:to-red-600 text-white px-4 py-2 text-sm font-medium shadow-md shadow-red-500/20 transition-all"
-                >
-                  <IconPower />
-                  <span className="hidden sm:inline">Abmelden</span>
-                </motion.button>
-              </form>
-            ) : (
-              <Link
-                href="https://www.karl-marx-checknitz.de/login"
-                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white px-4 py-2 text-sm font-medium shadow-md shadow-blue-500/20 transition-all"
-              >
-                Anmelden
-              </Link>
-            )}
-          </div>
-        </div>
-
-        {/* Tropfen-Navigation */}
-        <nav
-          className="flex items-end justify-center gap-2 -mb-px overflow-x-auto pb-3 scrollbar-hide"
-          aria-label="Hauptnavigation"
-        >
+        {/* Tropfen-Navigation Mitte */}
+        <nav className="flex items-center justify-center gap-2 overflow-x-auto scrollbar-hide" aria-label="Hauptnavigation">
           {links.map((item) => {
             const isActive =
               pathname === item.href ||
@@ -279,14 +217,14 @@ export default function SiteHeader() {
                 <motion.div
                   initial={false}
                   animate={{
-                    height: isActive ? 60 : 36,
+                    height: isActive ? 48 : 32,
                   }}
                   transition={{
                     type: 'spring',
                     stiffness: 500,
                     damping: 35,
                   }}
-                  className="relative w-14 rounded-b-full overflow-hidden"
+                  className="relative w-12 rounded-b-full overflow-hidden"
                   style={{
                     borderBottomLeftRadius: '50%',
                     borderBottomRightRadius: '50%',
@@ -306,10 +244,11 @@ export default function SiteHeader() {
                   />
 
                   {/* Icon */}
-                  <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center justify-center">
+                  <div className="absolute bottom-1 left-1/2 -translate-x-1/2 flex items-center justify-center">
                     <Icon
                       strokeWidth={isActive ? 2.5 : 2}
                       className={`
+                        w-4 h-4
                         ${isActive ? 'text-white' : 'text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white'}
                         transition-colors
                       `}
@@ -320,7 +259,7 @@ export default function SiteHeader() {
                 {/* Label */}
                 <span
                   className={`
-                    mt-2 px-2.5 py-0.5 text-[11px] font-semibold rounded-full whitespace-nowrap
+                    mt-1 px-2 py-0.5 text-[10px] font-semibold rounded-full whitespace-nowrap
                     ${
                       isActive
                         ? 'bg-blue-100 text-blue-900 dark:bg-blue-900/40 dark:text-blue-100'
@@ -335,9 +274,69 @@ export default function SiteHeader() {
             );
           })}
         </nav>
+
+        {/* Buttons Rechts */}
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Mark All Read */}
+          {me && counts.total > 0 && (
+            <motion.button
+              type="button"
+              onClick={markAllRead}
+              disabled={marking}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              initial={false}
+              animate={
+                prefersReducedMotion
+                  ? {}
+                  : {
+                      boxShadow: markedOk
+                        ? '0 4px 16px rgba(59,130,246,.3)'
+                        : '0 2px 8px rgba(0,0,0,.05)',
+                    }
+              }
+              className="hidden lg:inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-700 hover:from-blue-100 hover:to-indigo-100 dark:from-blue-900/20 dark:to-indigo-900/20 dark:text-blue-300 dark:hover:from-blue-900/30 dark:hover:to-indigo-900/30 border border-blue-200/50 dark:border-blue-800/50 shadow-sm transition-all disabled:opacity-60"
+              title="Alle Benachrichtigungen als gelesen markieren"
+            >
+              {marking ? (
+                <IconSpinner />
+              ) : markedOk ? (
+                <IconCheck />
+              ) : (
+                <IconMenuThin />
+              )}
+              <span className="hidden xl:inline">
+                {markedOk ? 'Erledigt!' : `${counts.total} als gelesen`}
+              </span>
+            </motion.button>
+          )}
+
+          {/* Logout / Login */}
+          {me ? (
+            <form action="/api/logout" method="post">
+              <motion.button
+                type="submit"
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-red-600 to-red-500 hover:from-red-700 hover:to-red-600 text-white px-3 py-2 text-sm font-medium shadow-md shadow-red-500/20 transition-all"
+              >
+                <IconPower />
+                <span className="hidden sm:inline">Abmelden</span>
+              </motion.button>
+            </form>
+          ) : (
+            <Link
+              href="https://www.karl-marx-checknitz.de/login"
+              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white px-3 py-2 text-sm font-medium shadow-md shadow-blue-500/20 transition-all"
+            >
+              Anmelden
+            </Link>
+          )}
+        </div>
       </div>
-    </header>
-  );
+    </div>
+  </header>
+);
 }
 
 /* ===== Icons ===== */
