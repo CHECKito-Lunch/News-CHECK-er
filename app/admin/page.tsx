@@ -38,9 +38,9 @@ const tiles: Array<{
   { href: '/admin/kpis',          label: 'KPIs',                 icon: Activity,     roles: ['admin','teamleiter'] },
   { href: '/admin/users',         label: 'Benutzer',             icon: UserCircle2,  roles: ['admin','moderator','teamleiter'] },
   { href: '/admin/checkiade',     label: 'CHECKiade',            icon: Trophy,       roles: ['admin','teamleiter'] },
-  { href: '/admin/feedback',      label: 'Feedbacks',            icon: Vote,         roles: ['admin','teamleiter'] },
-  { href: '/admin/qa',      label: 'Mitarbeiter Feedbacks',                    icon: Tags,         roles: ['admin','teamleiter'] },
-  { href: '/admin/roster-upload',    label: 'Dienstplan Upload',           icon: CalendarCog,          roles: ['admin','teamleiter'] },
+  { href: '/admin/feedback',      label: 'E-Feedback Upload',    icon: Vote,         roles: ['admin','teamleiter'] },
+  { href: '/admin/qa',            label: 'MA Feedback Upload',   icon: Tags,         roles: ['admin','teamleiter'] },
+  { href: '/admin/roster-upload', label: 'Dienstplan Upload',    icon: CalendarCog,  roles: ['admin','teamleiter'] },
 ];
 
 async function absoluteUrl(path: string) {
