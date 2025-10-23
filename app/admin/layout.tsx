@@ -3,7 +3,7 @@ import { ReactNode } from 'react';
 import { cookies } from 'next/headers';
 import { verifyToken, AUTH_COOKIE, type Role } from '@/lib/auth';
 import AdminHeader from '../components/AdminHeader';
-import AdminTabs from './shared/AdminTabs';
+
 import ScrollToTopButton from '../components/ScrollToTopButton';
 
 export const dynamic = 'force-dynamic';
@@ -25,8 +25,8 @@ export default async function AdminLayout({ children }: { children: ReactNode })
       <AdminHeader initialRole={role} />
 
       <div className="flex flex-1 gap-6">
-        {/* Sidebar */}
-        <AdminTabs />
+       
+       
 
         {/* Main */}
         <main className="flex-1 px-4 sm:px-8 py-6">
