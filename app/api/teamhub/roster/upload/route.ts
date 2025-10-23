@@ -170,10 +170,10 @@ export async function POST(req: NextRequest){
 
     if (!out.length) return json({ ok:false, error:'no_parsed_rows' }, 400);
 
-    // --------------------------- INSERT (mit Flip + Fallback Membership) ---------------------------
+    // ---------------- INSERT: Name-Match (inkl. Flip) + team_id aus app_users, Fallback memberships
     const inserted = await sql/*sql*/`
 WITH src AS (
-  SELECT * FROM jsonb_to_recordset(${sqlJson(out)}) AS r(
+  SELECT * FROM jsonb_to_recordset(${sqlJson(out ?? [])}) AS r(
     roster_date     text,
     start_time      text,
     end_time        text,
@@ -187,10 +187,10 @@ WITH src AS (
 ),
 assign_map AS (
   SELECT
-    -- Normalisierung wie im Frontend
+    -- Norm: lower + Umlaute -> ASCII + Sonderzeichen entfernen + Spaces komprimieren
     regexp_replace(
       regexp_replace(
-        replace(replace(replace(replace(lower(a.sheetName),'ä','ae'),'ö','oe'),'ü','ue'),'ß','ss'),
+        translate(lower(a.sheetName),'äöüß','aeoeuess'),
         '[^a-z0-9\\s]','',
         'g'
       ),
@@ -198,63 +198,43 @@ assign_map AS (
       'g'
     ) AS sheet_name_norm,
     NULLIF(a.user_id, '')::uuid AS user_id
-  FROM jsonb_to_recordset(${sqlJson(assigns)}) AS a(sheetName text, user_id text)
+  FROM jsonb_to_recordset(${sqlJson(assigns ?? [])}) AS a(sheetName text, user_id text)
   WHERE a.user_id IS NOT NULL
 ),
 src_norm AS (
   SELECT
     s.*,
-    -- Normalisierte Form
+    -- normierter Name
     regexp_replace(
       regexp_replace(
-        replace(replace(replace(replace(lower(s.employee_name),'ä','ae'),'ö','oe'),'ü','ue'),'ß','ss'),
+        translate(lower(s.employee_name),'äöüß','aeoeuess'),
         '[^a-z0-9\\s]','',
         'g'
       ),
       '\\s+',' ',
       'g'
-    ) AS employee_name_norm,
-    -- Geflippte Variante: erstes Wort ans Ende
-    regexp_replace(
-      regexp_replace(
-        replace(replace(replace(replace(
-          lower(
-            regexp_replace(
-              regexp_replace(
-                replace(replace(replace(replace(s.employee_name,'ä','ae'),'ö','oe'),'ü','ue'),'ß','ss'),
-                '[^A-Za-z0-9\\s]','',
-                'g'
-              ),
-              '\\s+',' ',
-              'g'
-            )
-          ),'ä','ae'),'ö','oe'),'ü','ue'),'ß','ss'),
-        '[^a-z0-9\\s]','',
-        'g'
-      ),
-      '\\s+',' ',
-      'g'
-    ) AS employee_name_norm_tmp
+    ) AS employee_name_norm
   FROM src s
 ),
 src_with_flip AS (
   SELECT
-    *,
-    -- Flip: "^(\S+)\s+(.*)$" -> "\2 \1", sonst gleich
+    sn.*,
+    -- Flip ohne Backreferences: erstes Wort ans Ende schieben
     CASE
-      WHEN employee_name_norm_tmp ~ '^[^\\s]+\\s+.+$'
-      THEN regexp_replace(employee_name_norm_tmp, '^([^\\s]+)\\s+(.+)$', '\\2 \\1')
-      ELSE employee_name_norm_tmp
+      WHEN position(' ' in employee_name_norm) > 0
+      THEN substring(employee_name_norm from position(' ' in employee_name_norm)+1)
+           || ' ' ||
+           split_part(employee_name_norm,' ',1)
+      ELSE employee_name_norm
     END AS employee_name_flip
-  FROM src_norm
+  FROM src_norm sn
 ),
 app_users_active AS (
   SELECT
     au.*,
-    -- Normalisierung Name
     regexp_replace(
       regexp_replace(
-        replace(replace(replace(replace(lower(au.name),'ä','ae'),'ö','oe'),'ü','ue'),'ß','ss'),
+        translate(lower(au.name),'äöüß','aeoeuess'),
         '[^a-z0-9\\s]','',
         'g'
       ),
@@ -267,7 +247,6 @@ app_users_active AS (
 resolved_user AS (
   SELECT
     sn.*,
-    -- 1) Assignment, 2) exakter Name, 3) Flip-Name
     COALESCE(am.user_id, aua.user_id) AS user_id
   FROM src_with_flip sn
   LEFT JOIN assign_map am
@@ -278,7 +257,6 @@ resolved_user AS (
 resolved_team AS (
   SELECT
     ru.*,
-    -- Primär: app_users.team_id; Fallback: erste aktive Membership
     COALESCE(au2.team_id, tm.team_id) AS team_id
   FROM resolved_user ru
   LEFT JOIN public.app_users au2
@@ -319,10 +297,10 @@ WHERE rt.user_id IS NOT NULL
 RETURNING id;
     `;
 
-    // --------------------------- UNRESOLVED (gleiche Logik) ---------------------------
+    // ---------------- UNRESOLVED: gleiche Ableitung, klarere Gründe
     const unresolved = await sql/*sql*/`
 WITH src AS (
-  SELECT * FROM jsonb_to_recordset(${sqlJson(out)}) AS r(
+  SELECT * FROM jsonb_to_recordset(${sqlJson(out ?? [])}) AS r(
     roster_date     text,
     start_time      text,
     end_time        text,
@@ -338,7 +316,7 @@ assign_map AS (
   SELECT
     regexp_replace(
       regexp_replace(
-        replace(replace(replace(replace(lower(a.sheetName),'ä','ae'),'ö','oe'),'ü','ue'),'ß','ss'),
+        translate(lower(a.sheetName),'äöüß','aeoeuess'),
         '[^a-z0-9\\s]','',
         'g'
       ),
@@ -346,7 +324,7 @@ assign_map AS (
       'g'
     ) AS sheet_name_norm,
     NULLIF(a.user_id, '')::uuid AS user_id
-  FROM jsonb_to_recordset(${sqlJson(assigns)}) AS a(sheetName text, user_id text)
+  FROM jsonb_to_recordset(${sqlJson(assigns ?? [])}) AS a(sheetName text, user_id text)
   WHERE a.user_id IS NOT NULL
 ),
 src_norm AS (
@@ -354,51 +332,33 @@ src_norm AS (
     s.*,
     regexp_replace(
       regexp_replace(
-        replace(replace(replace(replace(lower(s.employee_name),'ä','ae'),'ö','oe'),'ü','ue'),'ß','ss'),
+        translate(lower(s.employee_name),'äöüß','aeoeuess'),
         '[^a-z0-9\\s]','',
         'g'
       ),
       '\\s+',' ',
       'g'
-    ) AS employee_name_norm,
-    regexp_replace(
-      regexp_replace(
-        replace(replace(replace(replace(
-          lower(
-            regexp_replace(
-              regexp_replace(
-                replace(replace(replace(replace(s.employee_name,'ä','ae'),'ö','oe'),'ü','ue'),'ß','ss'),
-                '[^A-Za-z0-9\\s]','',
-                'g'
-              ),
-              '\\s+',' ',
-              'g'
-            )
-          ),'ä','ae'),'ö','oe'),'ü','ue'),'ß','ss'),
-        '[^a-z0-9\\s]','',
-        'g'
-      ),
-      '\\s+',' ',
-      'g'
-    ) AS employee_name_norm_tmp
+    ) AS employee_name_norm
   FROM src s
 ),
 src_with_flip AS (
   SELECT
-    *,
+    sn.*,
     CASE
-      WHEN employee_name_norm_tmp ~ '^[^\\s]+\\s+.+$'
-      THEN regexp_replace(employee_name_norm_tmp, '^([^\\s]+)\\s+(.+)$', '\\2 \\1')
-      ELSE employee_name_norm_tmp
+      WHEN position(' ' in employee_name_norm) > 0
+      THEN substring(employee_name_norm from position(' ' in employee_name_norm)+1)
+           || ' ' ||
+           split_part(employee_name_norm,' ',1)
+      ELSE employee_name_norm
     END AS employee_name_flip
-  FROM src_norm
+  FROM src_norm sn
 ),
 app_users_active AS (
   SELECT
     au.*,
     regexp_replace(
       regexp_replace(
-        replace(replace(replace(replace(lower(au.name),'ä','ae'),'ö','oe'),'ü','ue'),'ß','ss'),
+        translate(lower(au.name),'äöüß','aeoeuess'),
         '[^a-z0-9\\s]','',
         'g'
       ),
