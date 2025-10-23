@@ -68,9 +68,9 @@ export default function AdminHeader({ initialRole }: { initialRole?: Role }) {
 
   return (
     <header className="sticky top-0 z-30 bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl border-b border-gray-200/50 dark:border-gray-800/50 shadow-sm">
-      <div className="w-full max-w-[1920px] mx-auto px-6">
-        {/* Top Row: Logo + Logout */}
-        <div className="flex items-center justify-between py-1">
+      <div className="w-full max-w-[1920px] mx-auto px-6 py-3">
+        <div className="flex items-center justify-between gap-4">
+          {/* Logo Links */}
           <Link href="/" className="shrink-0">
             <Image
               src="/header.svg"
@@ -83,103 +83,106 @@ export default function AdminHeader({ initialRole }: { initialRole?: Role }) {
             />
           </Link>
 
-          {me && (
-            <form action="/api/logout" method="post">
-              <motion.button
-                type="submit"
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-red-600 to-red-500 hover:from-red-700 hover:to-red-600 text-white px-4 py-2 text-sm font-medium shadow-md shadow-red-500/20 transition-all"
-              >
-                <Power className="w-4 h-4" />
-                <span className="hidden sm:inline">Abmelden</span>
-              </motion.button>
-            </form>
-          )}
-        </div>
+          {/* Tropfen-Navigation Mitte */}
+          <nav className="flex items-center justify-center gap-2 overflow-x-auto scrollbar-hide" aria-label="Hauptnavigation">
+            {navItems.map((item) => {
+              const isActive =
+                pathname === item.href || (item.href !== '/' && pathname?.startsWith(item.href));
+              const Icon = item.icon;
 
-        {/* Tropfen-Navigation */}
-        <nav className="flex items-end justify-center gap-2 -mb-px overflow-x-auto pb-3 scrollbar-hide" aria-label="Hauptnavigation">
-          {navItems.map((item) => {
-            const isActive =
-              pathname === item.href || (item.href !== '/' && pathname?.startsWith(item.href));
-            const Icon = item.icon;
-
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                aria-current={isActive ? 'page' : undefined}
-                className="group relative flex flex-col items-center shrink-0"
-              >
-                {/* Tropfen */}
-                <motion.div
-                  initial={false}
-                  animate={{
-                    height: isActive ? 60 : 36,
-                  }}
-                  transition={{
-                    type: 'spring',
-                    stiffness: 500,
-                    damping: 35,
-                  }}
-                  className="relative w-14 rounded-b-full overflow-hidden"
-                  style={{
-                    borderBottomLeftRadius: '50%',
-                    borderBottomRightRadius: '50%',
-                  }}
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  aria-current={isActive ? 'page' : undefined}
+                  className="group relative flex flex-col items-center shrink-0"
                 >
-                  {/* Gradient Background */}
-                  <div
-                    className={`
-                      absolute inset-0
-                      ${
-                        isActive
-                          ? 'bg-gradient-to-b from-blue-500 to-blue-600 shadow-lg shadow-blue-500/40'
-                          : 'bg-gradient-to-b from-gray-300/60 to-gray-400/60 dark:from-gray-700/60 dark:to-gray-600/60 group-hover:from-gray-400/70 group-hover:to-gray-500/70'
-                      }
-                      transition-all duration-200
-                    `}
-                  />
+                  {/* Tropfen */}
+                  <motion.div
+                    initial={false}
+                    animate={{
+                      height: isActive ? 48 : 32,
+                    }}
+                    transition={{
+                      type: 'spring',
+                      stiffness: 500,
+                      damping: 35,
+                    }}
+                    className="relative w-12 rounded-b-full overflow-hidden"
+                    style={{
+                      borderBottomLeftRadius: '50%',
+                      borderBottomRightRadius: '50%',
+                    }}
+                  >
+                    {/* Gradient Background */}
+                    <div
+                      className={`
+                        absolute inset-0
+                        ${
+                          isActive
+                            ? 'bg-gradient-to-b from-blue-500 to-blue-600 shadow-lg shadow-blue-500/40'
+                            : 'bg-gradient-to-b from-gray-300/60 to-gray-400/60 dark:from-gray-700/60 dark:to-gray-600/60 group-hover:from-gray-400/70 group-hover:to-gray-500/70'
+                        }
+                        transition-all duration-200
+                      `}
+                    />
 
-                  {/* Icon am Ende des Tropfens */}
-                  <div
+                    {/* Icon */}
+                    <div
+                      className={`
+                        absolute bottom-1 left-1/2 -translate-x-1/2
+                        flex items-center justify-center
+                        ${
+                          isActive
+                            ? 'text-white'
+                            : 'text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white'
+                        }
+                        transition-colors
+                      `}
+                    >
+                      <Icon 
+                        className="w-4 h-4" 
+                        strokeWidth={isActive ? 2.5 : 2} 
+                      />
+                    </div>
+                  </motion.div>
+
+                  {/* Label */}
+                  <span
                     className={`
-                      absolute bottom-2 left-1/2 -translate-x-1/2
-                      flex items-center justify-center
+                      mt-1 px-2 py-0.5 text-[10px] font-semibold rounded-full whitespace-nowrap
                       ${
                         isActive
-                          ? 'text-white'
-                          : 'text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white'
+                          ? 'bg-blue-100 text-blue-900 dark:bg-blue-900/40 dark:text-blue-100'
+                          : 'text-gray-600 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-gray-100'
                       }
                       transition-colors
                     `}
                   >
-                    <Icon 
-                      className="w-5 h-5" 
-                      strokeWidth={isActive ? 2.5 : 2} 
-                    />
-                  </div>
-                </motion.div>
+                    {item.label}
+                  </span>
+                </Link>
+              );
+            })}
+          </nav>
 
-                {/* Label */}
-                <span
-                  className={`
-                    mt-2 px-2.5 py-0.5 text-[11px] font-semibold rounded-full whitespace-nowrap
-                    ${
-                      isActive
-                        ? 'bg-blue-100 text-blue-900 dark:bg-blue-900/40 dark:text-blue-100'
-                        : 'text-gray-600 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-gray-100'
-                    }
-                    transition-colors
-                  `}
+          {/* Logout Button Rechts */}
+          <div className="shrink-0">
+            {me && (
+              <form action="/api/logout" method="post">
+                <motion.button
+                  type="submit"
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-red-600 to-red-500 hover:from-red-700 hover:to-red-600 text-white px-3 py-2 text-sm font-medium shadow-md shadow-red-500/20 transition-all"
                 >
-                  {item.label}
-                </span>
-              </Link>
-            );
-          })}
-        </nav>
+                  <Power className="w-4 h-4" />
+                  <span className="hidden sm:inline">Abmelden</span>
+                </motion.button>
+              </form>
+            )}
+          </div>
+        </div>
       </div>
     </header>
   );
