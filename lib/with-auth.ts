@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // lib/with-auth.ts
 import { NextRequest } from "next/server";
 import {
@@ -86,5 +87,19 @@ export function withRole<C>(roles: Role[] | Role, handler: AuthedHandler<C>) {
   });
 }
 
-export const withAdmin =    <C,>(h: AuthedHandler<C>) => withRole<C>("admin", h);
+// ------------------------------
+// Vordefinierte Role-Wrapper
+// ------------------------------
+
+/** Nur Admin */
+export const withAdmin = <C,>(h: AuthedHandler<C>) => withRole<C>("admin", h);
+
+/** Admin oder Moderator */
 export const withModerator = <C,>(h: AuthedHandler<C>) => withRole<C>(["admin", "moderator"], h);
+
+/** Admin, Moderator oder Teamleiter (alle haben Admin-Rechte) */
+export const withAdminRights = <C,>(h: AuthedHandler<C>) => 
+  withRole<C>(["admin", "moderator", "teamleiter"], h);
+
+/** Alias für withAdminRights (semantisch klarer für manche Fälle) */
+export const withAdminOrTeamleiter = withAdminRights;

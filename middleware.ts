@@ -51,6 +51,11 @@ function isAdminOnly(pathname: string) {
   return ADMIN_ONLY_PREFIXES.some((p) => pathname.startsWith(p));
 }
 
+/** Hilfsfunktion: Prüft ob User Admin-Rechte hat (Admin, Moderator oder Teamleiter) */
+function hasAdminRights(role: Role | undefined): boolean {
+  return role === 'admin' || role === 'moderator' || role === 'teamleiter';
+}
+
 /* ----------------------------- Middleware ----------------------------- */
 export function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
@@ -60,7 +65,7 @@ export function middleware(req: NextRequest) {
 
   // 2) Login-Erkennung
   const roleCookie = req.cookies.get('user_role')?.value as Role | undefined;
-  const hasAuthJwt = !!req.cookies.get('auth')?.value;  // dein JWT
+  const hasAuthJwt = !!req.cookies.get('auth')?.value;
 
   // a) Weder Rolle noch JWT -> Login/Redirect
   if (!roleCookie && !hasAuthJwt) {
@@ -69,12 +74,10 @@ export function middleware(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // 3) Admin-Bereiche nur dann von der Middleware einschränken,
-  //    wenn eine explizite Rolle im Cookie steht. Falls nur JWT da ist,
-  //    lassen wir durch und der Server-Handler (DB) entscheidet.
+  // 3) Admin-Bereiche: Admin, Moderator oder Teamleiter dürfen rein
   if (roleCookie) {
     // b) Adminbereich: admin | moderator | teamleiter dürfen rein
-    if (isAdminArea(pathname) && !(roleCookie === 'admin' || roleCookie === 'moderator' || roleCookie === 'teamleiter')) {
+    if (isAdminArea(pathname) && !hasAdminRights(roleCookie)) {
       return pathname.startsWith('/api')
         ? NextResponse.json({ error: 'Forbidden' }, { status: 403 })
         : NextResponse.redirect(new URL('/', req.url));
@@ -92,10 +95,14 @@ export function middleware(req: NextRequest) {
 }
 
 /* ----------------------------- Matcher ----------------------------- */
-/* API bewusst vom Matching ausgeschlossen (robuster; Server-Handler authorisiert selbst) */
 export const config = {
   matcher: [
-    // alles außer Next-Assets/Icons UND außer /api
-    '/((?!_next/static|_next/image|favicon.ico|header.svg|api).*)',
+    /*
+     * Match all request paths except for:
+     * - _next/static (static files)
+     * - _next/image (image optimization files)
+     * - favicon.ico, header.svg (icons)
+     */
+    '/((?!_next/static|_next/image|favicon.ico|header.svg).*)',
   ],
 };

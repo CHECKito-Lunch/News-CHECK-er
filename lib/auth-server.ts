@@ -1,9 +1,10 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // lib/auth-server.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { cookies, headers } from 'next/headers';
 
-export type Role = 'admin'|'moderator'|'user';
+export type Role = 'admin' | 'moderator' | 'teamleiter' | 'user'; // <-- ÄNDERUNG
 export type SessionUser = { sub: string; role: Role; name?: string; email?: string };
 export type AuthUser = { sub: string; email: string|null; name: string|null; role: Role } & Record<string, any>;
 
@@ -27,7 +28,11 @@ function bearerFrom(req: NextRequest): string | null {
 // Role normalisieren (Fallback 'user')
 const normalizeRole = (r?: string | null): Role => {
   const v = String(r || '').toLowerCase();
-  return (v === 'admin' || v === 'moderator') ? v : 'user';
+  // ÄNDERUNG: teamleiter als valide Rolle erkennen
+  if (v === 'admin') return 'admin';
+  if (v === 'moderator') return 'moderator';
+  if (v === 'teamleiter') return 'teamleiter';
+  return 'user';
 };
 
 // ⛳ nach Login/Refresh Cookies konsistent setzen
@@ -90,7 +95,7 @@ async function loadUserByAnyId(idLike: string | null): Promise<AuthUser | null> 
 }
 
 /**
- * maybeUser: versucht so „robust“ wie möglich den Benutzer zu ermitteln:
+ * maybeUser: versucht so „robust" wie möglich den Benutzer zu ermitteln:
  * - Cookie/Header user_id (UUID ODER numerisch)
  * - Bearer (nur Präsenzcheck; kein Decode hier)
  * - lädt name/email/role IMMER aus DB (Cookies können veraltet sein)
@@ -126,8 +131,14 @@ export async function requireRole(req: NextRequest, allowed: Role[]): Promise<Au
 }
 
 // Bequemlichkeits-Shortcuts
-export const requireAdmin         = (req: NextRequest) => requireRole(req, ['admin']);
-export const requireModOrAdmin    = (req: NextRequest) => requireRole(req, ['admin','moderator']);
+export const requireAdmin = (req: NextRequest) => requireRole(req, ['admin']);
+export const requireModOrAdmin = (req: NextRequest) => requireRole(req, ['admin', 'moderator']);
+
+// NEUE SHORTCUTS für Teamleiter
+export const requireAdminRights = (req: NextRequest) => 
+  requireRole(req, ['admin', 'moderator', 'teamleiter']);
+
+export const requireAdminOrTeamleiter = requireAdminRights; // Alias
 
 /* ------------------- API-Handler-Helfer (optional) ------------------- */
 
