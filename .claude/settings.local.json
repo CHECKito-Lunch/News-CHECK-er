@@ -3,7 +3,8 @@
     "allow": [
       "Bash(cat:*)",
       "Bash(npm run build:*)",
-      "Bash(tee:*)"
+      "Bash(tee:*)",
+      "Read(//home/node/.npm/_logs/**)"
     ],
     "deny": [],
     "ask": []

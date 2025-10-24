@@ -44,11 +44,7 @@ export async function GET(request: NextRequest) {
   // Query bauen
   let query = supabase
     .from('team_threads')
-    .select(`
-      *,
-      author:users!team_threads_author_id_fkey(id, email, raw_user_meta_data),
-      comment_count:team_thread_comments(count)
-    `, { count: 'exact' })
+    .select(`*`, { count: 'exact' })
     .eq('team_id', teamId)
     .order('pinned', { ascending: false })
     .order('updated_at', { ascending: false });
@@ -66,7 +62,8 @@ export async function GET(request: NextRequest) {
   const { data: threads, error, count } = await query;
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error('[Threads GET] Error:', error);
+    return NextResponse.json({ error: error.message, details: error }, { status: 500 });
   }
 
   return NextResponse.json({

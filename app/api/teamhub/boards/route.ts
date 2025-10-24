@@ -38,28 +38,19 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // Hole alle Boards mit Item-Count
+  // Hole alle Boards
   const { data: boards, error } = await supabase
     .from('team_boards')
-    .select(`
-      *,
-      creator:users!team_boards_created_by_fkey(id, email, raw_user_meta_data),
-      item_count:team_board_items(count)
-    `)
+    .select(`*`)
     .eq('team_id', teamId)
     .order('created_at', { ascending: false });
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error('[Boards GET] Error:', error);
+    return NextResponse.json({ error: error.message, details: error }, { status: 500 });
   }
 
-  // Transformiere Daten
-  const transformedBoards = boards?.map(board => ({
-    ...board,
-    item_count: board.item_count[0]?.count || 0
-  }));
-
-  return NextResponse.json({ boards: transformedBoards });
+  return NextResponse.json({ boards: boards || [] });
 }
 
 // POST: Neues Board erstellen (nur Teamleiter)
