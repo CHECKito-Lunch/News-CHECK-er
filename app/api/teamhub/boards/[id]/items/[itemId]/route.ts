@@ -5,10 +5,10 @@ import { createClient } from '@/lib/supabase-server';
 // PUT: Item aktualisieren
 export async function PUT(
   request: NextRequest,
-  { params }: { params: Promise<{ boardId: string; itemId: string }> }
+  { params }: { params: Promise<{ id: string; itemId: string }> }
 ) {
   const supabase = createClient();
-  const { boardId, itemId } = await params;
+  const { id: boardId, itemId } = await params;
   const body = await request.json();
   const {
     title,
@@ -99,10 +99,10 @@ export async function PUT(
 // DELETE: Item löschen
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: Promise<{ boardId: string; itemId: string }> }
+  { params }: { params: Promise<{ id: string; itemId: string }> }
 ) {
   const supabase = await createClient();
-  const { boardId, itemId } = await params;
+  const { id: boardId, itemId } = await params;
 
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) {

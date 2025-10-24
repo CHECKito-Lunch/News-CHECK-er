@@ -59,7 +59,7 @@ export async function POST(
   // Schließe Poll
   const { data, error } = await supabase
     .from('team_polls')
-    .update({ 
+    .update({
       is_closed: true,
       updated_at: new Date().toISOString()
     })
@@ -71,13 +71,13 @@ export async function POST(
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ 
+  return NextResponse.json({
     data,
-    message: 'Poll erfolgreich geschlossen' 
+    message: 'Poll erfolgreich geschlossen'
   });
 }
 
-// POST: Poll wieder öffnen
+// DELETE: Poll wieder öffnen (nur Teamleiter)
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -125,6 +125,20 @@ export async function DELETE(
   // Öffne Poll wieder
   const { data, error } = await supabase
     .from('team_polls')
-    .update({ 
+    .update({
       is_closed: false,
       updated_at: new Date().toISOString()
+    })
+    .eq('id', pollId)
+    .select()
+    .single();
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({
+    data,
+    message: 'Poll wieder geöffnet'
+  });
+}
