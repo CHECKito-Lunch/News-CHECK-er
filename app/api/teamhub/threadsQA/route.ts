@@ -4,11 +4,18 @@ import { supabaseServer } from '@/lib/supabase-server';
 
 // GET: Thread mit allen Kommentaren (verschachtelt)
 export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  request: NextRequest
 ) {
   const supabase = await supabaseServer();
-  const { id: threadId } = await params;
+  const { searchParams } = new URL(request.url);
+  const threadId = searchParams.get('id');
+
+  if (!threadId) {
+    return NextResponse.json(
+      { error: 'thread id ist erforderlich' },
+      { status: 400 }
+    );
+  }
 
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) {
@@ -87,11 +94,18 @@ export async function GET(
 
 // PUT: Thread aktualisieren (nur Autor oder Teamleiter)
 export async function PUT(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  request: NextRequest
 ) {
   const supabase = await supabaseServer();
-  const { id: threadId } = await params;
+  const { searchParams } = new URL(request.url);
+  const threadId = searchParams.get('id');
+
+  if (!threadId) {
+    return NextResponse.json(
+      { error: 'thread id ist erforderlich' },
+      { status: 400 }
+    );
+  }
   const body = await request.json();
   const { title, content, pinned, locked } = body;
 
@@ -161,11 +175,18 @@ export async function PUT(
 
 // DELETE: Thread löschen (nur Autor oder Teamleiter)
 export async function DELETE(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  request: NextRequest
 ) {
   const supabase = await supabaseServer();
-  const { id: threadId } = await params;
+  const { searchParams } = new URL(request.url);
+  const threadId = searchParams.get('id');
+
+  if (!threadId) {
+    return NextResponse.json(
+      { error: 'thread id ist erforderlich' },
+      { status: 400 }
+    );
+  }
 
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) {
