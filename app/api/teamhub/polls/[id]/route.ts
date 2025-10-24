@@ -23,8 +23,8 @@ export async function GET(
     .select(`
       *,
       creator:users!team_polls_created_by_fkey(
-        id, 
-        email, 
+        id,
+        email,
         raw_user_meta_data
       )
     `)
@@ -112,8 +112,8 @@ export async function GET(
     option_text: opt.option_text,
     position: opt.position,
     vote_count: opt.votes[0]?.count || 0,
-    percentage: totalVotes > 0 
-      ? Math.round((opt.votes[0]?.count || 0) / totalVotes * 100) 
+    percentage: totalVotes > 0
+      ? Math.round((opt.votes[0]?.count || 0) / totalVotes * 100)
       : 0
   }));
 
@@ -139,4 +139,60 @@ export async function PUT(
   const body = await request.json();
   const { question, description, closes_at, is_closed } = body;
 
-  const { data: { user }, error: authError } = await supabase
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError || !user) {
+    return NextResponse.json(
+      { error: 'Nicht authentifiziert' },
+      { status: 401 }
+    );
+  }
+
+  // Hole Poll
+  const { data: poll } = await supabase
+    .from('team_polls')
+    .select('team_id, created_by')
+    .eq('id', pollId)
+    .single();
+
+  if (!poll) {
+    return NextResponse.json(
+      { error: 'Poll nicht gefunden' },
+      { status: 404 }
+    );
+  }
+
+  // Prüfe Berechtigung (Ersteller oder Teamleiter)
+  const { data: membership } = await supabase
+    .from('team_memberships')
+    .select('is_teamleiter')
+    .eq('team_id', poll.team_id)
+    .eq('user_id', user.id)
+    .single();
+
+  if (!membership?.is_teamleiter && poll.created_by !== user.id) {
+    return NextResponse.json(
+      { error: 'Keine Berechtigung' },
+      { status: 403 }
+    );
+  }
+
+  // Update Poll
+  const updateData: Record<string, unknown> = {};
+  if (question !== undefined) updateData.question = question;
+  if (description !== undefined) updateData.description = description;
+  if (closes_at !== undefined) updateData.closes_at = closes_at;
+  if (is_closed !== undefined) updateData.is_closed = is_closed;
+
+  const { data, error } = await supabase
+    .from('team_polls')
+    .update(updateData)
+    .eq('id', pollId)
+    .select()
+    .single();
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ data });
+}
