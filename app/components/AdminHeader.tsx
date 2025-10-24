@@ -98,34 +98,34 @@ export default function AdminHeader({ initialRole }: { initialRole?: Role }) {
                   className="group relative flex flex-col items-center shrink-0"
                 >
                   {/* Tropfen */}
-                  <motion.div
-                    initial={false}
-                    animate={{
-                      height: isActive ? 48 : 32,
-                    }}
-                    transition={{
-                      type: 'spring',
-                      stiffness: 500,
-                      damping: 35,
-                    }}
-                    className="relative w-12 rounded-b-full overflow-hidden"
-                    style={{
-                      borderBottomLeftRadius: '50%',
-                      borderBottomRightRadius: '50%',
-                    }}
-                  >
-                    {/* Gradient Background */}
-                    <div
-                      className={`
-                        absolute inset-0
-                        ${
-                          isActive
-                            ? 'bg-gradient-to-b from-blue-500 to-blue-600 shadow-lg shadow-blue-500/40'
-                            : 'bg-gradient-to-b from-gray-300/60 to-gray-400/60 dark:from-gray-700/60 dark:to-gray-600/60 group-hover:from-gray-400/70 group-hover:to-gray-500/70'
-                        }
-                        transition-all duration-200
-                      `}
-                    />
+                                  <motion.div
+                                    initial={false}
+                                    animate={{
+                                      height: isActive ? 48 : 32,
+                                    }}
+                                    transition={{
+                                      type: 'spring',
+                                      stiffness: 500,
+                                      damping: 35,
+                                    }}
+                                    className="relative w-12 rounded-b-full overflow-hidden"
+                                    style={{
+                                      borderBottomLeftRadius: '10%',
+                                      borderBottomRightRadius: '10%',
+                                    }}
+                                  >
+                                    {/* Gradient Background */}
+                                    <div
+                                      className={`
+                                        absolute inset-0
+                                        ${
+                                          isActive
+                                            ? 'bg-gradient-to-b from-blue-300 to-blue-500 shadow-lg shadow-blue-500/40'
+                                            : 'bg-gradient-to-b from-gray-300/60 to-gray-400/60 dark:from-gray-700/60 dark:to-gray-600/60 group-hover:from-gray-400/70 group-hover:to-gray-500/70'
+                                        }
+                                        transition-all duration-200
+                                      `}
+                                    />
 
                     {/* Icon */}
                     <div
