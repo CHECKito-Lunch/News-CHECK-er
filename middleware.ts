@@ -4,25 +4,25 @@ import { NextResponse, NextRequest } from 'next/server';
 type Role = 'admin' | 'moderator' | 'teamleiter' | 'user';
 
 /* ----------------------------- Public Paths ----------------------------- */
+/* ----------------------------- Public Paths ----------------------------- */
 const PUBLIC_PATHS = new Set([
   '/login',
-  '/register',
-  '/api/login',
-  '/api/register',
-  '/api/logout',
-  '/api/me',
-  '/api/unread',
-  '/api/profile',
-  '/api/upload',
-  '/api/admin/stats',
+  '/register',       // Registrierung für neue User
+  '/api/login',      // API endpoint für Login
+  '/api/register',   // API endpoint für Registrierung
+  '/api/logout',     // Logout sollte immer erreichbar sein
 ]);
 
 function isPublic(pathname: string) {
+  // Exakte Pfade aus PUBLIC_PATHS
   if (PUBLIC_PATHS.has(pathname)) return true;
-  if (pathname.startsWith('/api/events')) return true;
-  if (pathname.startsWith('/api/diag')) return true;
+  
+  // Next.js interne Pfade (notwendig für Funktion)
   if (pathname.startsWith('/_next')) return true;
+  
+  // Statische Assets (notwendig für Login-Seite)
   if (pathname === '/favicon.ico' || pathname === '/header.svg') return true;
+  
   return false;
 }
 
@@ -60,21 +60,22 @@ function hasAdminRights(role: Role | undefined): boolean {
 export function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
 
-  // 1) Öffentliche Pfade
+  // 1) Öffentliche Pfade - IMMER durchlassen
   if (isPublic(pathname)) return NextResponse.next();
 
   // 2) Login-Erkennung
   const roleCookie = req.cookies.get('user_role')?.value as Role | undefined;
   const hasAuthJwt = !!req.cookies.get('auth')?.value;
 
-  // a) Weder Rolle noch JWT -> Login/Redirect
+  // a) Nicht eingeloggt -> Redirect zu Login mit "from" Parameter
   if (!roleCookie && !hasAuthJwt) {
     const url = new URL('/login', req.url);
-    if (pathname !== '/login') url.searchParams.set('from', pathname + search);
+    // Speichere die ursprüngliche URL, um nach Login dorthin zurück zu leiten
+    url.searchParams.set('from', pathname + search);
     return NextResponse.redirect(url);
   }
 
-  // 3) Admin-Bereiche: Admin, Moderator oder Teamleiter dürfen rein
+  // 3) User ist eingeloggt - prüfe Berechtigungen
   if (roleCookie) {
     // b) Adminbereich: admin | moderator | teamleiter dürfen rein
     if (isAdminArea(pathname) && !hasAdminRights(roleCookie)) {
@@ -83,7 +84,7 @@ export function middleware(req: NextRequest) {
         : NextResponse.redirect(new URL('/', req.url));
     }
 
-    // c) Admin-only: admin | teamleiter (gleiches Recht; Moderator nicht)
+    // c) Admin-only: admin | teamleiter (Moderator nicht)
     if (isAdminOnly(pathname) && !(roleCookie === 'admin' || roleCookie === 'teamleiter')) {
       return pathname.startsWith('/api')
         ? NextResponse.json({ error: 'Forbidden' }, { status: 403 })
