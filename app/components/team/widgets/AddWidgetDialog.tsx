@@ -89,7 +89,7 @@ export function AddWidgetDialog({
           team_id: teamId,
           widget_type: widgetType.type,
           config: widgetType.defaultConfig,
-          position: Date.now() // Temporary position
+          position: Math.floor(Date.now() / 1000) // Unix timestamp in seconds (fits in INTEGER)
         })
       });
 
