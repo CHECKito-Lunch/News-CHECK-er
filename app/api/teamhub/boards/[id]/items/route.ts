@@ -1,12 +1,13 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseServer } from '@/lib/supabase-server';
+import { createClient } from '@/lib/supabase-server';
 
 // POST: Neues Item erstellen
 export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const supabase = await supabaseServer();
+  const supabase = await createClient();
   const boardId = params.id;
   const body = await request.json();
   const {
@@ -101,10 +102,10 @@ export async function POST(
     })
     .select(`
       *,
-      assigned_user:users!team_board_items_assigned_to_fkey(
+      assigned_user:auth.users!team_board_items_assigned_to_fkey(
         id, email, raw_user_meta_data
       ),
-      creator:users!team_board_items_created_by_fkey(
+      creator:auth.users!team_board_items_created_by_fkey(
         id, email, raw_user_meta_data
       )
     `)
@@ -122,7 +123,7 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const supabase = await supabaseServer();
+  const supabase = await createClient();
   const boardId = params.id;
   const body = await request.json();
   const { items } = body; // Array von {id, column_id, position}

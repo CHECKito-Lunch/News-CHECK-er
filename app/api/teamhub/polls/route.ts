@@ -1,9 +1,10 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseServer } from '@/lib/supabase-server';
+import { createClient } from '@/lib/supabase-server';
 
 // GET: Alle Polls für ein Team
 export async function GET(request: NextRequest) {
-  const supabase = await supabaseServer();
+  const supabase = await createClient();
   const { searchParams } = new URL(request.url);
   const teamId = searchParams.get('team_id');
   const status = searchParams.get('status'); // 'active', 'closed', 'all'
@@ -88,7 +89,7 @@ export async function GET(request: NextRequest) {
 
 // POST: Neuen Poll erstellen
 export async function POST(request: NextRequest) {
-  const supabase = await supabaseServer();
+  const supabase = createClient();
   const body = await request.json();
   const { 
     team_id, 
@@ -106,7 +107,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  const { data: { user }, error: authError } = await (await supabase).auth.getUser();
   if (authError || !user) {
     return NextResponse.json(
       { error: 'Nicht authentifiziert' },
@@ -115,7 +116,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Prüfe Mitgliedschaft (oder nur Teamleiter, wenn gewünscht)
-  const { data: membership } = await supabase
+  const { data: membership } = await (await supabase)
     .from('team_memberships')
     .select('is_teamleiter')
     .eq('team_id', team_id)
@@ -138,7 +139,7 @@ export async function POST(request: NextRequest) {
   // }
 
   // Poll erstellen
-  const { data: poll, error: pollError } = await supabase
+  const { data: poll, error: pollError } = await (await supabase)
     .from('team_polls')
     .insert({
       team_id,
@@ -162,14 +163,14 @@ export async function POST(request: NextRequest) {
     position: index
   }));
 
-  const { data: createdOptions, error: optionsError } = await supabase
+  const { data: createdOptions, error: optionsError } = await (await supabase)
     .from('team_poll_options')
     .insert(pollOptions)
     .select();
 
   if (optionsError) {
     // Rollback: Lösche Poll
-    await supabase.from('team_polls').delete().eq('id', poll.id);
+    await (await supabase).from('team_polls').delete().eq('id', poll.id);
     return NextResponse.json({ error: optionsError.message }, { status: 500 });
   }
 
@@ -199,7 +200,7 @@ async function createUnreadNotification(
     .neq('user_id', authorId);
 
   if (members && members.length > 0) {
-    const unreadEntries = members.map(m => ({
+    const unreadEntries = members.map((m: { user_id: any; }) => ({
       user_id: m.user_id,
       reference_type: type,
       reference_id: referenceId,

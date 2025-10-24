@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseServer } from '@/lib/supabase-server';
+import { createClient } from '@/lib/supabase-server';
 
 // GET: Lade die Team-Konfiguration
 export async function GET(request: NextRequest) {
-  const supabase = await supabaseServer();
+  const supabase = await createClient();
   const { searchParams } = new URL(request.url);
   const teamId = searchParams.get('team_id');
 
@@ -82,7 +82,7 @@ export async function GET(request: NextRequest) {
 
 // PUT: Aktualisiere die Team-Konfiguration (nur Teamleiter)
 export async function PUT(request: NextRequest) {
-  const supabase = await supabaseServer();
+  const supabase = await createClient();
   const body = await request.json();
   const { team_id, layout, theme } = body;
 
