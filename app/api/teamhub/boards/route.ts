@@ -1,15 +1,13 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseServer } from '@/lib/supabase-server';
+import { createClient } from '@/lib/supabase-server';
 
-// GET: Alle Threads für ein Team
+// GET: Alle Boards für ein Team
 export async function GET(request: NextRequest) {
-  const supabase = await supabaseServer();
+  const supabase = await createClient();
   const { searchParams } = new URL(request.url);
   const teamId = searchParams.get('team_id');
-  const page = parseInt(searchParams.get('page') || '1');
-  const limit = parseInt(searchParams.get('limit') || '10');
-  const pinned = searchParams.get('pinned'); // 'true' oder null
-  
+
   if (!teamId) {
     return NextResponse.json(
       { error: 'team_id ist erforderlich' },
@@ -40,54 +38,39 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // Query bauen
-  let query = supabase
-    .from('team_threads')
+  // Hole alle Boards mit Item-Count
+  const { data: boards, error } = await supabase
+    .from('team_boards')
     .select(`
       *,
-      author:users!team_threads_author_id_fkey(id, email, raw_user_meta_data),
-      comment_count:team_thread_comments(count)
-    `, { count: 'exact' })
+      creator:users!team_boards_created_by_fkey(id, email, raw_user_meta_data),
+      item_count:team_board_items(count)
+    `)
     .eq('team_id', teamId)
-    .order('pinned', { ascending: false })
-    .order('updated_at', { ascending: false });
-
-  // Filter für gepinnte Threads
-  if (pinned === 'true') {
-    query = query.eq('pinned', true);
-  }
-
-  // Pagination
-  const from = (page - 1) * limit;
-  const to = from + limit - 1;
-  query = query.range(from, to);
-
-  const { data: threads, error, count } = await query;
+    .order('created_at', { ascending: false });
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({
-    threads,
-    pagination: {
-      page,
-      limit,
-      total: count || 0,
-      totalPages: Math.ceil((count || 0) / limit)
-    }
-  });
+  // Transformiere Daten
+  const transformedBoards = boards?.map(board => ({
+    ...board,
+    item_count: board.item_count[0]?.count || 0
+  }));
+
+  return NextResponse.json({ boards: transformedBoards });
 }
 
-// POST: Neuen Thread erstellen
+// POST: Neues Board erstellen (nur Teamleiter)
 export async function POST(request: NextRequest) {
-  const supabase = await supabaseServer();
+  const supabase = await createClient();
   const body = await request.json();
-  const { team_id, title, content, pinned = false } = body;
+  const { team_id, name, description, columns } = body;
 
-  if (!team_id || !title) {
+  if (!team_id || !name) {
     return NextResponse.json(
-      { error: 'team_id und title sind erforderlich' },
+      { error: 'team_id und name sind erforderlich' },
       { status: 400 }
     );
   }
@@ -100,7 +83,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Prüfe Mitgliedschaft
+  // Prüfe Teamleiter-Status
   const { data: membership } = await supabase
     .from('team_memberships')
     .select('is_teamleiter')
@@ -108,29 +91,35 @@ export async function POST(request: NextRequest) {
     .eq('user_id', user.id)
     .single();
 
-  if (!membership) {
+  if (!membership?.is_teamleiter) {
     return NextResponse.json(
-      { error: 'Keine Berechtigung' },
+      { error: 'Nur Teamleiter können Boards erstellen' },
       { status: 403 }
     );
   }
 
-  // Nur Teamleiter dürfen Threads pinnen
-  const canPin = membership.is_teamleiter && pinned;
+  // Default-Spalten, falls nicht angegeben
+  const defaultColumns = [
+    { id: 'backlog', name: 'Backlog', position: 0 },
+    { id: 'todo', name: 'To Do', position: 1 },
+    { id: 'in_progress', name: 'In Progress', position: 2 },
+    { id: 'review', name: 'Review', position: 3 },
+    { id: 'done', name: 'Done', position: 4 }
+  ];
 
-  // Thread erstellen
+  // Board erstellen
   const { data, error } = await supabase
-    .from('team_threads')
+    .from('team_boards')
     .insert({
       team_id,
-      title,
-      content,
-      author_id: user.id,
-      pinned: canPin
+      name,
+      description,
+      columns: columns || defaultColumns,
+      created_by: user.id
     })
     .select(`
       *,
-      author:users!team_threads_author_id_fkey(id, email, raw_user_meta_data)
+      creator:users!team_boards_created_by_fkey(id, email, raw_user_meta_data)
     `)
     .single();
 
@@ -138,21 +127,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  // Markiere als ungelesen für andere Team-Mitglieder
-  await createUnreadNotification(supabase, team_id, user.id, 'thread', data.id);
+  // Unread-Notification
+  await createUnreadNotification(supabase, team_id, user.id, 'board', data.id);
 
   return NextResponse.json({ data }, { status: 201 });
 }
 
-// Helper: Unread-Notifications erstellen
+// Helper
 async function createUnreadNotification(
-  supabase: any,
+  supabase: Awaited<ReturnType<typeof createClient>>,
   teamId: string,
   authorId: string,
   type: string,
   referenceId: number
 ) {
-  // Hole alle Team-Mitglieder außer dem Autor
   const { data: members } = await supabase
     .from('team_memberships')
     .select('user_id')
@@ -160,7 +148,7 @@ async function createUnreadNotification(
     .neq('user_id', authorId);
 
   if (members && members.length > 0) {
-    const unreadEntries = members.map(m => ({
+    const unreadEntries = members.map((m) => ({
       user_id: m.user_id,
       reference_type: type,
       reference_id: referenceId,

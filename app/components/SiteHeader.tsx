@@ -149,11 +149,23 @@ export default function SiteHeader() {
 
   const links = useMemo(() => {
     const arr = [...baseLinks];
-    if (me?.role === 'teamleiter') arr.push({ href: '/teamhub', label: 'Teamhub', icon: IconTeam });
+    
+    // Teamhub (bestehendes Feature)
+    if (me?.role === 'teamleiter') {
+      arr.push({ href: '/teamhub', label: 'Teamhub', icon: IconBriefcase });
+    }
+    
+    // Teams (neues Feature - dein Team-Management)
+    if (me?.role === 'teamleiter') {
+      arr.push({ href: '/teams', label: 'Teams', icon: IconTeam });
+    }
+    
     if (me) arr.push({ href: '/profile', label: 'Profil', icon: IconUser });
+    
     if (me && ['admin', 'moderator', 'teamleiter'].includes(me.role)) {
       arr.push({ href: '/admin', label: 'Admin', icon: IconShield });
     }
+    
     return arr;
   }, [baseLinks, me]);
 
@@ -178,165 +190,164 @@ export default function SiteHeader() {
   );
 
   return (
-  <header className="sticky top-0 z-30 bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl border-b border-gray-200/50 dark:border-gray-800/50 shadow-sm">
-    <div className="w-full max-w-[1920px] mx-auto px-6 py-3">
-      <div className="flex items-center justify-between gap-4">
-        {/* Logo Links */}
-        <Link href="/" aria-label="Startseite" className="shrink-0">
-          <Image
-            src="/header.svg"
-            alt="NewsCHECKer"
-            width={200}
-            height={50}
-            className="h-10 md:h-12 w-auto dark:opacity-90"
-            priority
-            sizes="(max-width: 768px) 160px, 200px"
-          />
-        </Link>
+    <header className="sticky top-0 z-30 bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl border-b border-gray-200/50 dark:border-gray-800/50 shadow-sm">
+      <div className="w-full max-w-[1920px] mx-auto px-6 py-3">
+        <div className="flex items-center justify-between gap-4">
+          {/* Logo Links */}
+          <Link href="/" aria-label="Startseite" className="shrink-0">
+            <Image
+              src="/header.svg"
+              alt="NewsCHECKer"
+              width={200}
+              height={50}
+              className="h-10 md:h-12 w-auto dark:opacity-90"
+              priority
+              sizes="(max-width: 768px) 160px, 200px"
+            />
+          </Link>
 
-        {/* Tropfen-Navigation Mitte */}
-        <nav className="flex items-center justify-center gap-2 overflow-x-auto scrollbar-hide" aria-label="Hauptnavigation">
-          {links.map((item) => {
-            const isActive =
-              pathname === item.href ||
-              (item.href !== '/' && pathname?.startsWith(item.href));
-            const Icon = item.icon;
-            const badgeCount = countsByHref[item.href] ?? 0;
+          {/* Tropfen-Navigation Mitte */}
+          <nav className="flex items-center justify-center gap-2 overflow-x-auto scrollbar-hide" aria-label="Hauptnavigation">
+            {links.map((item) => {
+              const isActive =
+                pathname === item.href ||
+                (item.href !== '/' && pathname?.startsWith(item.href));
+              const Icon = item.icon;
+              const badgeCount = countsByHref[item.href] ?? 0;
 
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                aria-current={isActive ? 'page' : undefined}
-                className="group relative flex flex-col items-center shrink-0"
-              >
-                {/* Badge */}
-                {me && badgeCount > 0 && <Badge count={badgeCount} />}
-
-                {/* Tropfen */}
-                <motion.div
-                  initial={false}
-                  animate={{
-                    height: isActive ? 48 : 32,
-                  }}
-                  transition={{
-                    type: 'spring',
-                    stiffness: 500,
-                    damping: 35,
-                  }}
-                  className="relative w-12 rounded-b-full overflow-hidden"
-                  style={{
-                    borderBottomLeftRadius: '10%',
-                    borderBottomRightRadius: '10%',
-                  }}
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  aria-current={isActive ? 'page' : undefined}
+                  className="group relative flex flex-col items-center shrink-0"
                 >
-                  {/* Gradient Background */}
-                  <div
-                    className={`
-                      absolute inset-0
-                      ${
-                        isActive
-                          ? 'bg-gradient-to-b from-blue-300 to-blue-500 shadow-lg shadow-blue-500/40'
-                          : 'bg-gradient-to-b from-gray-300/60 to-gray-400/60 dark:from-gray-700/60 dark:to-gray-600/60 group-hover:from-gray-400/70 group-hover:to-gray-500/70'
-                      }
-                      transition-all duration-200
-                    `}
-                  />
+                  {/* Badge */}
+                  {me && badgeCount > 0 && <Badge count={badgeCount} />}
 
-                  {/* Icon */}
-                  <div className="absolute bottom-1 left-1/2 -translate-x-1/2 flex items-center justify-center">
-                    <Icon
-                      strokeWidth={isActive ? 2.5 : 2}
+                  {/* Tropfen */}
+                  <motion.div
+                    initial={false}
+                    animate={{
+                      height: isActive ? 48 : 32,
+                    }}
+                    transition={{
+                      type: 'spring',
+                      stiffness: 500,
+                      damping: 35,
+                    }}
+                    className="relative w-12 rounded-b-full overflow-hidden"
+                    style={{
+                      borderBottomLeftRadius: '10%',
+                      borderBottomRightRadius: '10%',
+                    }}
+                  >
+                    {/* Gradient Background */}
+                    <div
                       className={`
-                        w-4 h-4
-                        ${isActive ? 'text-white' : 'text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white'}
-                        transition-colors
+                        absolute inset-0
+                        ${
+                          isActive
+                            ? 'bg-gradient-to-b from-blue-300 to-blue-500 shadow-lg shadow-blue-500/40'
+                            : 'bg-gradient-to-b from-gray-300/60 to-gray-400/60 dark:from-gray-700/60 dark:to-gray-600/60 group-hover:from-gray-400/70 group-hover:to-gray-500/70'
+                        }
+                        transition-all duration-200
                       `}
                     />
-                  </div>
-                </motion.div>
 
-                {/* Label */}
-                <span
-                  className={`
-                    mt-1 px-2 py-0.5 text-[10px] font-semibold rounded-full whitespace-nowrap
-                    ${
-                      isActive
-                        ? 'bg-blue-100 text-blue-900 dark:bg-blue-900/40 dark:text-blue-100'
-                        : 'text-gray-600 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-gray-100'
-                    }
-                    transition-colors
-                  `}
-                >
-                  {item.label}
-                </span>
-              </Link>
-            );
-          })}
-        </nav>
+                    {/* Icon */}
+<div className="absolute bottom-1 left-1/2 -translate-x-1/2 flex items-center justify-center">
+  <div className={`
+    w-4 h-4
+    ${isActive ? 'text-white' : 'text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white'}
+    transition-colors
+  `}>
+    <Icon strokeWidth={isActive ? 2.5 : 2} />
+  </div>
+</div>
+                  </motion.div>
 
-        {/* Buttons Rechts */}
-        <div className="flex items-center gap-2 shrink-0">
-          {/* Mark All Read */}
-          {me && counts.total > 0 && (
-            <motion.button
-              type="button"
-              onClick={markAllRead}
-              disabled={marking}
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              initial={false}
-              animate={
-                prefersReducedMotion
-                  ? {}
-                  : {
-                      boxShadow: markedOk
-                        ? '0 4px 16px rgba(59,130,246,.3)'
-                        : '0 2px 8px rgba(0,0,0,.05)',
-                    }
-              }
-              className="hidden lg:inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-700 hover:from-blue-100 hover:to-indigo-100 dark:from-blue-900/20 dark:to-indigo-900/20 dark:text-blue-300 dark:hover:from-blue-900/30 dark:hover:to-indigo-900/30 border border-blue-200/50 dark:border-blue-800/50 shadow-sm transition-all disabled:opacity-60"
-              title="Alle Benachrichtigungen als gelesen markieren"
-            >
-              {marking ? (
-                <IconSpinner />
-              ) : markedOk ? (
-                <IconCheck />
-              ) : (
-                <IconMenuThin />
-              )}
-              <span className="hidden xl:inline">
-                {markedOk ? 'Erledigt!' : `${counts.total} als gelesen`}
-              </span>
-            </motion.button>
-          )}
+                  {/* Label */}
+                  <span
+                    className={`
+                      mt-1 px-2 py-0.5 text-[10px] font-semibold rounded-full whitespace-nowrap
+                      ${
+                        isActive
+                          ? 'bg-blue-100 text-blue-900 dark:bg-blue-900/40 dark:text-blue-100'
+                          : 'text-gray-600 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-gray-100'
+                      }
+                      transition-colors
+                    `}
+                  >
+                    {item.label}
+                  </span>
+                </Link>
+              );
+            })}
+          </nav>
 
-          {/* Logout / Login */}
-          {me ? (
-            <form action="/api/logout" method="post">
+          {/* Buttons Rechts */}
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Mark All Read */}
+            {me && counts.total > 0 && (
               <motion.button
-                type="submit"
+                type="button"
+                onClick={markAllRead}
+                disabled={marking}
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
-                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-red-600 to-red-500 hover:from-red-700 hover:to-red-600 text-white px-3 py-2 text-sm font-medium shadow-md shadow-red-500/20 transition-all"
+                initial={false}
+                animate={
+                  prefersReducedMotion
+                    ? {}
+                    : {
+                        boxShadow: markedOk
+                          ? '0 4px 16px rgba(59,130,246,.3)'
+                          : '0 2px 8px rgba(0,0,0,.05)',
+                      }
+                }
+                className="hidden lg:inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-700 hover:from-blue-100 hover:to-indigo-100 dark:from-blue-900/20 dark:to-indigo-900/20 dark:text-blue-300 dark:hover:from-blue-900/30 dark:hover:to-indigo-900/30 border border-blue-200/50 dark:border-blue-800/50 shadow-sm transition-all disabled:opacity-60"
+                title="Alle Benachrichtigungen als gelesen markieren"
               >
-                <IconPower />
-                <span className="hidden sm:inline">Abmelden</span>
+                {marking ? (
+                  <IconSpinner />
+                ) : markedOk ? (
+                  <IconCheck />
+                ) : (
+                  <IconMenuThin />
+                )}
+                <span className="hidden xl:inline">
+                  {markedOk ? 'Erledigt!' : `${counts.total} als gelesen`}
+                </span>
               </motion.button>
-            </form>
-          ) : (
-            <Link
-              href="https://www.karl-marx-checknitz.de/login"
-              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white px-3 py-2 text-sm font-medium shadow-md shadow-blue-500/20 transition-all"
-            >
-              Anmelden
-            </Link>
-          )}
+            )}
+
+            {/* Logout / Login */}
+            {me ? (
+              <form action="/api/logout" method="post">
+                <motion.button
+                  type="submit"
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-red-600 to-red-500 hover:from-red-700 hover:to-red-600 text-white px-3 py-2 text-sm font-medium shadow-md shadow-red-500/20 transition-all"
+                >
+                  <IconPower />
+                  <span className="hidden sm:inline">Abmelden</span>
+                </motion.button>
+              </form>
+            ) : (
+              <Link
+                href="https://www.karl-marx-checknitz.de/login"
+                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white px-3 py-2 text-sm font-medium shadow-md shadow-blue-500/20 transition-all"
+              >
+                Anmelden
+              </Link>
+            )}
+          </div>
         </div>
       </div>
-    </div>
-  </header>
-);
+    </header>
+  );
 }
 
 /* ===== Icons ===== */
@@ -378,7 +389,7 @@ function IconCheck() {
   );
 }
 
-function IconHome({ strokeWidth = 2 }: { strokeWidth?: number; className?: string }) {
+function IconHome({ strokeWidth = 2 }: { strokeWidth?: number }) {
   return (
     <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden>
       <path
@@ -392,7 +403,7 @@ function IconHome({ strokeWidth = 2 }: { strokeWidth?: number; className?: strin
   );
 }
 
-function IconNews({ strokeWidth = 2 }: { strokeWidth?: number; className?: string }) {
+function IconNews({ strokeWidth = 2 }: { strokeWidth?: number }) {
   return (
     <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden>
       <path
@@ -413,7 +424,7 @@ function IconNews({ strokeWidth = 2 }: { strokeWidth?: number; className?: strin
   );
 }
 
-function IconGroups({ strokeWidth = 2 }: { strokeWidth?: number; className?: string }) {
+function IconGroups({ strokeWidth = 2 }: { strokeWidth?: number }) {
   return (
     <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden>
       <path
@@ -428,7 +439,7 @@ function IconGroups({ strokeWidth = 2 }: { strokeWidth?: number; className?: str
   );
 }
 
-function IconCalendar({ strokeWidth = 2 }: { strokeWidth?: number; className?: string }) {
+function IconCalendar({ strokeWidth = 2 }: { strokeWidth?: number }) {
   return (
     <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden>
       <path
@@ -443,7 +454,7 @@ function IconCalendar({ strokeWidth = 2 }: { strokeWidth?: number; className?: s
   );
 }
 
-function IconTrophy({ strokeWidth = 2 }: { strokeWidth?: number; className?: string }) {
+function IconTrophy({ strokeWidth = 2 }: { strokeWidth?: number }) {
   return (
     <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden>
       <path
@@ -458,7 +469,7 @@ function IconTrophy({ strokeWidth = 2 }: { strokeWidth?: number; className?: str
   );
 }
 
-function IconChat({ strokeWidth = 2 }: { strokeWidth?: number; className?: string }) {
+function IconChat({ strokeWidth = 2 }: { strokeWidth?: number }) {
   return (
     <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden>
       <path
@@ -479,7 +490,7 @@ function IconChat({ strokeWidth = 2 }: { strokeWidth?: number; className?: strin
   );
 }
 
-function IconClipboardCheck({ strokeWidth = 2 }: { strokeWidth?: number; className?: string }) {
+function IconClipboardCheck({ strokeWidth = 2 }: { strokeWidth?: number }) {
   return (
     <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden>
       <path
@@ -500,11 +511,34 @@ function IconClipboardCheck({ strokeWidth = 2 }: { strokeWidth?: number; classNa
   );
 }
 
-function IconTeam({ strokeWidth = 2 }: { strokeWidth?: number; className?: string }) {
+// NEU: Briefcase Icon für Teamhub (bestehendes Feature)
+function IconBriefcase({ strokeWidth = 2 }: { strokeWidth?: number }) {
   return (
     <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden>
       <path
-        d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Zm6 8a6 6 0 0 0-12 0"
+        d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 10h18v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-9z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M3 10v-1a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v1"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+      />
+    </svg>
+  );
+}
+
+// Team Icon für /teams (neues Feature)
+function IconTeam({ strokeWidth = 2 }: { strokeWidth?: number }) {
+  return (
+    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden>
+      <path
+        d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"
         fill="none"
         stroke="currentColor"
         strokeWidth={strokeWidth}
@@ -515,7 +549,7 @@ function IconTeam({ strokeWidth = 2 }: { strokeWidth?: number; className?: strin
   );
 }
 
-function IconUser({ strokeWidth = 2 }: { strokeWidth?: number; className?: string }) {
+function IconUser({ strokeWidth = 2 }: { strokeWidth?: number }) {
   return (
     <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden>
       <path
@@ -530,7 +564,7 @@ function IconUser({ strokeWidth = 2 }: { strokeWidth?: number; className?: strin
   );
 }
 
-function IconShield({ strokeWidth = 2 }: { strokeWidth?: number; className?: string }) {
+function IconShield({ strokeWidth = 2 }: { strokeWidth?: number }) {
   return (
     <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden>
       <path
