@@ -1,13 +1,14 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseServer } from '@/lib/supabase-server';
+import { createClient } from '@/lib/supabase-server';
 
 // GET: Board mit allen Items
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const supabase = await supabaseServer();
-  const boardId = params.id;
+  const supabase = await createClient();
+  const { id: boardId } = await params;
 
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) {
@@ -77,7 +78,7 @@ export async function GET(
 
   // Gruppiere Items nach Spalten
   const itemsByColumn: Record<string, any[]> = {};
-  board.columns.forEach((col: any) => {
+  board.columns.forEach((col: { id: string }) => {
     itemsByColumn[col.id] = [];
   });
 
@@ -97,10 +98,10 @@ export async function GET(
 // PUT: Board aktualisieren (nur Teamleiter)
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const supabase = await supabaseServer();
-  const boardId = params.id;
+  const supabase = await createClient();
+  const { id: boardId } = await params;
   const body = await request.json();
   const { name, description, columns } = body;
 
@@ -142,7 +143,9 @@ export async function PUT(
   }
 
   // Update-Objekt
-  const updateData: any = { updated_at: new Date().toISOString() };
+  const updateData: Record<string, unknown> = { 
+    updated_at: new Date().toISOString() 
+  };
   if (name !== undefined) updateData.name = name;
   if (description !== undefined) updateData.description = description;
   if (columns !== undefined) updateData.columns = columns;
@@ -164,10 +167,10 @@ export async function PUT(
 // DELETE: Board löschen (nur Teamleiter)
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const supabase = await supabaseServer();
-  const boardId = params.id;
+  const supabase = await createClient();
+  const { id: boardId } = await params;
 
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) {

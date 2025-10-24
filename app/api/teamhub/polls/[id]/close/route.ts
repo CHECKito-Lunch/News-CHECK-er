@@ -4,10 +4,10 @@ import { supabaseServer } from '@/lib/supabase-server';
 // POST: Poll schließen (nur Ersteller oder Teamleiter)
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const supabase = await supabaseServer();
-  const pollId = params.id;
+  const { id: pollId } = await params;
 
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) {
@@ -80,10 +80,10 @@ export async function POST(
 // POST: Poll wieder öffnen
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const supabase = await supabaseServer();
-  const pollId = params.id;
+  const { id: pollId } = await params;
 
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) {

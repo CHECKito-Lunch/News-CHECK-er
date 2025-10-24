@@ -5,10 +5,10 @@ import { supabaseServer } from '@/lib/supabase-server';
 // PUT: Widget aktualisieren
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const supabase = await supabaseServer();
-  const widgetId = params.id;
+  const { id: widgetId } = await params;
   const body = await request.json();
   const { config, position, is_active } = body;
 
@@ -71,10 +71,10 @@ export async function PUT(
 // DELETE: Widget löschen
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const supabase = await supabaseServer();
-  const widgetId = params.id;
+  const { id: widgetId } = await params;
 
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) {

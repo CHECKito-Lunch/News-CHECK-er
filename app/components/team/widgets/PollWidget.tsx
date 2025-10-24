@@ -58,7 +58,7 @@ export function PollWidget({ teamId, config }: PollWidgetProps) {
           Aktuelle Umfragen
         </CardTitle>
         <Button size="sm" asChild>
-          <Link href={`/team/${teamId}/polls/new`}>
+          <Link href={`/teams/${teamId}/polls/new`}>
             <Plus className="h-4 w-4 mr-2" />
             Neu
           </Link>

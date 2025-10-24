@@ -5,10 +5,10 @@ import { createClient } from '@/lib/supabase-server';
 // POST: Neues Item erstellen
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const supabase = await createClient();
-  const boardId = params.id;
+  const { id: boardId } = await params;
   const body = await request.json();
   const {
     column_id,
@@ -121,10 +121,10 @@ export async function POST(
 // PATCH: Item aktualisieren (Drag & Drop)
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const supabase = await createClient();
-  const boardId = params.id;
+  const { id: boardId } = await params;
   const body = await request.json();
   const { items } = body; // Array von {id, column_id, position}
 

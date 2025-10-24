@@ -3,55 +3,46 @@ import { redirect } from 'next/navigation';
 import { TeamPageBuilder } from '@/app/components/team/TeamPageBuilder';
 import { TeamHeader } from '@/app/components/team/TeamHeader';
 
-interface TeamPageProps {
-  params: {
-    teamId: string;
-  };
-}
-
-export default async function TeamPage({ params }: TeamPageProps) {
+export default async function TeamDetailPage({
+  params,
+}: {
+  params: Promise<{ teamId: string }>; 
+}) {
+  
+  const { teamId } = await params;
+  
   const supabase = await supabaseServer();
   const { data: { user } } = await supabase.auth.getUser();
 
-  if (!user) {
-    redirect('/login');
-  }
+  if (!user) redirect('/login');
 
-  // Hole Team-Details
   const { data: team } = await supabase
     .from('teams')
     .select('*')
-    .eq('id', params.teamId)
+    .eq('id', teamId) 
     .single();
 
-  if (!team) {
-    redirect('/teams');
-  }
+  if (!team) redirect('/teams');
 
-  // Prüfe Mitgliedschaft
   const { data: membership } = await supabase
     .from('team_memberships')
     .select('*')
-    .eq('team_id', params.teamId)
+    .eq('team_id', teamId)
     .eq('user_id', user.id)
     .single();
 
-  if (!membership) {
-    redirect('/teams');
-  }
+  if (!membership) redirect('/teams');
 
-  // Hole Team-Konfiguration
   const { data: config } = await supabase
     .from('team_page_config')
     .select('*')
-    .eq('team_id', params.teamId)
+    .eq('team_id', teamId)
     .single();
 
-  // Hole aktive Widgets
   const { data: widgets } = await supabase
     .from('team_widgets')
     .select('*')
-    .eq('team_id', params.teamId)
+    .eq('team_id', teamId)
     .eq('is_active', true)
     .order('position', { ascending: true });
 
@@ -65,7 +56,7 @@ export default async function TeamPage({ params }: TeamPageProps) {
       
       <main className="container mx-auto px-4 py-8">
         <TeamPageBuilder
-          teamId={params.teamId}
+          teamId={teamId}
           config={config}
           widgets={widgets || []}
           isTeamLeiter={membership.is_teamleiter}

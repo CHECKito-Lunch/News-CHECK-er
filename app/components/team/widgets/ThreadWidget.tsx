@@ -63,7 +63,7 @@ export function ThreadWidget({ teamId, config }: ThreadWidgetProps) {
           Diskussionen
         </CardTitle>
         <Button size="sm" asChild>
-          <Link href={`/team/${teamId}/threads/new`}>
+          <Link href={`/teams/${teamId}/threads/new`}>
             <Plus className="h-4 w-4 mr-2" />
             Neu
           </Link>
@@ -86,7 +86,7 @@ export function ThreadWidget({ teamId, config }: ThreadWidgetProps) {
             {threads.map((thread) => (
               <Link
                 key={thread.id}
-                href={`/team/${teamId}/threads/${thread.id}`}
+                href={`/teams/${teamId}/threads/${thread.id}`}
                 className="block p-4 rounded-lg hover:bg-gray-50 transition-colors border"
               >
                 <div className="flex items-start justify-between gap-3">
@@ -131,7 +131,7 @@ export function ThreadWidget({ teamId, config }: ThreadWidgetProps) {
 
         <div className="mt-4">
           <Button variant="outline" className="w-full" asChild>
-            <Link href={`/team/${teamId}/threads`}>
+            <Link href={`/teams/${teamId}/threads`}>
               Alle Diskussionen anzeigen
             </Link>
           </Button>

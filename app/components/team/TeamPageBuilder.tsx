@@ -23,7 +23,7 @@ export function TeamPageBuilder({
   widgets: initialWidgets,
   isTeamLeiter
 }: TeamPageBuilderProps) {
-  const [widgets, setWidgets] = useState(initialWidgets);
+  const [widgets, setWidgets] = useState(initialWidgets.filter(w => w && w.id));
   const [isEditMode, setIsEditMode] = useState(false);
   const [showAddWidget, setShowAddWidget] = useState(false);
 
@@ -108,13 +108,13 @@ export function TeamPageBuilder({
           onDragEnd={handleDragEnd}
         >
           <SortableContext
-            items={widgets.map(w => w.id)}
+            items={widgets.map((w, idx) => w?.id || `widget-${idx}`)}
             strategy={verticalListSortingStrategy}
           >
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              {widgets.map((widget) => (
+              {widgets.map((widget, index) => (
                 <WidgetRenderer
-                  key={widget.id}
+                  key={widget?.id || `widget-${index}`}
                   widget={widget}
                   teamId={teamId}
                   isEditMode={isEditMode}
@@ -128,9 +128,9 @@ export function TeamPageBuilder({
         </DndContext>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {widgets.map((widget) => (
+          {widgets.map((widget, index) => (
             <WidgetRenderer
-              key={widget.id}
+              key={widget?.id || `widget-${index}`}
               widget={widget}
               teamId={teamId}
               isEditMode={false}

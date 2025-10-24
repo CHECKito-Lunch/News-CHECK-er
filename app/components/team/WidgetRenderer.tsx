@@ -26,6 +26,11 @@ export function WidgetRenderer({
   isEditMode,
   onRemove
 }: WidgetRendererProps) {
+  // Early return wenn widget ungültig ist
+  if (!widget || !widget.id) {
+    return null;
+  }
+
   const {
     attributes,
     listeners,
@@ -33,7 +38,7 @@ export function WidgetRenderer({
     transform,
     transition,
     isDragging
-  } = useSortable({ id: widget.id });
+  } = useSortable({ id: widget.id, disabled: !isEditMode });
 
   const style = {
     transform: CSS.Transform.toString(transform),

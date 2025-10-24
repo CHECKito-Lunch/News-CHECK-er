@@ -1,13 +1,14 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseServer } from '@/lib/supabase-server';
+import { createClient } from '@/lib/supabase-server';
 
 // POST: Kommentar zu einem Thread hinzufügen
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const supabase = await supabaseServer();
-  const threadId = params.id;
+  const supabase = await createClient();
+  const { id: threadId } = await params;
   const body = await request.json();
   const { content, parent_id = null } = body;
 
@@ -101,7 +102,7 @@ export async function POST(
 
 // Helper: Unread-Notifications
 async function createUnreadNotification(
-  supabase: any,
+  supabase: Awaited<ReturnType<typeof createClient>>,
   teamId: string,
   authorId: string,
   type: string,
@@ -114,7 +115,7 @@ async function createUnreadNotification(
     .neq('user_id', authorId);
 
   if (members && members.length > 0) {
-    const unreadEntries = members.map(m => ({
+    const unreadEntries = members.map((m) => ({
       user_id: m.user_id,
       reference_type: type,
       reference_id: referenceId,

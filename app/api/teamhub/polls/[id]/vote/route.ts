@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseServer } from '@/lib/supabase-server';
+import { createClient } from '@/lib/supabase-server';
 
 // POST: Abstimmen
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const supabase = await supabaseServer();
-  const pollId = params.id;
+  const supabase = await createClient();
+  const { id: pollId } = await params;
   const body = await request.json();
   const { option_ids } = body; // Array für Multiple-Choice, sonst [single_id]
 
@@ -116,10 +116,10 @@ export async function POST(
 // DELETE: Vote zurückziehen
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const supabase = await supabaseServer();
-  const pollId = params.id;
+  const supabase = await createClient();
+  const { id: pollId } = await params;
 
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) {

@@ -4,10 +4,10 @@ import { supabaseServer } from '@/lib/supabase-server';
 // GET: Einzelnen Poll mit Details und Ergebnissen abrufen
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const supabase = await supabaseServer();
-  const pollId = params.id;
+  const { id: pollId } = await params;
 
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) {
@@ -132,10 +132,10 @@ export async function GET(
 // PUT: Poll aktualisieren (nur Ersteller oder Teamleiter)
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const supabase = await supabaseServer();
-  const pollId = params.id;
+  const { id: pollId } = await params;
   const body = await request.json();
   const { question, description, closes_at, is_closed } = body;
 
